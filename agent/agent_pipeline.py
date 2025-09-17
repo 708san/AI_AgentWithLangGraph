@@ -85,7 +85,14 @@ class RareDiseaseDiagnosisPipeline:
                 print(f"Correctness: {getattr(ans, 'Correctness', '')}")
                 print(f"Patient Summary:\n{getattr(ans, 'PatientSummary', '')}")
                 print(f"Diagnosis Analysis:\n{getattr(ans, 'DiagnosisAnalysis', '')}")
-                print(f"Reference:\n{getattr(ans, 'reference', '')}")
+                # referencesはList[str]なので整形して出力
+                references = getattr(ans, 'references', [])
+                if references:
+                    print("References:")
+                    for ref in references:
+                        print(f"  - {ref}")
+                else:
+                    print("References: None")
                 print("-" * 40)
         else:
             print(reflection)

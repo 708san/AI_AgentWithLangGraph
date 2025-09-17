@@ -25,33 +25,39 @@ class State(TypedDict):
     reflection: Optional['ReflectionOutput']
     finalDiagnosis: Optional['DiagnosisOutput']
     
+# --- Pydantic Model for Zero-Shot Diagnosis Output ---
+class ZeroShotFormat(BaseModel):
+    disease_name: str = Field(..., description="The formal name of the most likely rare disease, based solely on the patient's HPO terms.")
+    rank: int = Field(..., description="The rank of the disease in the differential diagnosis list, where 1 is the most likely.")
 
+class ZeroShotOutput(BaseModel):
+    ans: List[ZeroShotFormat]
 
-class ReflectionOutput(BaseModel):
-    ans: List['ReflectionFormat']
-
-class ReflectionFormat(BaseModel):
-    disease_name: str = Field(..., description="The name of the disease.")
-    Correctness: bool = Field(..., description="Whether the diagnosis is correct or not.")
-    PatientSummary: str = Field(..., description="A brief summary of the patient's key symptoms.")
-    DiagnosisAnalysis: str = Field(..., description="Analysis of the diagnosis, including reasoning and evidence.")
-    reference: str = Field(..., description="Reference information or URL you used to make diagnosis.")
+# --- Pydantic Models for Tentative Diagnosis Output ---
+class DiagnosisFormat(BaseModel):
+    disease_name: str = Field(..., description="The formal name of the most likely rare disease, derived from synthesizing multiple data sources (HPO, PubCaseFinder, ZeroShot, GestaltMatcher).")
+    description: str = Field(..., description="The diagnostic reasoning explaining why this diagnosis is clinically plausible. Must specify which of the patient's symptoms support this diagnosis and include in-text citations [1], [2] to the evidence sources.")
+    rank: int = Field(..., description="The final rank of the disease in the differential diagnosis list, where 1 is the most likely.")
 
 class DiagnosisOutput(BaseModel):
     ans: list['DiagnosisFormat']
-    reference: Optional[str] = Field(None, description="Reference information or URL you used to make diagnosis.")
+    reference: Optional[str] = Field(None, description="A numbered list of all sources cited in the 'description' field. Each entry must include the source type, a summary of its content, and a URL if available.")
 
-class DiagnosisFormat(BaseModel):
-    disease_name: str = Field(..., description="The name of the disease.")
-    description: str = Field(..., description="A brief description and reason of the diagnosis.")
-    rank: int = Field(..., description="The rank of this disease among the candidates.")
+# --- Pydantic Models for Self-Reflection Output ---
+class ReflectionFormat(BaseModel):
+    disease_name: str = Field(..., description="The name of the diagnosis being evaluated.")
+    Correctness: bool = Field(..., description="A professional judgment on whether this diagnosis is clinically correct (True) or incorrect (False) for the patient, based on the provided medical literature.")
+    PatientSummary: str = Field(..., description="A  about three-sentence summary of the patient's most critical clinical features, which forms the basis for the diagnostic evaluation.")
+    DiagnosisAnalysis: str = Field(..., description="A detailed analysis of why the diagnosis was judged as correct or incorrect. This must be supported by logically connecting the patient's symptoms with direct evidence from the provided medical literature, using in-text citations [1], [2].")
+    references: List[str] = Field(
+        ...,
+        description="A numbered list of direct quotes extracted from the provided medical literature that support the analysis. Do not list URLs; extract the specific sentences. Example: [\"1. 'Cohen syndrome is characterized by truncal obesity.'\", \"2. 'Neutropenia is a frequent finding.'\"]"
+    )
 
-class ZeroShotFormat(BaseModel):
-    disease_name: str = Field(..., description="The name of the disease.")
-    rank: int = Field(..., description="The rank of this disease among the candidates.")
-    
-class ZeroShotOutput(BaseModel):
-    ans: List[ZeroShotFormat]
+class ReflectionOutput(BaseModel):
+    ans: List['ReflectionFormat'] = Field(..., description="A list of evaluation results, with each item in the list corresponding to a single tentative diagnosis that was reviewed.")
+
+
 
 class GestaltMatcherFormat(BaseModel):
     gene_name: str
