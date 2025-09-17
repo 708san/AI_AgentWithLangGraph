@@ -1,8 +1,7 @@
-# This tool is responsible for searching information using disease names.
 from typing import List, Dict, Any
 from langchain_community.retrievers import PubMedRetriever, WikipediaRetriever
-from state.state_types import State, InformationItem 
-from llm.azure_llm_instance import azure_llm
+from ..state.state_types import State, InformationItem
+from ..llm.azure_llm_instance import azure_llm
 
 
 def summarize_text(text: str) -> str:

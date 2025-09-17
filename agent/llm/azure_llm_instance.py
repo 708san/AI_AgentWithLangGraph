@@ -1,5 +1,5 @@
 import os
-from llm.llm_wrapper import AzureOpenAIWrapper
+from .llm_wrapper import AzureOpenAIWrapper
 
 azure_llm = AzureOpenAIWrapper(
     azure_endpoint=os.environ["AZURE_OPENAI_ENDPOINT"],

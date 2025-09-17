@@ -1,8 +1,8 @@
 from langchain.schema import HumanMessage
 from typing_extensions import List, Optional
-from state.state_types import PCFres, DiagnosisOutput
-from llm.prompt import prompt_dict, build_prompt
-from llm.azure_llm_instance import azure_llm
+from ..state.state_types import PCFres, DiagnosisOutput
+from ..llm.prompt import prompt_dict, build_prompt
+from ..llm.azure_llm_instance import azure_llm
 
 def createDiagnosis(hpo_dict: dict[str,str], pubCaseFinder: List[PCFres], zeroShotResult, gestaltMatcherResult) -> Optional[DiagnosisOutput]:
     top_str = "\n".join(

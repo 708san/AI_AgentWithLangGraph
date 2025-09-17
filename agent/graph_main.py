@@ -1,6 +1,16 @@
+import sys
+import os
 from langgraph.graph import StateGraph, START, END
-from state.state_types import State
-from nodes import PCFnode, createDiagnosisNode, createZeroShotNode, createHPODictNode,diseaseNormalizeNode,dieaseSearchNode,reflectionNode,BeginningOfFlowNode,finalDiagnosisNode,GestaltMatcherNode
+
+# プロジェクトのルートディレクトリをパスに追加
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from agent.state.state_types import State
+from agent.nodes import (
+    PCFnode, createDiagnosisNode, createZeroShotNode, createHPODictNode,
+    diseaseNormalizeNode, dieaseSearchNode, reflectionNode,
+    BeginningOfFlowNode, finalDiagnosisNode, GestaltMatcherNode
+)
 
 
 

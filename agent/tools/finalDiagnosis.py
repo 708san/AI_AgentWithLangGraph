@@ -1,8 +1,9 @@
 from langchain.schema import HumanMessage
 from typing_extensions import Optional
-from state.state_types import State, DiagnosisOutput
-from llm.prompt import prompt_dict, build_prompt
-from llm.azure_llm_instance import azure_llm
+from ..state.state_types import State, DiagnosisOutput
+from ..llm.prompt import prompt_dict, build_prompt
+from ..llm.azure_llm_instance import azure_llm
+
 
 def createFinalDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     """

@@ -1,7 +1,7 @@
 from langchain.schema import HumanMessage
-from state.state_types import ZeroShotOutput
-from llm.prompt import prompt_dict, build_prompt
-from llm.azure_llm_instance import azure_llm
+from ..state.state_types import ZeroShotOutput
+from ..llm.prompt import prompt_dict, build_prompt
+from ..llm.azure_llm_instance import azure_llm
 
 
 def createZeroshot(hpo_dict):
