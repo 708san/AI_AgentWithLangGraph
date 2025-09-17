@@ -52,8 +52,11 @@ graph_builder.add_edge("finalDiagnosisNode", END)
 
 
 if __name__ == "__main__":
-    input_hpo_list = ["HP:0001250", "HP:0004322"]
-    image_path = "./sampleImage/cdls_demo.png" 
+    input_hpo_list = [
+    "HP:0000054", "HP:0000286", "HP:0000297", "HP:0000965", "HP:0001263",
+    "HP:0001513", "HP:0002265", "HP:0002342", "HP:0030820"
+]
+    image_path = "/Users/yoshikuwa-n/Downloads/WorkForBioHackathon/AI_AgentWithLangGraph/sampleData/PhenoPacketStore_25072025/20001.jpg"
     initial_state = {
         #defalut depth is 0 (and in beggining node, depth will be increased to 1)
         "depth": 0,
@@ -78,7 +81,40 @@ if __name__ == "__main__":
     
     result = graph.invoke(initial_state)
 
+    
 
+    print("=== result of reflection ===")
+    reflection = result.get("reflection", None)
+    if reflection is None:
+        print("No reflection result.")
+    elif hasattr(reflection, "ans"):
+        for i, ans in enumerate(reflection.ans, 1):
+            print(f"--- Reflection {i} ---")
+            print(f"Diagnosis: {getattr(ans, 'disease_name', '')}")
+            print(f"Correctness: {getattr(ans, 'Correctness', '')}")
+            print(f"Patient Summary:\n{getattr(ans, 'PatientSummary', '')}")
+            print(f"Diagnosis Analysis:\n{getattr(ans, 'DiagnosisAnalysis', '')}")
+            print(f"Reference:\n{getattr(ans, 'reference', '')}")
+            print("-" * 40)
+    else:
+        print(reflection)
+    print("\n")
+
+    print("=== result of finalDiagnosis ===")
+    final_diag = result.get("finalDiagnosis", None)
+    if final_diag is None:
+        print("No final diagnosis.")
+    elif hasattr(final_diag, "ans"):
+        for i, diag in enumerate(final_diag.ans, 1):
+            print(f"Rank {i}: {diag.disease_name}")
+            print(f"  Description: {diag.description}")
+            print(f"  Reference: {getattr(final_diag, 'reference', '')}")
+            print("-" * 40)
+    else:
+        print(final_diag)
+    print("\n")
+    # check each result..
+    """
     print("=== HPO ===")
     print(result["hpoDict"])
     print("\n")
@@ -105,3 +141,4 @@ if __name__ == "__main__":
     print("=== result of finalDiagnosis ===")
     print(result.get("finalDiagnosis", None))
     print("\n")
+    """

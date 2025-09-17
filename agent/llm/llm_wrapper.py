@@ -12,3 +12,9 @@ class AzureOpenAIWrapper:
 
     def get_structured_llm(self, output_schema):
         return self.llm.with_structured_output(output_schema)
+    
+    def generate(self, prompt: str) -> str:
+        """
+        通常のテキスト生成（要約など）用のメソッド
+        """
+        return self.llm.invoke(prompt)
