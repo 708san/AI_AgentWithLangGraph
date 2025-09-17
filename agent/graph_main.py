@@ -21,12 +21,15 @@ def controll_join_node(state: State):
     return "DoDiagnosis"
 
 def after_reflection_edge(state: State):
+    if state.get("depth", 0) > 2:
+        print("depth limit reached, force to finalDiagnosisNode")
+        return "ProceedToFinalDiagnosisNode"
     reflection = state.get("reflection")
     # if reflection is None or not reflection.ans:
     if not reflection or not hasattr(reflection, "ans") or not reflection.ans:
         return "ReturnToBeginningNode"
     # if all not getattr(ans, "Correction", False) for ans in reflection.ans:
-    if all(not getattr(ans, "Correction", False) for ans in reflection.ans):
+    if all(not getattr(ans, "Correctness", False) for ans in reflection.ans):
         print("think again.")
         return "ReturnToBeginningNode"
     # Go to finalDiagnosisNode instead of END
@@ -69,10 +72,24 @@ if __name__ == "__main__":
         print("グラフ可視化に失敗しました:", e)
     
     result = graph.invoke(initial_state)
-   
-    
-    print("=== 診断結果 ===")
+
+    print("=== HPO ===")
+    print(result["hpoDict"])
+    print("\n")
+    print(result["hpoList"])
+    print("\n")
+    print("=== result of PCF ===")
+    print(result["pubCaseFinder"])
+    print("\n")
+    print("=== result of ZeroShot ===")
+    print(result["zeroShotResult"])
+    print("\n")
+    print("=== result of tentativeDiagnosis ===")
     print(result["tentativeDiagnosis"])
+    print("\n")
+    print("=== result of reflection ===")
     print(result["reflection"])
-    print("=== 最終診断結果 ===")
+    print("\n")
+    print("=== result of finalDiagnosis ===")
     print(result.get("finalDiagnosis", None))
+    print("\n")

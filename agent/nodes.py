@@ -12,15 +12,14 @@ from tools.finalDiagnosis import createFinalDiagnosis
 def BeginningOfFlowNode(state: State):
     print("BeginningOfFlowNode called")
     state["depth"] += 1
-    
+    print(f"Current depth: {state['depth']}")
     # reset Diagnosis and Reflection when starting a new flow
     
     return {"depth": state["depth"], "tentativeDiagnosis": None, "reflection": None}
 
 def PCFnode(state: State):
     print("PCFnode called")
-    if state.get("pubCaseFinder") is not None:
-        return {"pubCaseFinder": state["pubCaseFinder"]}
+    
     hpo_list = state["hpoList"]
     if not hpo_list:
         return {"pubCaseFinder": []}
@@ -28,8 +27,6 @@ def PCFnode(state: State):
 
 def createHPODictNode(state: State):
     print("createHPODictNode called")
-    if state.get("hpoDict") is not None:
-        return {"hpoDict": state["hpoDict"]}
     hpo_list = state.get("hpoList", [])
     hpo_dict = make_hpo_dic(hpo_list, None)
     return {"hpoDict": hpo_dict}
