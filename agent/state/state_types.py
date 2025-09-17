@@ -12,17 +12,20 @@ class HistoryItem(TypedDict):
 
 class State(TypedDict):
     depth: int
+    imagePath: Optional[str]
     clinicalText: Optional[str]
     hpoList: List[str]
     hpoDict: dict[str, str]
     pubCaseFinder: List[PCFres]
+    GestaltMatcher: List['GestaltMatcherFormat']
     # evidence are stored in memory
-    memory: List[HistoryItem]
+    memory: List['InformationItem']
     zeroShotResult: Optional['ZeroShotOutput']
     tentativeDiagnosis: Optional['DiagnosisOutput']
     reflection: Optional['ReflectionOutput']
     finalDiagnosis: Optional['DiagnosisOutput']
     
+
 
 class ReflectionOutput(BaseModel):
     ans: List['ReflectionFormat']
@@ -49,3 +52,17 @@ class ZeroShotFormat(BaseModel):
     
 class ZeroShotOutput(BaseModel):
     ans: List[ZeroShotFormat]
+
+class GestaltMatcherFormat(BaseModel):
+    gene_name: str
+    gene_entrez_id: str
+    distance: float
+    gestalt_score: float
+    image_id: str
+    subject_id: str
+
+class InformationItem(TypedDict):
+    title: str
+    url: str
+    content: str
+    disease_name: str

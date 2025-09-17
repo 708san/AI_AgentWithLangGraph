@@ -4,8 +4,8 @@ from state.state_types import PCFres, DiagnosisOutput
 from llm.prompt import prompt_dict, build_prompt
 from llm.azure_llm_instance import azure_llm
 
-def createDiagnosis(hpo_dict: dict[str,str], pubCaseFinder: List[PCFres], zeroShotResult) -> Optional[DiagnosisOutput]:
-    top5_str = "\n".join(
+def createDiagnosis(hpo_dict: dict[str,str], pubCaseFinder: List[PCFres], zeroShotResult, gestaltMatcherResult) -> Optional[DiagnosisOutput]:
+    top_str = "\n".join(
         [f"{i+1}. {item['omim_disease_name_en']} (score: {item['score']}) - {item['description']}" for i, item in enumerate(pubCaseFinder)]
     )
     zeroShotResult_str = ""
@@ -14,14 +14,30 @@ def createDiagnosis(hpo_dict: dict[str,str], pubCaseFinder: List[PCFres], zeroSh
             f"{i+1}. {item.disease_name} (rank: {item.rank})"
             for i, item in enumerate(zeroShotResult.ans)
         ])
-    print(zeroShotResult_str)
+    # --- GestaltMatcherの結果を整形 ---
+    gestaltMatcherResult_str = ""
+    if gestaltMatcherResult:
+        gestaltMatcherResult_str = "\n".join([
+            f"{i+1}. Gene: {item.get('gene_name', '')} (Entrez: {item.get('gene_entrez_id', '')}), "
+            f"Gestalt Score: {item.get('gestalt_score', '')}, Distance: {item.get('distance', '')}"
+            for i, item in enumerate(gestaltMatcherResult)
+        ])
+    # ---------------------------------
+
     inputs = {
         "hpo_list": ", ".join([f"{k}:{v}" for k, v in hpo_dict.items()]),
-        "top5": top5_str,
-        "zeroShotResult": zeroShotResult_str
+        "pcf_result": top_str,
+        "zeroShotResult": zeroShotResult_str,
+        "gestaltMatcherResult": gestaltMatcherResult_str  
     }
     prompt_template = prompt_dict["diagnosis_prompt"] 
     structured_llm = azure_llm.get_structured_llm(DiagnosisOutput)
+
     prompt = build_prompt(prompt_template, inputs)
+
+    print("final diagnosis prompt\n")
+    print(prompt)
+    print("\n")
+    
     messages = [HumanMessage(content=prompt)]
     return structured_llm.invoke(messages)

@@ -9,8 +9,8 @@ def createFinalDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     Generate FinalDiagnosis using State, prompt, and DiagnosisOutput
     """
    
-    patient_info = state.get("clinicalText", "")
-    similar_case_detailed = state.get("memory", "")
+    patient_info = state.get("hpoDict", "")
+    similar_case_detailed = state.get("clinicalText", "")
     tentative_result = state.get("tentativeDiagnosis", None)
     judgements = state.get("reflection", None)
 
@@ -52,6 +52,11 @@ def createFinalDiagnosis(state: State) -> Optional[DiagnosisOutput]:
         "judgements": judgements_str
     }
     prompt = build_prompt(prompt_template, inputs)
+    """
+    print("final diagnosis prompt\n")
+    print(prompt)
+    print("\n")
+    """
     messages = [HumanMessage(content=prompt)]
     structured_llm = azure_llm.get_structured_llm(DiagnosisOutput)
     return structured_llm.invoke(messages)

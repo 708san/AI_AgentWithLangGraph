@@ -1,6 +1,6 @@
 from langgraph.graph import StateGraph, START, END
 from state.state_types import State
-from nodes import PCFnode, createDiagnosisNode, createZeroShotNode, createHPODictNode,diseaseNormalizeNode,dieaseSearchNode,reflectionNode,BeginningOfFlowNode,finalDiagnosisNode
+from nodes import PCFnode, createDiagnosisNode, createZeroShotNode, createHPODictNode,diseaseNormalizeNode,dieaseSearchNode,reflectionNode,BeginningOfFlowNode,finalDiagnosisNode,GestaltMatcherNode
 
 
 
@@ -8,6 +8,7 @@ graph_builder = StateGraph(State)
 graph_builder.add_node("BeginningOfFlowNode", BeginningOfFlowNode)
 graph_builder.add_node("createZeroShotNode", createZeroShotNode)
 graph_builder.add_node("PCFnode", PCFnode)
+graph_builder.add_node("GestaltMatcherNode", GestaltMatcherNode)
 graph_builder.add_node("createHPODictNode", createHPODictNode)
 graph_builder.add_node("createDiagnosisNode", createDiagnosisNode)
 graph_builder.add_node("diseaseNormalizeNode", diseaseNormalizeNode)
@@ -38,8 +39,9 @@ def after_reflection_edge(state: State):
 graph_builder.add_edge(START, "BeginningOfFlowNode")
 graph_builder.add_edge( "BeginningOfFlowNode", "PCFnode")
 graph_builder.add_edge( "BeginningOfFlowNode", "createHPODictNode")
+graph_builder.add_edge( "BeginningOfFlowNode", "GestaltMatcherNode")
 graph_builder.add_edge("createHPODictNode", "createZeroShotNode")
-graph_builder.add_edge(["createZeroShotNode", "PCFnode"], "createDiagnosisNode")
+graph_builder.add_edge(["createZeroShotNode", "PCFnode", "GestaltMatcherNode"], "createDiagnosisNode")
 graph_builder.add_edge("createDiagnosisNode", "diseaseNormalizeNode")
 graph_builder.add_edge("diseaseNormalizeNode", "diseaseSearchNode")
 graph_builder.add_edge("diseaseSearchNode", "reflectionNode")
@@ -51,12 +53,15 @@ graph_builder.add_edge("finalDiagnosisNode", END)
 
 if __name__ == "__main__":
     input_hpo_list = ["HP:0001250", "HP:0004322"]
+    image_path = "./sampleImage/cdls_demo.png" 
     initial_state = {
         #defalut depth is 0 (and in beggining node, depth will be increased to 1)
         "depth": 0,
         "clinicalText": None,
         "hpoList": input_hpo_list,
+        "imagePath": image_path,
         "pubCaseFinder": [],
+        "GestaltMatcher": None,
         "hpoDict": {},
         "zeroShotResult": None,
         "memory": [],
@@ -73,10 +78,14 @@ if __name__ == "__main__":
     
     result = graph.invoke(initial_state)
 
+
     print("=== HPO ===")
     print(result["hpoDict"])
     print("\n")
     print(result["hpoList"])
+    print("\n")
+    print("=== results of gestaltMatcher ===")
+    print(result["GestaltMatcher"])
     print("\n")
     print("=== result of PCF ===")
     print(result["pubCaseFinder"])
@@ -84,6 +93,9 @@ if __name__ == "__main__":
     print("=== result of ZeroShot ===")
     print(result["zeroShotResult"])
     print("\n")
+    print("=== result of diseaseSearch ===")
+    print(result["memory"])
+    
     print("=== result of tentativeDiagnosis ===")
     print(result["tentativeDiagnosis"])
     print("\n")

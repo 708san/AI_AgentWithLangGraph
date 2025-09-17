@@ -3,8 +3,9 @@ prompt_dict = {
         "You are a specialist in the field of rare diseases.\n"
         "You have access to the following context:\n"
         "Based on the following symptoms: {hpo_list},\n"
-        "and the top 5 disease candidates from PubCaseFinder: {top5},\n"
+        "and disease candidates from PubCaseFinder: {pcf_result},\n"
         "and the top 5 disease candidates from Zero-Shot Diagnosis: {zeroShotResult},\n"
+        "and this is the results from GestaltMatcher with candidate gene and disease: {gestaltMatcherResult}\n"
         "Based on the above and your knowledge, enumerate the **top 5 most likely rare disease diagnoses** for this patient.\n"
         "**For each diagnosis, use the following format:**\n"
         "## **DIAGNOSIS NAME** (Rank #X/5)\n"
@@ -58,10 +59,10 @@ prompt_dict = {
         "literature that supports your conclusion\n"
         "Patient phenotype:\n"
         "{patient_info}\n"
+        "Medical literature:\n"
+        "{disease_knowledge}\n"
     #  "Similar cases:\n"
     #   "{similar_case_detailed}\n"
-    #  "Medical literature:\n"
-    #   "{disease_knowledge}\n"
     ),
     "final_diagnosis_prompt": (
         "You have access to the following information:\n"
