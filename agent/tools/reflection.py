@@ -35,13 +35,13 @@ def create_reflection(patient_info, diagnosis_to_judge, disease_knowledge_list):
     }
     structured_llm = azure_llm.get_structured_llm(ReflectionFormat)
     prompt = build_prompt(prompt_template, inputs)
-    """
+    
     print("reflection prompt\n")
     print(prompt)
     print("\n")
-    """
+    
     messages = [HumanMessage(content=prompt)]
     result = structured_llm.invoke(messages)
     if isinstance(result, dict):
-        return ReflectionFormat(**result)
-    return result
+        return ReflectionFormat(**result), prompt
+    return result, prompt

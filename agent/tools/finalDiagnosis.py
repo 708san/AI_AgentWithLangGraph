@@ -53,11 +53,9 @@ def createFinalDiagnosis(state: State) -> Optional[DiagnosisOutput]:
         "judgements": judgements_str
     }
     prompt = build_prompt(prompt_template, inputs)
-    """
-    print("final diagnosis prompt\n")
-    print(prompt)
-    print("\n")
-    """
+    
+    
     messages = [HumanMessage(content=prompt)]
     structured_llm = azure_llm.get_structured_llm(DiagnosisOutput)
-    return structured_llm.invoke(messages)
+    result = structured_llm.invoke(messages)
+    return result, prompt

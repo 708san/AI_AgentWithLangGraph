@@ -15,7 +15,7 @@ class RareDiseaseDiagnosisPipeline:
     def __init__(self, enable_log=False, log_filename=None):
         self.graph = self._build_graph()
         self.enable_log = enable_log
-        self.logfile_path=None
+        self.logfile_path = None
         self.log_filename = log_filename
         if self.enable_log:
             self.logfile_path = self._get_logfile_path()
@@ -40,20 +40,39 @@ class RareDiseaseDiagnosisPipeline:
             f.write(ascii_graph)
             f.write("\n\n")
 
-
     def _log(self, node_name, result):
         if not self.enable_log or not self.logfile_path:
             return
         with open(self.logfile_path, "a", encoding="utf-8") as f:
             f.write(f"\n=== {node_name} ===\n")
             try:
+                # プロンプト付きのdictの場合はプロンプトも出力
+                if isinstance(result, dict) and "prompt" in result:
+                    prompt = result["prompt"]
+                    # reflectionNodeのときは複数プロンプトを分かりやすく区切る
+                    if node_name == "reflectionNode" and prompt.strip():
+                        prompts = prompt.split("\n---\n") if "\n---\n" in prompt else prompt.split("\n\n")
+                        ans_list = result.get("result", result)
+                        ans_list = getattr(ans_list, "ans", None) or []
+                        for i, p in enumerate(prompts):
+                            disease_name = ""
+                            if i < len(ans_list):
+                                disease_name = getattr(ans_list[i], "disease_name", f"#{i+1}")
+                            f.write(f"\n----- Reflection Prompt for: {disease_name} -----\n")
+                            f.write(p.strip() + "\n")
+                            f.write("----- End Reflection Prompt -----\n")
+                    else:
+                        f.write("\n----- Prompt Start -----\n")
+                        f.write(prompt.strip() + "\n")
+                        f.write("----- Prompt End -----\n")
+                    f.write("Result:\n")
+                    result = result.get("result", result)
                 # ZeroShotOutput, DiagnosisOutput, ReflectionOutputはpydanticモデル
                 if isinstance(result, ZeroShotOutput) or isinstance(result, DiagnosisOutput) or isinstance(result, ReflectionOutput):
                     f.write(result.model_dump_json(indent=2, ensure_ascii=False))
                 elif hasattr(result, "dict"):
                     f.write(json.dumps(result.dict(), ensure_ascii=False, indent=2))
                 elif isinstance(result, dict):
-                    # dictの中にpydanticモデルが入っている場合も考慮
                     def default(o):
                         if hasattr(o, "model_dump"):
                             return o.model_dump()
@@ -75,7 +94,6 @@ class RareDiseaseDiagnosisPipeline:
                 f.write(f"ログ整形エラー: {e}\n")
             f.write("\n")
 
-
     def _build_graph(self):
         graph_builder = StateGraph(State)
         # ラップして各ノードの結果をログに記録
@@ -83,6 +101,9 @@ class RareDiseaseDiagnosisPipeline:
             def wrapped(state):
                 result = node_func(state)
                 self._log(node_name, result)
+                # プロンプト付きdictの場合はresult["result"]を返す
+                if isinstance(result, dict) and "result" in result:
+                    return result["result"]
                 return result
             return wrapped
 

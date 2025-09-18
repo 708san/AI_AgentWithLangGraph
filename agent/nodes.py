@@ -9,6 +9,7 @@ from .tools.diseaseSearch import diseaseSearchForDiagnosis
 from .tools.diseaseNormalize import diseaseNormalizeForDiagnosis
 from .tools.finalDiagnosis import createFinalDiagnosis
 from .tools.gestaltMathcher import call_gestalt_matcher_api
+from agent.llm.prompt import prompt_dict
 
 def BeginningOfFlowNode(state: State):
     print("BeginningOfFlowNode called")
@@ -79,9 +80,9 @@ def createDiagnosisNode(state: State):
     gestaltMatcherResult = state.get("GestaltMatcher", None)
 
     if hpo_dict and pubCaseFinder:
-        tentativeDiagnosis = createDiagnosis(hpo_dict, pubCaseFinder, zeroShotResult, gestaltMatcherResult)
-        return {"tentativeDiagnosis": tentativeDiagnosis}
-    return {"tentativeDiagnosis": None}
+        result, prompt = createDiagnosis(hpo_dict, pubCaseFinder, zeroShotResult, gestaltMatcherResult)
+        return {"result": {"tentativeDiagnosis": result}, "prompt": prompt}
+    return {"result": {"tentativeDiagnosis": None}}
 
 
 
@@ -107,17 +108,19 @@ def reflectionNode(state: State):
     if tentativeDiagnosis and hpo_dict:
         diagnosis_to_judge_lis = tentativeDiagnosis.ans
         reflection_result_list = []
+        prompts = []
         for diagnosis_to_judge in diagnosis_to_judge_lis:
-            reflection_result = create_reflection(hpo_dict, diagnosis_to_judge,disease_knowledge)
+            reflection_result, prompt = create_reflection(hpo_dict, diagnosis_to_judge, disease_knowledge)
             reflection_result_list.append(reflection_result)
+            prompts.append(prompt)
         print(type(reflection_result_list[0]))
-        return {"reflection": ReflectionOutput(ans=reflection_result_list)}
-    return {"reflection": None}
+        return {"result": {"reflection": ReflectionOutput(ans=reflection_result_list)}, "prompt": "\n---\n".join(prompts)}
+    return {"result": {"reflection": None}}
 
 def finalDiagnosisNode(state: State):
     print("finalDiagnosisNode called")
-    finalDiagnosis = createFinalDiagnosis(state)
-    return {"finalDiagnosis": finalDiagnosis}
+    finalDiagnosis, prompt = createFinalDiagnosis(state)
+    return {"result": {"finalDiagnosis": finalDiagnosis}, "prompt": prompt}
 
 def diseaseNormalizeForFinalNode(state: State):
     print("diseaseNormalizeForFinalNode called")
