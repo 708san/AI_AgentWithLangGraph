@@ -39,5 +39,5 @@ def call_gestalt_matcher_api(image_path: str, depth: int):
 
     response.raise_for_status()
     result = response.json()
-    genes = result.get("suggested_genes_list", [])
-    return genes[:depth * 5]
+    syndromes = result.get("suggested_syndromes_list", [])
+    return syndromes[:depth + 4]

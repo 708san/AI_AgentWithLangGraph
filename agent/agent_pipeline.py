@@ -17,12 +17,25 @@ class RareDiseaseDiagnosisPipeline:
         self.logfile_path = None
         if self.enable_log:
             self.logfile_path = self._get_logfile_path()
-
+            self._write_graph_ascii_to_log()
+            
     def _get_logfile_path(self):
         log_dir = os.path.join(os.getcwd(), "log")
         os.makedirs(log_dir, exist_ok=True)
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         return os.path.join(log_dir, f"agent_log_{timestamp}.log")
+    
+    def _write_graph_ascii_to_log(self):
+        # エージェントフロー図をASCIIでlogファイルの先頭に出力
+        try:
+            ascii_graph = self.graph.get_graph().draw_ascii()
+        except Exception as e:
+            ascii_graph = f"[Failed to draw graph: {e}]"
+        with open(self.logfile_path, "w", encoding="utf-8") as f:
+            f.write("=== Agent Flow Graph ===\n")
+            f.write(ascii_graph)
+            f.write("\n\n")
+
 
     def _log(self, node_name, result):
         if not self.enable_log or not self.logfile_path:

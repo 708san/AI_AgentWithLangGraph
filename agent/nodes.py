@@ -35,17 +35,17 @@ def GestaltMatcherNode(state: State):
         return {"GestaltMatcher": []}
     try:
         gestalt_results = call_gestalt_matcher_api(image_path, depth)
-        gestalt_list = []
+        syndrome_list = []
         for res in gestalt_results:
-            gestalt_list.append({
-                "gene_name": res.get("gene_name", ""),
-                "gene_entrez_id": res.get("gene_entrez_id", ""),
+            syndrome_list.append({
+                "subject_id": res.get("subject_id", ""),
+                "syndrome_name": res.get("syndrome_name", ""),
+                "omim_id": res.get("omim_id", ""),
                 "distance": res.get("distance"),
-                "gestalt_score": res.get("gestalt_score"),
                 "image_id": res.get("image_id", ""),
-                "subject_id": res.get("subject_id", "")
+                "gestalt_score": res.get("gestalt_score")
             })
-        return {"GestaltMatcher": gestalt_list}
+        return {"GestaltMatcher": syndrome_list}
     except Exception as e:
         print(f"Error calling GestaltMatcher API: {e}")
         return {"GestaltMatcher": []}

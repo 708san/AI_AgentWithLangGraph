@@ -60,12 +60,12 @@ class ReflectionOutput(BaseModel):
 
 
 class GestaltMatcherFormat(BaseModel):
-    gene_name: str
-    gene_entrez_id: str
-    distance: float
-    gestalt_score: float
-    image_id: str
     subject_id: str
+    syndrome_name: str
+    omim_id: str
+    distance: float
+    image_id: str
+    gestalt_score: float
 
 class InformationItem(TypedDict):
     title: str

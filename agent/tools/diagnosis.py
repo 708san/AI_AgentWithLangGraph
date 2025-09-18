@@ -18,8 +18,8 @@ def createDiagnosis(hpo_dict: dict[str,str], pubCaseFinder: List[PCFres], zeroSh
     gestaltMatcherResult_str = ""
     if gestaltMatcherResult:
         gestaltMatcherResult_str = "\n".join([
-            f"{i+1}. Gene: {item.get('gene_name', '')} (Entrez: {item.get('gene_entrez_id', '')}), "
-            f"Gestalt Score: {item.get('gestalt_score', '')}, Distance: {item.get('distance', '')}"
+            f"{i+1}. Disease Name: OMIM{item.get('omim_id', '')}:{item.get('syndrome_name', '')}), "
+            f"Score: {item.get('gestalt_score', '')}"
             for i, item in enumerate(gestaltMatcherResult)
         ])
     # ---------------------------------
@@ -35,6 +35,9 @@ def createDiagnosis(hpo_dict: dict[str,str], pubCaseFinder: List[PCFres], zeroSh
 
     prompt = build_prompt(prompt_template, inputs)
 
-    
+    print("Diagnosis Prompt:")
+    print(prompt)
+    print("\n")
+        
     messages = [HumanMessage(content=prompt)]
     return structured_llm.invoke(messages)
