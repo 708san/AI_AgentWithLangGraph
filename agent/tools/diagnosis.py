@@ -35,9 +35,7 @@ def createDiagnosis(hpo_dict: dict[str,str], pubCaseFinder: List[PCFres], zeroSh
 
     prompt = build_prompt(prompt_template, inputs)
 
-    print("Diagnosis Prompt:")
-    print(prompt)
-    print("\n")
+   
         
     messages = [HumanMessage(content=prompt)]
     return structured_llm.invoke(messages)
