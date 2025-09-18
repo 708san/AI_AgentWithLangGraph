@@ -7,14 +7,16 @@ from agent.state.state_types import State, ZeroShotOutput, DiagnosisOutput, Refl
 from agent.nodes import (
     PCFnode, createDiagnosisNode, createZeroShotNode, createHPODictNode,
     diseaseNormalizeNode, dieaseSearchNode, reflectionNode,
-    BeginningOfFlowNode, finalDiagnosisNode, GestaltMatcherNode
+    BeginningOfFlowNode, finalDiagnosisNode, GestaltMatcherNode,
+    diseaseNormalizeForFinalNode
 )
 
 class RareDiseaseDiagnosisPipeline:
-    def __init__(self, enable_log=False):
+    def __init__(self, enable_log=False, log_filename=None):
         self.graph = self._build_graph()
         self.enable_log = enable_log
-        self.logfile_path = None
+        self.logfile_path=None
+        self.log_filename = log_filename
         if self.enable_log:
             self.logfile_path = self._get_logfile_path()
             self._write_graph_ascii_to_log()
@@ -22,6 +24,8 @@ class RareDiseaseDiagnosisPipeline:
     def _get_logfile_path(self):
         log_dir = os.path.join(os.getcwd(), "log")
         os.makedirs(log_dir, exist_ok=True)
+        if self.log_filename:
+            return os.path.join(log_dir, self.log_filename)
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         return os.path.join(log_dir, f"agent_log_{timestamp}.log")
     
@@ -92,6 +96,7 @@ class RareDiseaseDiagnosisPipeline:
         graph_builder.add_node("diseaseSearchNode", wrap_node(dieaseSearchNode, "diseaseSearchNode"))
         graph_builder.add_node("reflectionNode", wrap_node(reflectionNode, "reflectionNode"))
         graph_builder.add_node("finalDiagnosisNode", wrap_node(finalDiagnosisNode, "finalDiagnosisNode"))
+        graph_builder.add_node("diseaseNormalizeForFinalNode", wrap_node(diseaseNormalizeForFinalNode, "diseaseNormalizeForFinalNode"))
 
         def after_reflection_edge(state: State):
             if state.get("depth", 0) > 2:
@@ -120,7 +125,8 @@ class RareDiseaseDiagnosisPipeline:
                 "ProceedToFinalDiagnosisNode": "finalDiagnosisNode"
             }
         )
-        graph_builder.add_edge("finalDiagnosisNode", END)
+        graph_builder.add_edge("finalDiagnosisNode", "diseaseNormalizeForFinalNode")
+        graph_builder.add_edge("diseaseNormalizeForFinalNode", END)
         return graph_builder.compile()
 
     def run(self, hpo_list, image_path=None, verbose=True):

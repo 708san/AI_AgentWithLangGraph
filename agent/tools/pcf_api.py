@@ -9,7 +9,7 @@ def callingPCF(hpo_list , depth):
         response.raise_for_status()
         data = response.json()
         top = []
-        for item in data[:depth * 5]:
+        for item in data[:5]:
             top.append({
                 "omim_disease_name_en": item.get("omim_disease_name_en", ""),
                 "description": item.get("description", ""),

@@ -101,7 +101,7 @@ def diseaseSearchForDiagnosis(state: State) -> Dict[str, List[InformationItem]]:
 
     # --- Wikipediaからの情報取得 ---
     try:
-        wiki_retriever = WikipediaRetriever(top_k_results=search_depth * 1, doc_content_chars_max=3000)
+        wiki_retriever = WikipediaRetriever(top_k_results=search_depth * 1, doc_content_chars_max=2000)
         for name in disease_names:
             print(f"    - [Wikipedia] 「{name}」を検索中...")
             wiki_docs = wiki_retriever.invoke(name)

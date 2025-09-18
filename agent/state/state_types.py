@@ -36,6 +36,7 @@ class ZeroShotOutput(BaseModel):
 # --- Pydantic Models for Tentative Diagnosis Output ---
 class DiagnosisFormat(BaseModel):
     disease_name: str = Field(..., description="The formal name of the most likely rare disease, derived from synthesizing multiple data sources (HPO, PubCaseFinder, ZeroShot, GestaltMatcher).")
+    OMIM_id: Optional[str] = Field(None, description="The OMIM identifier for the disease, if available.")
     description: str = Field(..., description="The diagnostic reasoning explaining why this diagnosis is clinically plausible. Must specify which of the patient's symptoms support this diagnosis and include in-text citations [1], [2] to the evidence sources.")
     rank: int = Field(..., description="The final rank of the disease in the differential diagnosis list, where 1 is the most likely.")
 

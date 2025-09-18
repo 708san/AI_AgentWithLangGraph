@@ -83,11 +83,15 @@ def createDiagnosisNode(state: State):
         return {"tentativeDiagnosis": tentativeDiagnosis}
     return {"tentativeDiagnosis": None}
 
+
+
 def diseaseNormalizeNode(state: State):
     print("diseaseNormalizeNode called")
     tentativeDiagnosis = state.get("tentativeDiagnosis", None)
-    # Placeholder for disease normalization logic
-    return 
+    if tentativeDiagnosis is not None:
+        normalizedDiagnosis = diseaseNormalizeForDiagnosis(tentativeDiagnosis)
+        return {"tentativeDiagnosis": normalizedDiagnosis}
+    return {"tentativeDiagnosis": None}
 
 def dieaseSearchNode(state: State):
     print("diseaseSearchNode called")
@@ -114,3 +118,11 @@ def finalDiagnosisNode(state: State):
     print("finalDiagnosisNode called")
     finalDiagnosis = createFinalDiagnosis(state)
     return {"finalDiagnosis": finalDiagnosis}
+
+def diseaseNormalizeForFinalNode(state: State):
+    print("diseaseNormalizeForFinalNode called")
+    finalDiagnosis = state.get("finalDiagnosis", None)
+    if finalDiagnosis is not None:
+        normalizedDiagnosis = diseaseNormalizeForDiagnosis(finalDiagnosis)
+        return {"finalDiagnosis": normalizedDiagnosis}
+    return {"finalDiagnosis": None}
