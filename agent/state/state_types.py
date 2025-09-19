@@ -18,6 +18,7 @@ class State(TypedDict):
     hpoDict: dict[str, str]
     pubCaseFinder: List[PCFres]
     GestaltMatcher: List['GestaltMatcherFormat']
+    webresources: List['webresource']
     # evidence are stored in memory
     memory: List['InformationItem']
     zeroShotResult: Optional['ZeroShotOutput']
@@ -59,6 +60,7 @@ class ReflectionOutput(BaseModel):
     ans: List['ReflectionFormat'] = Field(..., description="A list of evaluation results, with each item in the list corresponding to a single tentative diagnosis that was reviewed.")
 
 
+#---Pydantic Model for  GM---
 
 class GestaltMatcherFormat(BaseModel):
     subject_id: str
@@ -68,8 +70,14 @@ class GestaltMatcherFormat(BaseModel):
     image_id: str
     gestalt_score: float
 
+#---TypedDict ---
 class InformationItem(TypedDict):
     title: str
     url: str
     content: str
     disease_name: str
+
+class webresource(TypedDict):
+    title: str
+    url: str
+    snippet: str

@@ -1,3 +1,5 @@
+NUM_DIAGNOSES = 5
+
 prompt_dict = {
     "diagnosis_prompt": (
         "You are a senior clinical geneticist acting as a lead diagnostician. You have received preliminary reports from three different sources: a phenotype-based analysis (PubCaseFinder), a generative AI analysis (Zero-Shot Diagnosis), and a facial dysmorphology analysis (GestaltMatcher). Your task is to synthesize these disparate findings into a single, cohesive differential diagnosis, re-ranking the candidates based on the convergence and strength of evidence.\n"
@@ -14,9 +16,9 @@ prompt_dict = {
         "- **Generative Model Plausibility (Zero-Shot):** Is this diagnosis considered plausible by the Zero-Shot analysis?\n"
         "- **Convergence of Evidence:** How many of the three sources support this diagnosis? A diagnosis supported by multiple sources is significantly more likely.\n"
         "\n"
-        "**Step 3: Re-Rank and Formulate Final Diagnosis**\n"
-        "- Based on your synthesis in Step 2, create a new, final ranking of the top 5 most likely diagnoses. Prioritize candidates with strong, multi-source evidence.\n"
-        "- For each of the top 5 diagnoses, formulate the diagnostic reasoning (`description`) by summarizing the key evidence from Step 2 that justifies its rank.\n"
+        f"**Step 3: Re-Rank and Formulate Final Diagnosis**\n"
+        f"- Based on your synthesis in Step 2, create a new, final ranking of the top {NUM_DIAGNOSES} most likely diagnoses. Prioritize candidates with strong, multi-source evidence.\n"
+        f"- For each of the top {NUM_DIAGNOSES} diagnoses, formulate the diagnostic reasoning (`description`) by summarizing the key evidence from Step 2 that justifies its rank.\n"
         "\n"
         "Now, perform this evaluation for the following case and provide the final output.\n"
         "---\n"

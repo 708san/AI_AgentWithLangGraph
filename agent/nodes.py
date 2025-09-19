@@ -9,8 +9,22 @@ from .tools.diseaseSearch import diseaseSearchForDiagnosis
 from .tools.diseaseNormalize import diseaseNormalizeForDiagnosis
 from .tools.finalDiagnosis import createFinalDiagnosis
 from .tools.gestaltMathcher import call_gestalt_matcher_api
+from .tools.HPOwebReserch import search_hpo_terms
+
 from agent.llm.prompt import prompt_dict
 
+def HPOwebSearchNode(state: State):
+    print("HPOwebSearchNode called")
+    try:
+        webresources = search_hpo_terms(state)
+        
+        # 既存のwebresourcesとマージ（重複排除はsearch_hpo_terms内で実施済み想定）
+        state["webresources"] = state.get("webresources", []) + webresources
+        return {"webresources": state["webresources"]}
+    except Exception as e:
+        print(f"Error in HPOwebSearchNode: {e}")
+        return {"webresources": state.get("webresources", [])}
+    
 def BeginningOfFlowNode(state: State):
     print("BeginningOfFlowNode called")
     state["depth"] += 1
@@ -79,9 +93,11 @@ def createDiagnosisNode(state: State):
     pubCaseFinder = state.get("pubCaseFinder", [])
     zeroShotResult = state.get("zeroShotResult", None)
     gestaltMatcherResult = state.get("GestaltMatcher", None)
+    webresources = state.get("webresources", [])
+
 
     if hpo_dict and pubCaseFinder:
-        result, prompt = createDiagnosis(hpo_dict, pubCaseFinder, zeroShotResult, gestaltMatcherResult)
+        result, prompt = createDiagnosis(hpo_dict, pubCaseFinder, zeroShotResult, gestaltMatcherResult, webresources)
         return {"result": {"tentativeDiagnosis": result}, "prompt": prompt}
     return {"result": {"tentativeDiagnosis": None}}
 

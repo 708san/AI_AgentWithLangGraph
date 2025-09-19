@@ -8,7 +8,7 @@ from agent.nodes import (
     PCFnode, createDiagnosisNode, createZeroShotNode, createHPODictNode,
     diseaseNormalizeNode, dieaseSearchNode, reflectionNode,
     BeginningOfFlowNode, finalDiagnosisNode, GestaltMatcherNode,
-    diseaseNormalizeForFinalNode
+    diseaseNormalizeForFinalNode, HPOwebSearchNode
 )
 
 class RareDiseaseDiagnosisPipeline:
@@ -172,6 +172,7 @@ Now, process the following text:
         graph_builder.add_node("PCFnode", wrap_node(PCFnode, "PCFnode"))
         graph_builder.add_node("GestaltMatcherNode", wrap_node(GestaltMatcherNode, "GestaltMatcherNode"))
         graph_builder.add_node("createHPODictNode", wrap_node(createHPODictNode, "createHPODictNode"))
+        graph_builder.add_node("HPOwebSearchNode", wrap_node(HPOwebSearchNode, "HPOwebSearchNode"))
         graph_builder.add_node("createDiagnosisNode", wrap_node(createDiagnosisNode, "createDiagnosisNode"))
         graph_builder.add_node("diseaseNormalizeNode", wrap_node(diseaseNormalizeNode, "diseaseNormalizeNode"))
         graph_builder.add_node("diseaseSearchNode", wrap_node(dieaseSearchNode, "diseaseSearchNode"))
@@ -196,7 +197,8 @@ Now, process the following text:
         graph_builder.add_edge("BeginningOfFlowNode", "createHPODictNode")
         graph_builder.add_edge("BeginningOfFlowNode", "GestaltMatcherNode")
         graph_builder.add_edge("createHPODictNode", "createZeroShotNode")
-        graph_builder.add_edge(["createZeroShotNode", "PCFnode", "GestaltMatcherNode"], "createDiagnosisNode")
+        graph_builder.add_edge("createHPODictNode", "HPOwebSearchNode")
+        graph_builder.add_edge(["createZeroShotNode", "PCFnode", "GestaltMatcherNode", "HPOwebSearchNode"], "createDiagnosisNode")
         graph_builder.add_edge("createDiagnosisNode", "diseaseNormalizeNode")
         graph_builder.add_edge("diseaseNormalizeNode", "diseaseSearchNode")
         graph_builder.add_edge("diseaseSearchNode", "reflectionNode")
