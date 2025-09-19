@@ -10,7 +10,8 @@ def createFinalDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     Generate FinalDiagnosis using State, prompt, and DiagnosisOutput
     """
    
-    patient_info = state.get("hpoDict", "")
+    hpo_dict = state.get("hpoDict", {})
+    absent_hpo_dict = state.get("absentHpoDict", {}) 
     similar_case_detailed = state.get("clinicalText", "")
     tentative_result = state.get("tentativeDiagnosis", None)
     judgements = state.get("reflection", None)
@@ -39,6 +40,9 @@ def createFinalDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     else:
         judgements_str = ""
 
+    present_hpo = ", ".join([v for k, v in hpo_dict.items()]) if hpo_dict else ""
+    absent_hpo = ", ".join([v for k, v in (absent_hpo_dict or {}).items()]) if absent_hpo_dict else ""
+
     # If memory (similar_case_detailed) is a list, join as string
     if isinstance(similar_case_detailed, list):
         similar_case_detailed_str = "\n".join([str(item) for item in similar_case_detailed])
@@ -47,7 +51,8 @@ def createFinalDiagnosis(state: State) -> Optional[DiagnosisOutput]:
 
     prompt_template = prompt_dict["final_diagnosis_prompt"]
     inputs = {
-        "patient_info": patient_info,
+        "present_hpo": present_hpo,
+        "absent_hpo": absent_hpo,
         "similar_case_detailed": similar_case_detailed_str,
         "tentative_result": tentative_result_str,
         "judgements": judgements_str

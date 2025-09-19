@@ -16,6 +16,8 @@ class State(TypedDict):
     clinicalText: Optional[str]
     hpoList: List[str]
     hpoDict: dict[str, str]
+    absentHpoList: List[str]
+    absentHpoDict: dict[str, str] 
     pubCaseFinder: List[PCFres]
     GestaltMatcher: List['GestaltMatcherFormat']
     webresources: List['webresource']

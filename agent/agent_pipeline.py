@@ -5,7 +5,7 @@ from langgraph.graph import StateGraph, START, END
 from agent.state.state_types import State, ZeroShotOutput, DiagnosisOutput, ReflectionOutput
 
 from agent.nodes import (
-    PCFnode, createDiagnosisNode, createZeroShotNode, createHPODictNode,
+    PCFnode, createDiagnosisNode, createZeroShotNode, createHPODictNode,createAbsentHPODictNode, 
     diseaseNormalizeNode, dieaseSearchNode, reflectionNode,
     BeginningOfFlowNode, finalDiagnosisNode, GestaltMatcherNode,
     diseaseNormalizeForFinalNode, HPOwebSearchNode
@@ -172,6 +172,7 @@ Now, process the following text:
         graph_builder.add_node("PCFnode", wrap_node(PCFnode, "PCFnode"))
         graph_builder.add_node("GestaltMatcherNode", wrap_node(GestaltMatcherNode, "GestaltMatcherNode"))
         graph_builder.add_node("createHPODictNode", wrap_node(createHPODictNode, "createHPODictNode"))
+        graph_builder.add_node("createAbsentHPODictNode", wrap_node(createAbsentHPODictNode, "createAbsentHPODictNode"))
         graph_builder.add_node("HPOwebSearchNode", wrap_node(HPOwebSearchNode, "HPOwebSearchNode"))
         graph_builder.add_node("createDiagnosisNode", wrap_node(createDiagnosisNode, "createDiagnosisNode"))
         graph_builder.add_node("diseaseNormalizeNode", wrap_node(diseaseNormalizeNode, "diseaseNormalizeNode"))
@@ -196,9 +197,10 @@ Now, process the following text:
         graph_builder.add_edge("BeginningOfFlowNode", "PCFnode")
         graph_builder.add_edge("BeginningOfFlowNode", "createHPODictNode")
         graph_builder.add_edge("BeginningOfFlowNode", "GestaltMatcherNode")
+        graph_builder.add_edge("BeginningOfFlowNode", "createAbsentHPODictNode")
         graph_builder.add_edge("createHPODictNode", "createZeroShotNode")
         graph_builder.add_edge("createHPODictNode", "HPOwebSearchNode")
-        graph_builder.add_edge(["createZeroShotNode", "PCFnode", "GestaltMatcherNode", "HPOwebSearchNode"], "createDiagnosisNode")
+        graph_builder.add_edge(["createZeroShotNode", "PCFnode", "GestaltMatcherNode", "HPOwebSearchNode", "createAbsentHPODictNode"], "createDiagnosisNode")
         graph_builder.add_edge("createDiagnosisNode", "diseaseNormalizeNode")
         graph_builder.add_edge("diseaseNormalizeNode", "diseaseSearchNode")
         graph_builder.add_edge("diseaseSearchNode", "reflectionNode")
@@ -212,11 +214,12 @@ Now, process the following text:
         graph_builder.add_edge("diseaseNormalizeForFinalNode", END)
         return graph_builder.compile()
 
-    def run(self, hpo_list, image_path=None, verbose=True):
+    def run(self, hpo_list, image_path=None, verbose=True, absent_hpo_list=None):
         initial_state = {
             "depth": 0,
             "clinicalText": None,
             "hpoList": hpo_list,
+            "absentHpoList": absent_hpo_list or [],
             "imagePath": image_path,
             "pubCaseFinder": [],
             "GestaltMatcher": None,

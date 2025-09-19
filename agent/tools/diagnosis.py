@@ -19,7 +19,7 @@ def format_webresources(webresources: list) -> str:
     return "\n".join(lines)
 
 
-def createDiagnosis(hpo_dict: dict[str,str], pubCaseFinder: List[PCFres], zeroShotResult, gestaltMatcherResult, webresources=None) -> Optional[DiagnosisOutput]:
+def createDiagnosis(hpo_dict: dict[str,str], pubCaseFinder: List[PCFres], zeroShotResult, gestaltMatcherResult, webresources=None, absent_hpo_dict=None) -> Optional[DiagnosisOutput]:
     top_str = "\n".join(
         [f"{i+1}. {item['omim_disease_name_en']} (score: {item['score']}) - {item['description']}" for i, item in enumerate(pubCaseFinder)]
     )
@@ -42,7 +42,8 @@ def createDiagnosis(hpo_dict: dict[str,str], pubCaseFinder: List[PCFres], zeroSh
     # ---------------------------------
 
     inputs = {
-        "hpo_list": ", ".join([f"{k}:{v}" for k, v in hpo_dict.items()]),
+        "hpo_list": ", ".join([v for k, v in hpo_dict.items()]),
+        "absent_hpo_list": ", ".join([v for k, v in (absent_hpo_dict or {}).items()]),
         "pcf_result": top_str,
         "zeroShotResult": zeroShotResult_str,
         "gestaltMatcherResult": gestaltMatcherResult_str,

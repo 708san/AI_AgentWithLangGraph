@@ -19,7 +19,7 @@ def format_disease_knowledge(info_list, disease_name):
         return "No disease knowledge available for this rank."
     return "\n".join(lines)
 
-def create_reflection(patient_info, diagnosis_to_judge, disease_knowledge_list):
+def create_reflection(hpo_dict, diagnosis_to_judge, disease_knowledge_list, absent_hpo_dict=None):
     prompt_template = prompt_dict["reflection_prompt"]
     diagnosis_name = diagnosis_to_judge.disease_name
     description = diagnosis_to_judge.description
@@ -28,8 +28,12 @@ def create_reflection(patient_info, diagnosis_to_judge, disease_knowledge_list):
 
     disease_knowledge_str = format_disease_knowledge(disease_knowledge_list, disease_name) if disease_knowledge_list is not None else ""
 
+    present_hpo = ", ".join([v for k, v in hpo_dict.items()]) if hpo_dict else ""
+    absent_hpo = ", ".join([v for k, v in (absent_hpo_dict or {}).items()]) if absent_hpo_dict else ""
+
     inputs = {
-        "patient_info": patient_info,
+        "present_hpo": present_hpo,
+        "absent_hpo": absent_hpo,
         "diagnosis_to_judge": f"{diagnosis_name} (Rank: {rank})\nDescription: {description}",
         "disease_knowledge": disease_knowledge_str
     }

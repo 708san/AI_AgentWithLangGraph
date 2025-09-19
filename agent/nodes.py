@@ -71,15 +71,22 @@ def createHPODictNode(state: State):
     hpo_dict = make_hpo_dic(hpo_list, None)
     return {"hpoDict": hpo_dict}
 
+def createAbsentHPODictNode(state: State):
+    print("createAbsentHPODictNode called")
+    absent_hpo_list = state.get("absentHpoList", [])
+    absent_hpo_dict = make_hpo_dic(absent_hpo_list, None)
+    return {"absentHpoDict": absent_hpo_dict}
+
 
 def createZeroShotNode(state: State):
     print("createZeroShotNode called")
     hpo_dict = state.get("hpoDict", {})
+    absent_hpo_dict = state.get("absentHpoDict", {})
     if state.get("zeroShotResult") is not None:
         return {"zeroShotResult": state["zeroShotResult"]}
     if hpo_dict:
         # createZeroshotが(result, prompt)を返すように修正
-        result, prompt = createZeroshot(hpo_dict)
+        result, prompt = createZeroshot(hpo_dict, absent_hpo_dict=absent_hpo_dict)
         if result:
             return {"result": {"zeroShotResult": result}, "prompt": prompt}
     return {"result": {"zeroShotResult": None}}
@@ -90,6 +97,7 @@ def createDiagnosisNode(state: State):
     # To integrate streamss from both ZeroShot and PCF before diagnosis
     print("DiagnosisNode called")
     hpo_dict = state.get("hpoDict", {})
+    absent_hpo_dict = state.get("absentHpoDict", {})
     pubCaseFinder = state.get("pubCaseFinder", [])
     zeroShotResult = state.get("zeroShotResult", None)
     gestaltMatcherResult = state.get("GestaltMatcher", None)
@@ -97,7 +105,7 @@ def createDiagnosisNode(state: State):
 
 
     if hpo_dict and pubCaseFinder:
-        result, prompt = createDiagnosis(hpo_dict, pubCaseFinder, zeroShotResult, gestaltMatcherResult, webresources)
+        result, prompt = createDiagnosis(hpo_dict, pubCaseFinder, zeroShotResult, gestaltMatcherResult, webresources, absent_hpo_dict=absent_hpo_dict)
         return {"result": {"tentativeDiagnosis": result}, "prompt": prompt}
     return {"result": {"tentativeDiagnosis": None}}
 
@@ -120,6 +128,7 @@ def reflectionNode(state: State):
     print("reflectionNode called")
     tentativeDiagnosis = state.get("tentativeDiagnosis", None)
     hpo_dict = state.get("hpoDict", {})
+    absent_hpo_dict = state.get("absentHpoDict", {})
     disease_knowledge = state.get("memory", [])
 
     if tentativeDiagnosis and hpo_dict:
@@ -127,7 +136,7 @@ def reflectionNode(state: State):
         reflection_result_list = []
         prompts = []
         for diagnosis_to_judge in diagnosis_to_judge_lis:
-            reflection_result, prompt = create_reflection(hpo_dict, diagnosis_to_judge, disease_knowledge)
+            reflection_result, prompt = create_reflection(hpo_dict, diagnosis_to_judge, disease_knowledge, absent_hpo_dict=absent_hpo_dict)
             reflection_result_list.append(reflection_result)
             prompts.append(prompt)
         print(type(reflection_result_list[0]))
