@@ -49,7 +49,6 @@ def call_gestalt_matcher_api(image_path: str, depth: int):
 
     for syndrome in syndromes:
         distance = syndrome.get("distance") or syndrome.get("gestalt_score")
-        print(f"distance: {distance}")
         if distance is not None:
             distance = float(distance)
             score = (MAX_DISTANCE - distance) / MAX_DISTANCE
