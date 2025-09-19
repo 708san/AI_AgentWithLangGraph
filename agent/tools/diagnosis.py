@@ -33,7 +33,7 @@ def createDiagnosis(hpo_dict: dict[str,str], pubCaseFinder: List[PCFres], zeroSh
     gestaltMatcherResult_str = ""
     if gestaltMatcherResult:
         gestaltMatcherResult_str = "\n".join([
-            f"{i+1}. OMIM{item.get('omim_id', '')}: {item.get('syndrome_name', '')})"
+            f"{i+1}. {item.get('syndrome_name', '')})"
             f" (Similarity score: {float(item.get('score', 0)):.3f})"
             for i, item in enumerate(gestaltMatcherResult)
         ])
@@ -52,7 +52,7 @@ def createDiagnosis(hpo_dict: dict[str,str], pubCaseFinder: List[PCFres], zeroSh
     # プロンプトテンプレートにweb_search_resultsを追加する必要あり
     prompt_template = (
         prompt_dict["diagnosis_prompt"] +
-        "\n**5. Web Search Results (Literature/Case Reports):**\n{web_search_results}\n"
+        "\n**6. Web Search Results (Literature/Case Reports):**\n{web_search_results}\n"
     )
     structured_llm = azure_llm.get_structured_llm(DiagnosisOutput)
 

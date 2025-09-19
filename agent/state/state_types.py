@@ -5,6 +5,7 @@ class PCFres(TypedDict):
     omim_disease_name_en: str
     description: str
     score: Optional[float]
+    omim_id: str
 
 class HistoryItem(TypedDict):
     role: str  # "user" or "agent" or "tool"

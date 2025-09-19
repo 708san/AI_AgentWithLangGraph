@@ -13,7 +13,8 @@ def callingPCF(hpo_list , depth):
             top.append({
                 "omim_disease_name_en": item.get("omim_disease_name_en", ""),
                 "description": item.get("description", ""),
-                "score": item.get("score", None)
+                "score": item.get("score", None),
+                "omim_id": item.get("id", "")
             })
         return top
     except Exception as e:
