@@ -64,10 +64,11 @@ def createZeroShotNode(state: State):
     if state.get("zeroShotResult") is not None:
         return {"zeroShotResult": state["zeroShotResult"]}
     if hpo_dict:
-        zeroShotResult = createZeroshot(hpo_dict)
-        if zeroShotResult:
-            return {"zeroShotResult": zeroShotResult}
-    return {"zeroShotResult": None}
+        # createZeroshotが(result, prompt)を返すように修正
+        result, prompt = createZeroshot(hpo_dict)
+        if result:
+            return {"result": {"zeroShotResult": result}, "prompt": prompt}
+    return {"result": {"zeroShotResult": None}}
 
 
 

@@ -45,11 +45,71 @@ class RareDiseaseDiagnosisPipeline:
             return
         with open(self.logfile_path, "a", encoding="utf-8") as f:
             f.write(f"\n=== {node_name} ===\n")
+            # diseaseSearchNodeの直後にSummarize Prompt for DiseaseSearchを表示
+            if node_name == "diseaseSearchNode":
+                f.write("\n----- Summarize Prompt for DiseaseSearch -----\n")
+                f.write("""
+You are an expert clinical geneticist and a diagnostician. Your critical task is to analyze a medical text and convert it into a high-yield, structured summary designed specifically for differential diagnosis. Your output must not only list symptoms but also highlight features that distinguish the condition from its clinical mimics.
+
+Instructions:
+
+From the text I provide, generate a summary strictly following these rules:
+
+1. Information to Extract (Include ONLY these):
+
+Disease: The name of the syndrome or disorder.
+
+Genetics: The causative gene(s) and inheritance pattern. If not specified, state "Not specified".
+
+Key Phenotypes: A concise, bulleted list of the core clinical features and symptoms.
+
+Differentiating Features: This is the most critical section. Extract features that are particularly useful for distinguishing this syndrome from others. This includes:
+
+Hallmark signs: Features that are highly characteristic or pathognomonic.
+
+Key negative findings: Symptoms typically ABSENT in this condition but present in similar ones (e.g., "Absence of hyperphagia").
+
+Unique constellations: A specific combination of symptoms that points strongly to this diagnosis.
+
+2. Information to Exclude (Strictly Omit):
+
+Patient case histories, family origins, or demographic details.
+
+Treatment, management, or therapeutic strategies.
+
+Research methodology, study populations, or author details.
+
+Prognosis, mortality, or prevalence statistics.
+
+General background information that isn't a clinical feature.
+
+3. Output Format (Use this exact structure):
+
+Disease: [Name of the disease]
+Genetics: [Gene(s), Inheritance pattern]
+Key Phenotypes:
+
+[Bulleted list of core clinical features]
+
+[Example: Intellectual disability]
+
+[Example: Craniofacial dysmorphism]
+Differentiating Features:
+
+Hallmark(s): [List highly specific or unique signs.]
+
+Key Negative Finding(s): [List what is typically absent, e.g., "Absence of..."]
+
+Unique Constellation: [Describe a diagnostically powerful combination of symptoms.]
+
+Now, process the following text:
+"""
+)
+                f.write("----- End Summarize Prompt for DiseaseSearch -----\n\n")
             try:
                 # プロンプト付きのdictの場合はプロンプトも出力
                 if isinstance(result, dict) and "prompt" in result:
                     prompt = result["prompt"]
-                    # reflectionNodeのときは複数プロンプトを分かりやすく区切る
                     if node_name == "reflectionNode" and prompt.strip():
                         prompts = prompt.split("\n---\n") if "\n---\n" in prompt else prompt.split("\n\n")
                         ans_list = result.get("result", result)

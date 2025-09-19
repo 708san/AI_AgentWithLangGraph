@@ -7,11 +7,9 @@ from ..llm.azure_llm_instance import azure_llm
 def createZeroshot(hpo_dict):
     if hpo_dict:
         info_type = "HPO terms"
-        patient_info = ",".join([f"{k}:{v}" for k, v in hpo_dict.items()])
-      
-    
+        patient_info = ", ".join([f"{v}" for k, v in hpo_dict.items()])
     else:
-        return None
+        return None, None
     prompt_template = prompt_dict["zero-shot-diagnosis-prompt"]
     inputs = {
         "info_type": info_type,
@@ -20,4 +18,5 @@ def createZeroshot(hpo_dict):
     structured_llm = azure_llm.get_structured_llm(ZeroShotOutput)
     prompt = build_prompt(prompt_template, inputs)
     messages = [HumanMessage(content=prompt)]
-    return structured_llm.invoke(messages)
+    result = structured_llm.invoke(messages)
+    return result, prompt
