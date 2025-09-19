@@ -21,7 +21,7 @@ def format_webresources(webresources: list) -> str:
 
 def createDiagnosis(hpo_dict: dict[str,str], pubCaseFinder: List[PCFres], zeroShotResult, gestaltMatcherResult, webresources=None, absent_hpo_dict=None) -> Optional[DiagnosisOutput]:
     top_str = "\n".join(
-        [f"{i+1}. {item['omim_disease_name_en']} (score: {item['score']}) - {item['description']}" for i, item in enumerate(pubCaseFinder)]
+        [f"{i+1}. {item['omim_disease_name_en']} (score: {float(item['score']):.3f}) - {item['description']}" for i, item in enumerate(pubCaseFinder)]
     )
     zeroShotResult_str = ""
     if zeroShotResult and hasattr(zeroShotResult, "ans"):
@@ -33,8 +33,8 @@ def createDiagnosis(hpo_dict: dict[str,str], pubCaseFinder: List[PCFres], zeroSh
     gestaltMatcherResult_str = ""
     if gestaltMatcherResult:
         gestaltMatcherResult_str = "\n".join([
-            f"{i+1}. Disease Name: OMIM{item.get('omim_id', '')}:{item.get('syndrome_name', '')}), "
-            f"Distance: The distance from reference case of the disease is {item.get('distance', '')} in feature space."
+            f"{i+1}. OMIM{item.get('omim_id', '')}: {item.get('syndrome_name', '')})"
+            f" (Similarity score: {float(item.get('score', 0)):.3f})"
             for i, item in enumerate(gestaltMatcherResult)
         ])
     # --- Webリソースの整形 ---

@@ -56,9 +56,8 @@ def GestaltMatcherNode(state: State):
                 "subject_id": res.get("subject_id", ""),
                 "syndrome_name": res.get("syndrome_name", ""),
                 "omim_id": res.get("omim_id", ""),
-                "distance": res.get("distance"),
                 "image_id": res.get("image_id", ""),
-                "gestalt_score": res.get("gestalt_score")
+                "score": res.get("score")
             })
         return {"GestaltMatcher": syndrome_list}
     except Exception as e:

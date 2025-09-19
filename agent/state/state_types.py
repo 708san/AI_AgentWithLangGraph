@@ -68,9 +68,9 @@ class GestaltMatcherFormat(BaseModel):
     subject_id: str
     syndrome_name: str
     omim_id: str
-    distance: float
     image_id: str
-    gestalt_score: float
+    score: float
+    
 
 #---TypedDict ---
 class InformationItem(TypedDict):
