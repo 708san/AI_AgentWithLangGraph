@@ -198,9 +198,9 @@ Now, process the following text:
         graph_builder.add_edge("BeginningOfFlowNode", "createHPODictNode")
         graph_builder.add_edge("BeginningOfFlowNode", "GestaltMatcherNode")
         graph_builder.add_edge("BeginningOfFlowNode", "createAbsentHPODictNode")
-        graph_builder.add_edge("createHPODictNode", "createZeroShotNode")
+        graph_builder.add_edge(["createHPODictNode","createAbsentHPODictNode"], "createZeroShotNode")
         graph_builder.add_edge("createHPODictNode", "HPOwebSearchNode")
-        graph_builder.add_edge(["createZeroShotNode", "PCFnode", "GestaltMatcherNode", "HPOwebSearchNode", "createAbsentHPODictNode"], "createDiagnosisNode")
+        graph_builder.add_edge(["createZeroShotNode", "PCFnode", "GestaltMatcherNode", "HPOwebSearchNode"], "createDiagnosisNode")
         graph_builder.add_edge("createDiagnosisNode", "diseaseNormalizeNode")
         graph_builder.add_edge("diseaseNormalizeNode", "diseaseSearchNode")
         graph_builder.add_edge("diseaseSearchNode", "reflectionNode")
@@ -214,7 +214,7 @@ Now, process the following text:
         graph_builder.add_edge("diseaseNormalizeForFinalNode", END)
         return graph_builder.compile()
 
-    def run(self, hpo_list, image_path=None, verbose=True, absent_hpo_list=None):
+    def run(self, hpo_list, image_path=None, verbose=True, absent_hpo_list=None, onset=None, sex=None, patient_id=None):
         initial_state = {
             "depth": 0,
             "clinicalText": None,
@@ -227,7 +227,10 @@ Now, process the following text:
             "zeroShotResult": None,
             "memory": [],
             "tentativeDiagnosis": None,
-            "reflection": None
+            "reflection": None,
+            "onset": onset if onset else "Unknown",
+            "sex": sex if sex else "Unknown",
+            "patient_id": patient_id if patient_id else "unknown",
         }
         result = self.graph.invoke(initial_state)
         if verbose:

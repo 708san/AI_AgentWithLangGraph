@@ -13,6 +13,30 @@ from .tools.HPOwebReserch import search_hpo_terms
 
 from agent.llm.prompt import prompt_dict
 
+import os
+import json
+
+def save_node_result(node_name, result, patient_id):
+    res_dir = os.path.join(os.path.dirname(__file__), '../res')
+    os.makedirs(res_dir, exist_ok=True)
+    out_path = os.path.join(res_dir, f"{patient_id}.json")
+    # 既存ファイルがあれば読み込んで追記
+    if os.path.exists(out_path):
+        with open(out_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+    else:
+        data = {}
+    # Pydanticモデルやクラスインスタンスならdict化
+    if hasattr(result, "dict"):
+        data[node_name] = result.dict()
+    elif isinstance(result, list):
+        # リストの場合は各要素をdict化
+        data[node_name] = [r.dict() if hasattr(r, "dict") else r for r in result]
+    else:
+        data[node_name] = result
+    with open(out_path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
 def HPOwebSearchNode(state: State):
     print("HPOwebSearchNode called")
     try:
@@ -33,13 +57,19 @@ def BeginningOfFlowNode(state: State):
     
     return {"depth": state["depth"], "tentativeDiagnosis": None, "reflection": None}
 
+
 def PCFnode(state: State):
     print("PCFnode called")
     depth = state.get("depth", 0)
     hpo_list = state["hpoList"]
+    patient_id = state.get("patient_id", "unknown")
     if not hpo_list:
-        return {"pubCaseFinder": []}
-    return {"pubCaseFinder": callingPCF(hpo_list, depth)}
+        result = []
+        save_node_result("PCFnode", result, patient_id)
+        return {"pubCaseFinder": result}
+    result = callingPCF(hpo_list, depth)
+    save_node_result("PCFnode", result, patient_id)
+    return {"pubCaseFinder": result}
 
 def GestaltMatcherNode(state: State):
     print("GestaltMatcherNode called")
@@ -59,6 +89,8 @@ def GestaltMatcherNode(state: State):
                 "image_id": res.get("image_id", ""),
                 "score": res.get("score")
             })
+        patient_id = state.get("patient_id", "unknown")
+        save_node_result("GestaltMatcherNode", syndrome_list, patient_id)
         return {"GestaltMatcher": syndrome_list}
     except Exception as e:
         print(f"Error calling GestaltMatcher API: {e}")
@@ -79,14 +111,16 @@ def createAbsentHPODictNode(state: State):
 
 def createZeroShotNode(state: State):
     print("createZeroShotNode called")
+    patient_id = state.get("patient_id", "unknown")
     hpo_dict = state.get("hpoDict", {})
     absent_hpo_dict = state.get("absentHpoDict", {})
     if state.get("zeroShotResult") is not None:
         return {"zeroShotResult": state["zeroShotResult"]}
     if hpo_dict:
         # createZeroshotが(result, prompt)を返すように修正
-        result, prompt = createZeroshot(hpo_dict, absent_hpo_dict=absent_hpo_dict)
+        result, prompt = createZeroshot(hpo_dict, absent_hpo_dict=absent_hpo_dict,onset=state.get("onset", "Unknown"),sex=state.get("sex", "Unknown"))
         if result:
+            save_node_result("createZeroShotNode", result, patient_id)
             return {"result": {"zeroShotResult": result}, "prompt": prompt}
     return {"result": {"zeroShotResult": None}}
 
@@ -104,24 +138,33 @@ def createDiagnosisNode(state: State):
 
 
     if hpo_dict and pubCaseFinder:
-        result, prompt = createDiagnosis(hpo_dict, pubCaseFinder, zeroShotResult, gestaltMatcherResult, webresources, absent_hpo_dict=absent_hpo_dict)
+        result, prompt = createDiagnosis(hpo_dict, pubCaseFinder, zeroShotResult, gestaltMatcherResult, webresources, absent_hpo_dict=absent_hpo_dict, onset=state.get("onset", "Unknown"),
+    sex=state.get("sex", "Unknown"))
         return {"result": {"tentativeDiagnosis": result}, "prompt": prompt}
     return {"result": {"tentativeDiagnosis": None}}
+
+
 
 
 
 def diseaseNormalizeNode(state: State):
     print("diseaseNormalizeNode called")
     tentativeDiagnosis = state.get("tentativeDiagnosis", None)
+    patient_id = state.get("patient_id", "unknown")
     if tentativeDiagnosis is not None:
         normalizedDiagnosis = diseaseNormalizeForDiagnosis(tentativeDiagnosis)
+        save_node_result("diseaseNormalizeNode", normalizedDiagnosis, patient_id)
         return {"tentativeDiagnosis": normalizedDiagnosis}
+    save_node_result("diseaseNormalizeNode", None, patient_id)
     return {"tentativeDiagnosis": None}
+
 
 def dieaseSearchNode(state: State):
     print("diseaseSearchNode called")
     
     return diseaseSearchForDiagnosis(state)
+
+
 
 def reflectionNode(state: State):
     print("reflectionNode called")
@@ -129,17 +172,25 @@ def reflectionNode(state: State):
     hpo_dict = state.get("hpoDict", {})
     absent_hpo_dict = state.get("absentHpoDict", {})
     disease_knowledge = state.get("memory", [])
+    patient_id = state.get("patient_id", "unknown")
 
     if tentativeDiagnosis and hpo_dict:
         diagnosis_to_judge_lis = tentativeDiagnosis.ans
         reflection_result_list = []
         prompts = []
         for diagnosis_to_judge in diagnosis_to_judge_lis:
-            reflection_result, prompt = create_reflection(hpo_dict, diagnosis_to_judge, disease_knowledge, absent_hpo_dict=absent_hpo_dict)
+            reflection_result, prompt = create_reflection(
+                hpo_dict, diagnosis_to_judge, disease_knowledge,
+                absent_hpo_dict=absent_hpo_dict,
+                onset=state.get("onset", "Unknown"),
+                sex=state.get("sex", "Unknown")
+            )
             reflection_result_list.append(reflection_result)
             prompts.append(prompt)
         print(type(reflection_result_list[0]))
+        save_node_result("reflectionNode", [r.dict() if hasattr(r, "dict") else r for r in reflection_result_list], patient_id)
         return {"result": {"reflection": ReflectionOutput(ans=reflection_result_list)}, "prompt": "\n---\n".join(prompts)}
+    save_node_result("reflectionNode", None, patient_id)
     return {"result": {"reflection": None}}
 
 def finalDiagnosisNode(state: State):
@@ -147,10 +198,15 @@ def finalDiagnosisNode(state: State):
     finalDiagnosis, prompt = createFinalDiagnosis(state)
     return {"result": {"finalDiagnosis": finalDiagnosis}, "prompt": prompt}
 
+
+
 def diseaseNormalizeForFinalNode(state: State):
     print("diseaseNormalizeForFinalNode called")
     finalDiagnosis = state.get("finalDiagnosis", None)
+    patient_id = state.get("patient_id", "unknown")
     if finalDiagnosis is not None:
         normalizedDiagnosis = diseaseNormalizeForDiagnosis(finalDiagnosis)
+        save_node_result("diseaseNormalizeForFinalNode", normalizedDiagnosis, patient_id)
         return {"finalDiagnosis": normalizedDiagnosis}
+    save_node_result("diseaseNormalizeForFinalNode", None, patient_id)
     return {"finalDiagnosis": None}

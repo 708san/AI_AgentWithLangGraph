@@ -7,7 +7,7 @@ class AzureOpenAIWrapper:
             api_key=api_key,
             deployment_name=deployment_name,
             api_version=api_version,
-            temperature=0.2,
+            temperature=0.0,
         )
 
     def get_structured_llm(self, output_schema):

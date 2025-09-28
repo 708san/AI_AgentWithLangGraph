@@ -15,6 +15,8 @@ def createFinalDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     similar_case_detailed = state.get("clinicalText", "")
     tentative_result = state.get("tentativeDiagnosis", None)
     judgements = state.get("reflection", None)
+    onset=state.get("onset", "Unknown")
+    sex=state.get("sex", "Unknown")
 
     # Format tentativeDiagnosis (DiagnosisOutput type or None) as string, including reference
     if tentative_result is not None and hasattr(tentative_result, "ans"):
@@ -53,6 +55,8 @@ def createFinalDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     inputs = {
         "present_hpo": present_hpo,
         "absent_hpo": absent_hpo,
+        "onset": onset if onset else "Unknown",
+        "sex": sex if sex else "Unknown",
         "similar_case_detailed": similar_case_detailed_str,
         "tentative_result": tentative_result_str,
         "judgements": judgements_str

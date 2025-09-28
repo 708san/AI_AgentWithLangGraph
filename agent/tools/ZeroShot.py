@@ -4,7 +4,7 @@ from ..llm.prompt import prompt_dict, build_prompt
 from ..llm.azure_llm_instance import azure_llm
 
 
-def createZeroshot(hpo_dict, absent_hpo_dict=None):
+def createZeroshot(hpo_dict, absent_hpo_dict=None, onset=None, sex=None):
     """
     hpo_dictとabsent_hpo_dictを使ってZero-Shot診断プロンプトを作成し、LLMに投げる
     """
@@ -18,7 +18,9 @@ def createZeroshot(hpo_dict, absent_hpo_dict=None):
         prompt_dict["zero-shot-diagnosis-prompt"],
         {
             "present_hpo": present_hpo,
-            "absent_hpo": absent_hpo
+            "absent_hpo": absent_hpo,
+            "onset": onset if onset else "Unknown",
+            "sex": sex if sex else "Unknown"
         }
     )
 

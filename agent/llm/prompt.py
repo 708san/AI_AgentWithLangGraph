@@ -31,13 +31,17 @@ Now, perform this evaluation for the following case and provide the final output
 **2. Patient's Absent Phenotype (Absent HPO List):**
 {{absent_hpo_list}}
 
-**3. PubCaseFinder Report (Phenotype-based):**
+**3. Onset:** {{onset}}
+
+**4. Sex:** {{sex}}
+
+**5. PubCaseFinder Report (Phenotype-based):**
 {{pcf_result}}
 
-**4. Zero-Shot Diagnosis Report (Generative AI-based):**
+**6. Zero-Shot Diagnosis Report (Generative AI-based):**
 {{zeroShotResult}}
 
-**5. GestaltMatcher Report (Facial Dysmorphology-based):**
+**7. GestaltMatcher Report (Facial Dysmorphology-based):**
 {{gestaltMatcherResult}}""",
 
     "zero-shot-diagnosis-prompt": """You are a specialist in the field of rare diseases.
@@ -45,6 +49,8 @@ You will be provided and asked about a complicated clinical case; read it carefu
 
 Patient HPO terms (present): {present_hpo}
 Patient HPO terms (absent): {absent_hpo}
+Onset: {onset}
+Sex: {sex}
 
 Enumerate the top 5 most likely rare disease diagnoses that explain the patient's phenotype. Be precise. Prefer recently defined conditions and specific conditions over umbrella diagnoses.
 
@@ -87,11 +93,17 @@ Now, perform this evaluation for the following case.
 Proposed Diagnosis to Evaluate: {diagnosis_to_judge}
 Patient Phenotype (present): {present_hpo}
 Patient Phenotype (absent): {absent_hpo}
+Onset: {onset}
+Sex: {sex}
+
 Medical Literature: {disease_knowledge}""",
 
     "final_diagnosis_prompt": """You have access to the following information:
 - Patient presentation (present HPO): {present_hpo}
 - Patient presentation (absent HPO): {absent_hpo}
+- Onset: {onset}
+- Sex: {sex}
+
 # - Similar cases: {similar_case_detailed}
 - Primary diagnosis results (with references): {tentative_result}
 - Disease Reflection (with references): {judgements}

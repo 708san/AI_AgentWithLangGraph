@@ -28,6 +28,9 @@ class State(TypedDict):
     tentativeDiagnosis: Optional['DiagnosisOutput']
     reflection: Optional['ReflectionOutput']
     finalDiagnosis: Optional['DiagnosisOutput']
+    onset: Optional[str]
+    sex: Optional[str]
+    patient_id: Optional[str]
     
 # --- Pydantic Model for Zero-Shot Diagnosis Output ---
 class ZeroShotFormat(BaseModel):

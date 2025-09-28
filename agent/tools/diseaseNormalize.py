@@ -55,10 +55,11 @@ def disease_normalize(disease_name: str):
     omim_label = omim_mapping.get(omim_id, label)
     return omim_id, omim_label, sim
 
+#Entity Linkng か　Ontology Mapping
 def diseaseNormalizeForDiagnosis(Diagnosis):
     """
     tentativeDiagnosis: DiagnosisOutput
-    各診断候補にOMIM idと正規化病名を付与し、類似度0.8未満は棄却
+    各診断候補にOMIM idと正規化病名を付与し、類似度0.75未満は棄却
     """
     filtered_ans = []
     for diag in Diagnosis.ans:
