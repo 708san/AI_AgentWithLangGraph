@@ -21,20 +21,46 @@ HPO term list:
 Follow the instructions and generate 2 search queries in English.
 """,
    "summarize_results_prompt":  """ROLE:
-Act as a medical doctor summarizing a clinical article for a colleague.
+Act as a clinical geneticist specializing in the differential diagnosis of rare diseases. Your goal is to create a high-yield summary for a colleague to help them distinguish this condition from clinical mimics.
 
 TASK:
-Read the provided article text and summarize it into a single, concise paragraph.
+Read the provided article text and extract key clinical information into a structured summary designed specifically for differential diagnosis.
 
 INSTRUCTIONS:
 
-Primary Focus: The summary must concentrate on the core message, specifically the connection between phenotypes (clinical features) and their related diseases or syndromes.
+Primary Focus: The summary must concentrate strictly on clinically actionable information. The main purpose is to highlight features that differentiate the condition from other similar syndromes.
 
-Content Selection: Extract only the most critical information and key findings. Ignore background details, methodology, or tangential points.
+Content to Extract (Include ONLY these sections):
 
-Conditional Check: Before summarizing, first determine if the article is medically related. If the content is not about medicine, biology, or clinical science, you must ignore all other rules and output the exact phrase: not a medical-related page.
+Disease: The formal name of the syndrome or disorder.
 
-Output Format: If the article is medical, the final output must be a single paragraph only.
+Genetics: The causative gene(s) and inheritance pattern.
+
+Key Phenotypes: A concise, bulleted list of the core clinical features and symptoms.
+
+Differentiating Features: This is the most critical section. Extract features that are particularly useful for distinguishing this syndrome from others.
+
+Hallmark(s): List any signs that are highly specific, characteristic, or pathognomonic.
+
+Key Negative Finding(s): List important symptoms that are typically ABSENT in this condition but may be present in similar ones (e.g., "Absence of hyperphagia").
+
+Unique Constellation: Describe a specific combination of symptoms that, when seen together, points strongly to this diagnosis.
+
+Content to Exclude (Strictly Omit):
+
+Treatment, management, prognosis, or therapeutic strategies.
+
+Research methodology, study populations, or prevalence statistics.
+
+Patient case histories or demographic details.
+
+General background information that is not a distinguishing clinical feature.
+
+Conditional Check:
+Before summarizing, first determine if the article is medically related. If the content is not about medicine, biology, or clinical science, you must ignore all other rules and output the exact phrase: not a medical-related page.
+
+Output Format:
+If the article is medical, the final output must be a structured summary using the exact section headings listed above.
 
 ARTICLE TO SUMMARIZE:
 

@@ -6,7 +6,7 @@ from .tools.ZeroShot import createZeroshot
 from .tools.make_HPOdic import make_hpo_dic
 from .tools.reflection import create_reflection
 from .tools.diseaseSearch import diseaseSearchForDiagnosis
-from .tools.diseaseNormalize import diseaseNormalizeForDiagnosis, normalize_pcf_results, normalize_gestalt_results
+from .tools.diseaseNormalize import diseaseNormalizeForDiagnosis, normalize_pcf_results, normalize_gestalt_results, normalize_zeroshot_results
 from .tools.finalDiagnosis import createFinalDiagnosis
 from .tools.gestaltMathcher import call_gestalt_matcher_api
 from .tools.HPOwebReserch import search_hpo_terms
@@ -49,13 +49,13 @@ def PCFnode(state: State):
     return {"pubCaseFinder": result}
 
 
+
 def NormalizePCFNode(state: State):
     """PCFの結果に含まれる病名をOMIM IDに基づいて正規化する"""
     print("NormalizePCFNode called")
-    pcf_results = state.get("pubCaseFinder", [])
-    if not pcf_results:
+    normalized_results = normalize_pcf_results(state)
+    if not normalized_results:
         return {}
-    normalized_results = normalize_pcf_results(pcf_results)
     return {"pubCaseFinder": normalized_results}
 
 @save_result("GestaltMatcherNode")
@@ -86,10 +86,9 @@ def GestaltMatcherNode(state: State):
 def NormalizeGestaltMatcherNode(state: State):
     """GestaltMatcherの結果に含まれる病名をOMIM IDに基づいて正規化する"""
     print("NormalizeGestaltMatcherNode called")
-    gestalt_results = state.get("GestaltMatcher", [])
-    if not gestalt_results:
+    normalized_results = normalize_gestalt_results(state)
+    if not normalized_results:
         return {}
-    normalized_results = normalize_gestalt_results(gestalt_results)
     return {"GestaltMatcher": normalized_results}
 
 def createHPODictNode(state: State):
@@ -105,7 +104,6 @@ def createAbsentHPODictNode(state: State):
     return {"absentHpoDict": absent_hpo_dict}
 
 
-@save_result("createZeroShotNode")
 def createZeroShotNode(state: State):
     print("createZeroShotNode called")
     hpo_dict = state.get("hpoDict", {})
@@ -119,6 +117,18 @@ def createZeroShotNode(state: State):
             # promptはstateに保存しないので、ここでは返さない
             return {"zeroShotResult": result, "prompt": prompt}
     return {"zeroShotResult": None}
+
+
+@save_result("NormalizeZeroShotNode")
+def NormalizeZeroShotNode(state: State):
+    """ZeroShotの結果に含まれる病名を正規化し、重複を排除する"""
+    print("NormalizeZeroShotNode called")
+    # stateから値を取り出すのではなく、stateをそのまま渡す
+    normalized_result = normalize_zeroshot_results(state)
+    if not normalized_result:
+        return {}
+    # 既存のキー 'zeroShotResult' を上書きする
+    return {"zeroShotResult": normalized_result}
 
 
 @save_result("createDiagnosisNode")

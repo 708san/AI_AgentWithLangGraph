@@ -36,6 +36,7 @@ class State(TypedDict):
 class ZeroShotFormat(BaseModel):
     disease_name: str = Field(..., description="The formal name of the most likely rare disease, based solely on the patient's HPO terms.")
     rank: int = Field(..., description="The rank of the disease in the differential diagnosis list, where 1 is the most likely.")
+    OMIM_id: Optional[str] = Field(None, description="The OMIM identifier for the disease, if available.")
 
 class ZeroShotOutput(BaseModel):
     ans: List[ZeroShotFormat]

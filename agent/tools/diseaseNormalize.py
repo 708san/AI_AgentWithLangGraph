@@ -6,6 +6,7 @@ import re
 from openai import AzureOpenAI
 from dotenv import load_dotenv
 from typing import Optional
+from ..state.state_types import State,ZeroShotOutput
 
 load_dotenv()
 
@@ -53,10 +54,11 @@ omim_mapping_by_number = {
     if extract_omim_number(key)
 }
 
-def normalize_pcf_results(pcf_results: list) -> list:
+def normalize_pcf_results(state: State) -> list:
     """
-    PCFの結果リストを受け取り、OMIM IDに基づいて病名を正規化する。
+    Stateを受け取り、その中のPCFの結果リストを正規化する。
     """
+    pcf_results = state.get("pubCaseFinder", [])
     for result in pcf_results:
         omim_id_num = extract_omim_number(result.get("omim_id"))
         if omim_id_num and omim_id_num in omim_mapping_by_number:
@@ -64,10 +66,11 @@ def normalize_pcf_results(pcf_results: list) -> list:
     return pcf_results
 
 
-def normalize_gestalt_results(gestalt_results: list) -> list:
+def normalize_gestalt_results(state: State) -> list:
     """
-    GestaltMatcherの結果リストを受け取り、OMIM IDに基づいて病名を正規化する。
+    Stateを受け取り、その中のGestaltMatcherの結果リストを正規化する。
     """
+    gestalt_results = state.get("GestaltMatcher", [])
     for result in gestalt_results:
         omim_id_num = extract_omim_number(result.get("omim_id"))
         if omim_id_num and omim_id_num in omim_mapping_by_number:
@@ -75,6 +78,32 @@ def normalize_gestalt_results(gestalt_results: list) -> list:
             result["syndrome_name"] = omim_mapping_by_number[omim_id_num]
     return gestalt_results
 
+def normalize_zeroshot_results(state: State) -> Optional[ZeroShotOutput]:
+    """
+    Stateを受け取り、その中のZeroShotOutputを正規化し、OMIM IDを付与し、重複を排除する。
+    """
+    zeroshot_output = state.get("zeroShotResult")
+    if not zeroshot_output or not zeroshot_output.ans:
+        return zeroshot_output
+
+    unique_omim_ids = set()
+    normalized_ans = []
+
+    for diag in zeroshot_output.ans:
+        disease_name_upper = diag.disease_name.upper()
+        omim_id, omim_label, sim = disease_normalize(disease_name_upper)
+
+        # 類似度が高い場合のみ採用し、OMIM IDがユニークであることを確認
+        if sim >= 0.75 and omim_id not in unique_omim_ids:
+            diag.OMIM_id = omim_id
+            diag.disease_name = omim_label
+            normalized_ans.append(diag)
+            unique_omim_ids.add(omim_id)
+        else:
+            print(f"Filtered out {diag.disease_name} (OMIM: {omim_id}) due to low similarity ({sim:.2f}) or duplication.")
+    
+    zeroshot_output.ans = normalized_ans
+    return zeroshot_output
 
 def disease_normalize(disease_name: str):
     """

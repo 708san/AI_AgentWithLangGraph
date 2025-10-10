@@ -82,7 +82,7 @@ Briefly, in about three sentences, summarize the most critical clinical features
 - Synthesize: Combine the "FOR" and "AGAINST" points into a detailed, balanced analysis. This will become the value for DiagnosisAnalysis. Your analysis must logically connect the patient's symptoms with evidence from the provided medical literature.
 
 **Step 3: Extract Supporting References**
-From the provided "Medical Literature," extract a numbered list of direct quotes that support your analysis. Do not list URLs; extract the specific sentences. This list of strings will become the value for references.
+Extract and number the most relevant evidence from the provided medical literature that supports your conclusion. This list of strings will become the value for references.
 
 **Step 4: Determine Final Correctness**
 Based on your holistic analysis, determine the final Correctness.
