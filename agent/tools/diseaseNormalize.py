@@ -2,8 +2,10 @@ import os
 import numpy as np
 import faiss
 import json
+import re
 from openai import AzureOpenAI
 from dotenv import load_dotenv
+from typing import Optional
 
 load_dotenv()
 
@@ -29,21 +31,36 @@ INDEX_BIN = INDEX_BASE + ".bin"
 INDEX_JSON = INDEX_BASE + ".json"
 OMIM_MAPPING_JSON = os.path.join(os.path.dirname(__file__), "../data/DataForOmimMapping/omim_mapping.json")
 
+def extract_omim_number(omim_id_str: any) -> Optional[str]:
+    """OMIM ID文字列から数字部分のみを抽出する"""
+    if not omim_id_str or not isinstance(omim_id_str, (str, int)):
+        return None
+    
+    match = re.search(r'\d+', str(omim_id_str))
+    return match.group(0) if match else None
+
 # インデックスとマッピングのロード
 faiss_index = faiss.read_index(INDEX_BIN)
 with open(INDEX_JSON, encoding="utf-8") as f:
     index_map = json.load(f)
 with open(OMIM_MAPPING_JSON, encoding="utf-8") as f:
-    omim_mapping = json.load(f)
+    original_omim_mapping = json.load(f)
+
+# 数字IDをキーとする新しい検索用マッピングを作成
+omim_mapping_by_number = {
+    extract_omim_number(key): value 
+    for key, value in original_omim_mapping.items() 
+    if extract_omim_number(key)
+}
 
 def normalize_pcf_results(pcf_results: list) -> list:
     """
     PCFの結果リストを受け取り、OMIM IDに基づいて病名を正規化する。
     """
     for result in pcf_results:
-        omim_id = result.get("omim_id")
-        if omim_id and omim_id in omim_mapping:
-            result["disease_name"] = omim_mapping[omim_id]
+        omim_id_num = extract_omim_number(result.get("omim_id"))
+        if omim_id_num and omim_id_num in omim_mapping_by_number:
+            result["disease_name"] = omim_mapping_by_number[omim_id_num]
     return pcf_results
 
 
@@ -52,13 +69,17 @@ def normalize_gestalt_results(gestalt_results: list) -> list:
     GestaltMatcherの結果リストを受け取り、OMIM IDに基づいて病名を正規化する。
     """
     for result in gestalt_results:
-        omim_id = result.get("omim_id")
-        if omim_id and omim_id in omim_mapping:
-            result["syndrome"] = omim_mapping[omim_id] # 'syndrome'キーを更新
+        omim_id_num = extract_omim_number(result.get("omim_id"))
+        if omim_id_num and omim_id_num in omim_mapping_by_number:
+            # GestaltMatcherの出力キーに合わせて 'syndrome_name' を更新
+            result["syndrome_name"] = omim_mapping_by_number[omim_id_num]
     return gestalt_results
 
 
 def disease_normalize(disease_name: str):
+    """
+    疾患名をembeddingし、FAISSインデックスで最も類似するOMIM IDと正規化病名を返す。
+    """
     # 疾患名をembedding
     response = client.embeddings.create(
         model=deployment_name,
@@ -66,23 +87,30 @@ def disease_normalize(disease_name: str):
     )
     query_embedding = np.array(response.data[0].embedding, dtype="float32").reshape(1, -1)
     faiss.normalize_L2(query_embedding)
+    
     # 類似度最大のインデックスを取得
     distance, indices = faiss_index.search(query_embedding, 1)
     idx = indices[0][0]
     sim = float(distance[0][0])  # コサイン類似度
-    omim_id = index_map["omim_ids"][idx]
-    label = index_map["labels"][idx]
+    
+    omim_id_from_index = index_map["omim_ids"][idx]
+    label_from_index = index_map["labels"][idx]
+    
     # omim_mapping.jsonから正式病名を取得
-    omim_label = omim_mapping.get(omim_id, label)
-    return omim_id, omim_label, sim
+    omim_id_num = extract_omim_number(omim_id_from_index)
+    omim_label = omim_mapping_by_number.get(omim_id_num, label_from_index)
+    
+    return omim_id_from_index, omim_label, sim
 
-#Entity Linkng か　Ontology Mapping
 def diseaseNormalizeForDiagnosis(Diagnosis):
     """
     tentativeDiagnosis: DiagnosisOutput
     各診断候補にOMIM idと正規化病名を付与し、類似度0.75未満は棄却
     """
     filtered_ans = []
+    if not hasattr(Diagnosis, "ans"):
+        return Diagnosis
+        
     for diag in Diagnosis.ans:
         disease_name_upper = diag.disease_name.upper()
         omim_id, omim_label, sim = disease_normalize(disease_name_upper)

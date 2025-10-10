@@ -3,6 +3,7 @@ import datetime
 import json
 from langgraph.graph import StateGraph, START, END
 from agent.state.state_types import State, ZeroShotOutput, DiagnosisOutput, ReflectionOutput
+from agent.utils.logger import log_node_result
 
 from agent.nodes import (
     PCFnode, createDiagnosisNode, createZeroShotNode, createHPODictNode,createAbsentHPODictNode, 
@@ -42,118 +43,9 @@ class RareDiseaseDiagnosisPipeline:
             f.write("\n\n")
 
     def _log(self, node_name, result):
-        if not self.enable_log or not self.logfile_path:
+        if not self.enable_log:
             return
-        with open(self.logfile_path, "a", encoding="utf-8") as f:
-            f.write(f"\n=== {node_name} ===\n")
-            # diseaseSearchNodeの直後にSummarize Prompt for DiseaseSearchを表示
-            if node_name == "diseaseSearchNode":
-                f.write("\n----- Summarize Prompt for DiseaseSearch -----\n")
-                f.write("""
-You are an expert clinical geneticist and a diagnostician. Your critical task is to analyze a medical text and convert it into a high-yield, structured summary designed specifically for differential diagnosis. Your output must not only list symptoms but also highlight features that distinguish the condition from its clinical mimics.
-
-Instructions:
-
-From the text I provide, generate a summary strictly following these rules:
-
-1. Information to Extract (Include ONLY these):
-
-Disease: The name of the syndrome or disorder.
-
-Genetics: The causative gene(s) and inheritance pattern. If not specified, state "Not specified".
-
-Key Phenotypes: A concise, bulleted list of the core clinical features and symptoms.
-
-Differentiating Features: This is the most critical section. Extract features that are particularly useful for distinguishing this syndrome from others. This includes:
-
-Hallmark signs: Features that are highly characteristic or pathognomonic.
-
-Key negative findings: Symptoms typically ABSENT in this condition but present in similar ones (e.g., "Absence of hyperphagia").
-
-Unique constellations: A specific combination of symptoms that points strongly to this diagnosis.
-
-2. Information to Exclude (Strictly Omit):
-
-Patient case histories, family origins, or demographic details.
-
-Treatment, management, or therapeutic strategies.
-
-Research methodology, study populations, or author details.
-
-Prognosis, mortality, or prevalence statistics.
-
-General background information that isn't a clinical feature.
-
-3. Output Format (Use this exact structure):
-
-Disease: [Name of the disease]
-Genetics: [Gene(s), Inheritance pattern]
-Key Phenotypes:
-
-[Bulleted list of core clinical features]
-
-[Example: Intellectual disability]
-
-[Example: Craniofacial dysmorphism]
-Differentiating Features:
-
-Hallmark(s): [List highly specific or unique signs.]
-
-Key Negative Finding(s): [List what is typically absent, e.g., "Absence of..."]
-
-Unique Constellation: [Describe a diagnostically powerful combination of symptoms.]
-
-Now, process the following text:
-"""
-)
-                f.write("----- End Summarize Prompt for DiseaseSearch -----\n\n")
-            try:
-                # プロンプト付きのdictの場合はプロンプトも出力
-                if isinstance(result, dict) and "prompt" in result:
-                    prompt = result["prompt"]
-                    if node_name == "reflectionNode" and prompt.strip():
-                        prompts = prompt.split("\n---\n") if "\n---\n" in prompt else prompt.split("\n\n")
-                        ans_list = result.get("result", result)
-                        ans_list = getattr(ans_list, "ans", None) or []
-                        for i, p in enumerate(prompts):
-                            disease_name = ""
-                            if i < len(ans_list):
-                                disease_name = getattr(ans_list[i], "disease_name", f"#{i+1}")
-                            f.write(f"\n----- Reflection Prompt for: {disease_name} -----\n")
-                            f.write(p.strip() + "\n")
-                            f.write("----- End Reflection Prompt -----\n")
-                    else:
-                        f.write("\n----- Prompt Start -----\n")
-                        f.write(prompt.strip() + "\n")
-                        f.write("----- Prompt End -----\n")
-                    f.write("Result:\n")
-                    result = result.get("result", result)
-                # ZeroShotOutput, DiagnosisOutput, ReflectionOutputはpydanticモデル
-                if isinstance(result, ZeroShotOutput) or isinstance(result, DiagnosisOutput) or isinstance(result, ReflectionOutput):
-                    f.write(result.model_dump_json(indent=2, ensure_ascii=False))
-                elif hasattr(result, "dict"):
-                    f.write(json.dumps(result.dict(), ensure_ascii=False, indent=2))
-                elif isinstance(result, dict):
-                    def default(o):
-                        if hasattr(o, "model_dump"):
-                            return o.model_dump()
-                        if hasattr(o, "dict"):
-                            return o.dict()
-                        return str(o)
-                    f.write(json.dumps(result, ensure_ascii=False, indent=2, default=default))
-                elif isinstance(result, list):
-                    for item in result:
-                        if hasattr(item, "model_dump_json"):
-                            f.write(item.model_dump_json(indent=2, ensure_ascii=False) + "\n")
-                        elif hasattr(item, "dict"):
-                            f.write(json.dumps(item.dict(), ensure_ascii=False, indent=2) + "\n")
-                        else:
-                            f.write(str(item) + "\n")
-                else:
-                    f.write(str(result))
-            except Exception as e:
-                f.write(f"ログ整形エラー: {e}\n")
-            f.write("\n")
+        log_node_result(self.logfile_path, node_name, result)
 
     def _build_graph(self):
         graph_builder = StateGraph(State)

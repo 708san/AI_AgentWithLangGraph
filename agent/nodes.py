@@ -48,7 +48,7 @@ def PCFnode(state: State):
     result = callingPCF(hpo_list, depth)
     return {"pubCaseFinder": result}
 
-@save_result("NormalizePCFNode")
+
 def NormalizePCFNode(state: State):
     """PCFの結果に含まれる病名をOMIM IDに基づいて正規化する"""
     print("NormalizePCFNode called")
@@ -82,7 +82,7 @@ def GestaltMatcherNode(state: State):
         print(f"Error calling GestaltMatcher API: {e}")
         return {"GestaltMatcher": []}
     
-@save_result("NormalizeGestaltMatcherNode")
+
 def NormalizeGestaltMatcherNode(state: State):
     """GestaltMatcherの結果に含まれる病名をOMIM IDに基づいて正規化する"""
     print("NormalizeGestaltMatcherNode called")
@@ -117,7 +117,7 @@ def createZeroShotNode(state: State):
         result, prompt = createZeroshot(hpo_dict, absent_hpo_dict=absent_hpo_dict,onset=state.get("onset", "Unknown"),sex=state.get("sex", "Unknown"))
         if result:
             # promptはstateに保存しないので、ここでは返さない
-            return {"zeroShotResult": result}
+            return {"zeroShotResult": result, "prompt": prompt}
     return {"zeroShotResult": None}
 
 
@@ -136,7 +136,7 @@ def createDiagnosisNode(state: State):
     if hpo_dict and pubCaseFinder:
         result, prompt = createDiagnosis(hpo_dict, pubCaseFinder, zeroShotResult, gestaltMatcherResult, webresources, absent_hpo_dict=absent_hpo_dict, onset=state.get("onset", "Unknown"),
     sex=state.get("sex", "Unknown"))
-        return {"tentativeDiagnosis": result}
+        return {"tentativeDiagnosis": result, "prompt": prompt}
     return {"tentativeDiagnosis": None}
 
 
@@ -180,14 +180,14 @@ def reflectionNode(state: State):
             reflection_result_list.append(reflection_result)
             prompts.append(prompt)
         print(type(reflection_result_list[0]))
-        return {"reflection": ReflectionOutput(ans=reflection_result_list)}
+        return {"reflection": ReflectionOutput(ans=reflection_result_list), "prompt": "\n---\n".join(prompts)}
     return {"reflection": None}
 
 @save_result("finalDiagnosisNode")
 def finalDiagnosisNode(state: State):
     print("finalDiagnosisNode called")
     finalDiagnosis, prompt = createFinalDiagnosis(state)
-    return {"finalDiagnosis": finalDiagnosis}
+    return {"finalDiagnosis": finalDiagnosis, "prompt": prompt}
 
 
 @save_result("diseaseNormalizeForFinalNode")
