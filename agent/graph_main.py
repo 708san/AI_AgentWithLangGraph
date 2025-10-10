@@ -24,7 +24,7 @@ graph_builder.add_node("NormalizeGestaltMatcherNode", NormalizeGestaltMatcherNod
 graph_builder.add_node("createHPODictNode", createHPODictNode)
 graph_builder.add_node("createDiagnosisNode", createDiagnosisNode)
 graph_builder.add_node("diseaseNormalizeNode", diseaseNormalizeNode)
-graph_builder.add_node("diseaseSearchNode", diseaseSearchNode)  # Placeholder for disease search node
+graph_builder.add_node("diseaseSearchNode", diseaseSearchNode) 
 graph_builder.add_node("reflectionNode", reflectionNode)
 graph_builder.add_node("finalDiagnosisNode", finalDiagnosisNode)
 

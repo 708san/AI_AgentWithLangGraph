@@ -1,4 +1,4 @@
-NUM_DIAGNOSES = 5
+NUM_DIAGNOSES = 8
 
 prompt_dict = {
     "diagnosis_prompt": f"""You are a senior clinical geneticist acting as a lead diagnostician. You have received preliminary reports from three different sources: a phenotype-based analysis (PubCaseFinder), a generative AI analysis (Zero-Shot Diagnosis), and an expert facial dysmorphology analysis (GestaltMatcher). Your task is to synthesize these disparate findings into a single, cohesive differential diagnosis, re-ranking the candidates based on the convergence and strength of evidence.
