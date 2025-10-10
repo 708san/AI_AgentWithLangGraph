@@ -6,7 +6,7 @@ from .tools.ZeroShot import createZeroshot
 from .tools.make_HPOdic import make_hpo_dic
 from .tools.reflection import create_reflection
 from .tools.diseaseSearch import diseaseSearchForDiagnosis
-from .tools.diseaseNormalize import diseaseNormalizeForDiagnosis
+from .tools.diseaseNormalize import diseaseNormalizeForDiagnosis, normalize_pcf_results, normalize_gestalt_results
 from .tools.finalDiagnosis import createFinalDiagnosis
 from .tools.gestaltMathcher import call_gestalt_matcher_api
 from .tools.HPOwebReserch import search_hpo_terms
@@ -38,7 +38,7 @@ def BeginningOfFlowNode(state: State):
     return {"depth": state["depth"], "tentativeDiagnosis": None, "reflection": None}
 
 
-@save_result("PCFnode")
+@save_result("PCFNode")
 def PCFnode(state: State):
     print("PCFnode called")
     depth = state.get("depth", 0)
@@ -47,6 +47,16 @@ def PCFnode(state: State):
         return {"pubCaseFinder": []}
     result = callingPCF(hpo_list, depth)
     return {"pubCaseFinder": result}
+
+@save_result("NormalizePCFNode")
+def NormalizePCFNode(state: State):
+    """PCFの結果に含まれる病名をOMIM IDに基づいて正規化する"""
+    print("NormalizePCFNode called")
+    pcf_results = state.get("pubCaseFinder", [])
+    if not pcf_results:
+        return {}
+    normalized_results = normalize_pcf_results(pcf_results)
+    return {"pubCaseFinder": normalized_results}
 
 @save_result("GestaltMatcherNode")
 def GestaltMatcherNode(state: State):
@@ -71,6 +81,16 @@ def GestaltMatcherNode(state: State):
     except Exception as e:
         print(f"Error calling GestaltMatcher API: {e}")
         return {"GestaltMatcher": []}
+    
+@save_result("NormalizeGestaltMatcherNode")
+def NormalizeGestaltMatcherNode(state: State):
+    """GestaltMatcherの結果に含まれる病名をOMIM IDに基づいて正規化する"""
+    print("NormalizeGestaltMatcherNode called")
+    gestalt_results = state.get("GestaltMatcher", [])
+    if not gestalt_results:
+        return {}
+    normalized_results = normalize_gestalt_results(gestalt_results)
+    return {"GestaltMatcher": normalized_results}
 
 def createHPODictNode(state: State):
     print("createHPODictNode called")
@@ -131,7 +151,7 @@ def diseaseNormalizeNode(state: State):
     return {"tentativeDiagnosis": None}
 
 
-def dieaseSearchNode(state: State):
+def diseaseSearchNode(state: State):
     print("diseaseSearchNode called")
     
     return diseaseSearchForDiagnosis(state)

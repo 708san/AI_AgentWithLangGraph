@@ -36,6 +36,27 @@ with open(INDEX_JSON, encoding="utf-8") as f:
 with open(OMIM_MAPPING_JSON, encoding="utf-8") as f:
     omim_mapping = json.load(f)
 
+def normalize_pcf_results(pcf_results: list) -> list:
+    """
+    PCFの結果リストを受け取り、OMIM IDに基づいて病名を正規化する。
+    """
+    for result in pcf_results:
+        omim_id = result.get("omim_id")
+        if omim_id and omim_id in omim_mapping:
+            result["disease_name"] = omim_mapping[omim_id]
+    return pcf_results
+
+
+def normalize_gestalt_results(gestalt_results: list) -> list:
+    """
+    GestaltMatcherの結果リストを受け取り、OMIM IDに基づいて病名を正規化する。
+    """
+    for result in gestalt_results:
+        omim_id = result.get("omim_id")
+        if omim_id and omim_id in omim_mapping:
+            result["syndrome"] = omim_mapping[omim_id] # 'syndrome'キーを更新
+    return gestalt_results
+
 
 def disease_normalize(disease_name: str):
     # 疾患名をembedding

@@ -7,9 +7,9 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agent.state.state_types import State
 from agent.nodes import (
-    PCFnode, createDiagnosisNode, createZeroShotNode, createHPODictNode,
-    diseaseNormalizeNode, dieaseSearchNode, reflectionNode,
-    BeginningOfFlowNode, finalDiagnosisNode, GestaltMatcherNode
+    PCFnode, NormalizePCFNode, createDiagnosisNode, createZeroShotNode, createHPODictNode,
+    diseaseNormalizeNode, diseaseSearchNode, reflectionNode,
+    BeginningOfFlowNode, finalDiagnosisNode, GestaltMatcherNode, NormalizeGestaltMatcherNode,
 )
 
 
@@ -19,10 +19,12 @@ graph_builder.add_node("BeginningOfFlowNode", BeginningOfFlowNode)
 graph_builder.add_node("createZeroShotNode", createZeroShotNode)
 graph_builder.add_node("PCFnode", PCFnode)
 graph_builder.add_node("GestaltMatcherNode", GestaltMatcherNode)
+graph_builder.add_node("NormalizePCFNode", NormalizePCFNode)
+graph_builder.add_node("NormalizeGestaltMatcherNode", NormalizeGestaltMatcherNode)
 graph_builder.add_node("createHPODictNode", createHPODictNode)
 graph_builder.add_node("createDiagnosisNode", createDiagnosisNode)
 graph_builder.add_node("diseaseNormalizeNode", diseaseNormalizeNode)
-graph_builder.add_node("diseaseSearchNode", dieaseSearchNode)  # Placeholder for disease search node
+graph_builder.add_node("diseaseSearchNode", diseaseSearchNode)  # Placeholder for disease search node
 graph_builder.add_node("reflectionNode", reflectionNode)
 graph_builder.add_node("finalDiagnosisNode", finalDiagnosisNode)
 
@@ -48,10 +50,12 @@ def after_reflection_edge(state: State):
 
 graph_builder.add_edge(START, "BeginningOfFlowNode")
 graph_builder.add_edge( "BeginningOfFlowNode", "PCFnode")
+graph_builder.add_edge("PCFnode", "NormalizePCFNode")
 graph_builder.add_edge( "BeginningOfFlowNode", "createHPODictNode")
 graph_builder.add_edge( "BeginningOfFlowNode", "GestaltMatcherNode")
+graph_builder.add_edge("GestaltMatcherNode", "NormalizeGestaltMatcherNode")
 graph_builder.add_edge("createHPODictNode", "createZeroShotNode")
-graph_builder.add_edge(["createZeroShotNode", "PCFnode", "GestaltMatcherNode"], "createDiagnosisNode")
+graph_builder.add_edge(["createZeroShotNode", "NormalizePCFNode", "NormalizeGestaltMatcherNode"], "createDiagnosisNode")
 graph_builder.add_edge("createDiagnosisNode", "diseaseNormalizeNode")
 graph_builder.add_edge("diseaseNormalizeNode", "diseaseSearchNode")
 graph_builder.add_edge("diseaseSearchNode", "reflectionNode")
