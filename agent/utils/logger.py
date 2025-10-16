@@ -1,5 +1,5 @@
 import json
-from agent.state.state_types import ZeroShotOutput, DiagnosisOutput, ReflectionOutput
+from agent.state.state_types import ZeroShotOutput, DiagnosisOutput, ReflectionOutput, PhenotypeSearchFormat
 
 def _write_disease_search_prompt(f):
     """diseaseSearchNode用の固定プロンプトを書き込む"""
@@ -106,6 +106,10 @@ def _format_and_write_result(f, result):
                 f.write(json.dumps(item.dict(), ensure_ascii=False, indent=2) + "\n")
             else:
                 f.write(str(item) + "\n")
+    elif isinstance(result, list) and all(isinstance(item, PhenotypeSearchFormat) for item in result):
+        f.write("Top similar diseases from phenotype search:\n")
+        for item in result:
+            f.write(f"  - {item.disease_info.disease_name} (OMIM: {item.disease_info.OMIM_id}, Score: {item.similarity_score:.4f})\n")
     else:
         f.write(str(result))
 

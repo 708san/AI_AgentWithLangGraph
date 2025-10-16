@@ -10,11 +10,20 @@ from .tools.diseaseNormalize import diseaseNormalizeForDiagnosis, normalize_pcf_
 from .tools.finalDiagnosis import createFinalDiagnosis
 from .tools.gestaltMathcher import call_gestalt_matcher_api
 from .tools.HPOwebReserch import search_hpo_terms
+from .tools.embeddingSearchWithHPO import embedding_search_with_hpo
 
 from .utils.result_saver import save_result
 
 import os
 import json
+
+def BeginningOfFlowNode(state: State):
+    print("BeginningOfFlowNode called")
+    state["depth"] += 1
+    print(f"Current depth: {state['depth']}")
+    # reset Diagnosis and Reflection when starting a new flow
+    
+    return {"depth": state["depth"], "tentativeDiagnosis": None, "reflection": None}
 
 @save_result("HPOwebSearchNode")
 def HPOwebSearchNode(state: State):
@@ -29,13 +38,25 @@ def HPOwebSearchNode(state: State):
         print(f"Error in HPOwebSearchNode: {e}")
         return {"webresources": state.get("webresources", [])}
     
-def BeginningOfFlowNode(state: State):
-    print("BeginningOfFlowNode called")
-    state["depth"] += 1
-    print(f"Current depth: {state['depth']}")
-    # reset Diagnosis and Reflection when starting a new flow
+@save_result("DiseaseSearchWithHPONode")
+def DiseaseSearchWithHPONode(state: State):
+    """
+    Searches for diseases with similar phenotypes based on the patient's HPO list using embedding vector search.
+    """
+    print("DiseaseSearchWithHPONode called")
+
+    # Following the design principle of passing the state to tool functions.
+    # It is expected that the search_phenotypes_by_embedding function will:
+    # 1. Extract the hpo_list from the state.
+    # 2. Execute the search.
+    # 3. Return the results as a List[PhenotypeSearchFormat].
+    search_results = embedding_search_with_hpo(state)
     
-    return {"depth": state["depth"], "tentativeDiagnosis": None, "reflection": None}
+    if not search_results:
+        print("Phenotype search returned no results.")
+        return {}
+        
+    return {"phenotypeSearchResult": search_results}
 
 
 @save_result("PCFNode")
@@ -133,21 +154,19 @@ def NormalizeZeroShotNode(state: State):
 
 @save_result("createDiagnosisNode")
 def createDiagnosisNode(state: State):
-    # To integrate streamss from both ZeroShot and PCF before diagnosis
-    print("DiagnosisNode called")
-    hpo_dict = state.get("hpoDict", {})
-    absent_hpo_dict = state.get("absentHpoDict", {})
-    pubCaseFinder = state.get("pubCaseFinder", [])
-    zeroShotResult = state.get("zeroShotResult", None)
-    gestaltMatcherResult = state.get("GestaltMatcher", None)
-    webresources = state.get("webresources", [])
-
-
-    if hpo_dict and pubCaseFinder:
-        result, prompt = createDiagnosis(hpo_dict, pubCaseFinder, zeroShotResult, gestaltMatcherResult, webresources, absent_hpo_dict=absent_hpo_dict, onset=state.get("onset", "Unknown"),
-    sex=state.get("sex", "Unknown"))
+    """
+    Gathers all preliminary reports and generates a tentative diagnosis by synthesizing them.
+    """
+    print("createDiagnosisNode called")
+    
+    # The createDiagnosis function now takes the entire state as input.
+    # It will handle extracting all necessary information internally.
+    result, prompt = createDiagnosis(state)
+    
+    if result:
         return {"tentativeDiagnosis": result, "prompt": prompt}
-    return {"tentativeDiagnosis": None}
+    
+    return {}
 
 
 

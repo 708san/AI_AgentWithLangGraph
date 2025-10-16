@@ -1,65 +1,65 @@
+import json
+from typing import List, Optional
 from langchain.schema import HumanMessage
-from typing_extensions import List, Optional
-from ..state.state_types import PCFres, DiagnosisOutput
-from ..llm.prompt import prompt_dict, build_prompt
-from ..llm.azure_llm_instance import azure_llm
+from ..state.state_types import State, DiagnosisOutput, ZeroShotOutput, PCFres, PhenotypeSearchFormat
+from ..llm.prompt import prompt_dict
+from ..llm.azure_llm_instance import azure_llm # get_structured_llmを直接使うためにインポート
 
-def format_webresources(webresources: list) -> str:
+def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     """
-    Webリソースリストを診断プロンプト用のテキストに整形
+    Integrates multiple information sources (PCF, ZeroShot, GestaltMatcher, PhenotypeSearch) 
+    to generate a tentative diagnosis.
     """
-    if not webresources:
-        return "No relevant web search results found."
-    lines = []
-    for i, res in enumerate(webresources, 1):
-        title = res.get("title", "")
-        url = res.get("url", "")
-        snippet = res.get("snippet", "")
-        lines.append(f"{i}. {title}\nURL: {url}\nSummary: {snippet}")
-    return "\n".join(lines)
+    hpo_list = state.get("hpo_list", [])
+    absent_hpo_list = list(state.get("absentHpoDict", {}).values())
+    onset = state.get("onset", "Unknown")
+    sex = state.get("sex", "Unknown")
+    pcf_results = state.get("pubCaseFinder", [])
+    zeroshot_results = state.get("zeroShotResult")
+    gestalt_matcher_results = state.get("GestaltMatcher", [])
+    web_search_results = state.get("webresources", [])
+    phenotype_search_results = state.get("phenotypeSearchResult", [])
 
+    # --- Format each result into a string for the prompt ---
+    
+    # PCF results
+    pcf_text = "\n".join([f"{i+1}. {res.get('disease_name', res.get('omim_disease_name_en', 'N/A'))} (score: {res.get('score', 0):.3f}) - {res.get('description', '')}" for i, res in enumerate(pcf_results)]) if pcf_results else "No results from PubCaseFinder."
 
-def createDiagnosis(hpo_dict: dict[str,str], pubCaseFinder: List[PCFres], zeroShotResult, gestaltMatcherResult, webresources=None, absent_hpo_dict=None, onset=None, sex=None) -> Optional[DiagnosisOutput]:
-    top_str = "\n".join(
-        [f"{i+1}. {item['omim_disease_name_en']} (score: {float(item['score']):.3f}) - {item['description']}" for i, item in enumerate(pubCaseFinder)]
+    # Zero-shot results
+    zeroshot_text = "\n".join([f"{i+1}. {res.disease_name} (rank: {res.rank})" for i, res in enumerate(zeroshot_results.ans)]) if zeroshot_results and zeroshot_results.ans else "No results from Zero-Shot Diagnosis."
+
+    # GestaltMatcher results
+    gm_text = "\n".join([f"{i+1}. {res.get('syndrome_name', 'N/A')}) (Similarity score: {res.get('score', 0):.3f})" for i, res in enumerate(gestalt_matcher_results)]) if gestalt_matcher_results else "No results from GestaltMatcher."
+
+    # Web search results
+    web_text = "\n".join([f"- {res.get('title', 'No Title')}: {res.get('content', 'No Content')}" for res in web_search_results]) if web_search_results else "No relevant web search results found."
+    # Phenotype search results
+    phenotype_search_text = "\n".join([f"{i+1}. {res.disease_info.disease_name} (OMIM: {res.disease_info.OMIM_id}, Similarity score: {res.similarity_score:.3f})" for i, res in enumerate(phenotype_search_results)]) if phenotype_search_results else "No results from Phenotype Similarity Search."
+
+    # Assemble the prompt
+    prompt = prompt_dict["diagnosis_prompt"].format(
+        hpo_list=", ".join(hpo_list),
+        absent_hpo_list=", ".join(absent_hpo_list),
+        onset=onset,
+        sex=sex,
+        pcf_results=pcf_text,
+        zeroshot_results=zeroshot_text,
+        gestalt_matcher_results=gm_text,
+        phenotype_search_results=phenotype_search_text,
+        web_search_results=web_text
     )
-    zeroShotResult_str = ""
-    if zeroShotResult and hasattr(zeroShotResult, "ans"):
-        zeroShotResult_str = "\n".join([
-            f"{i+1}. {item.disease_name} (rank: {item.rank})"
-            for i, item in enumerate(zeroShotResult.ans)
-        ])
-    # --- GestaltMatcherの結果を整形 ---
-    gestaltMatcherResult_str = ""
-    if gestaltMatcherResult:
-        gestaltMatcherResult_str = "\n".join([
-            f"{i+1}. {item.get('syndrome_name', '')})"
-            f" (Similarity score: {float(item.get('score', 0)):.3f})"
-            for i, item in enumerate(gestaltMatcherResult)
-        ])
-    # --- Webリソースの整形 ---
-    webresources_str = format_webresources(webresources) if webresources is not None else "No web search results provided."
-    # ---------------------------------
 
-    inputs = {
-        "hpo_list": ", ".join([v for k, v in hpo_dict.items()]),
-        "absent_hpo_list": ", ".join([v for k, v in (absent_hpo_dict or {}).items()]),
-        "onset": onset if onset else "Unknown",
-        "sex": sex if sex else "Unknown", 
-        "pcf_result": top_str,
-        "zeroShotResult": zeroShotResult_str,
-        "gestaltMatcherResult": gestaltMatcherResult_str,
-        "web_search_results": webresources_str
-    }
-    # プロンプトテンプレートにweb_search_resultsを追加する必要あり
-    prompt_template = (
-        prompt_dict["diagnosis_prompt"] +
-        "\n**6. Web Search Results (Literature/Case Reports):**\n{web_search_results}\n"
-    )
+    # --- Query the LLM to get the diagnosis result ---
+    # Get a structured LLM instance that outputs in the DiagnosisOutput format
     structured_llm = azure_llm.get_structured_llm(DiagnosisOutput)
 
-    prompt = build_prompt(prompt_template, inputs)
-
+    # Create the message payload for the LLM
     messages = [HumanMessage(content=prompt)]
-    result = structured_llm.invoke(messages)
-    return result, prompt
+    
+    # Invoke the LLM and get the structured result
+    diagnosis_json = structured_llm.invoke(messages)
+    
+    if diagnosis_json:
+        return (diagnosis_json, prompt)
+    
+    return None

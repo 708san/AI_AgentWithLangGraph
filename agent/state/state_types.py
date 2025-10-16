@@ -21,6 +21,7 @@ class State(TypedDict):
     absentHpoDict: dict[str, str] 
     pubCaseFinder: List[PCFres]
     GestaltMatcher: List['GestaltMatcherFormat']
+    phenotypeSearchResult: Optional[List['PhenotypeSearchFormat']]
     webresources: List['webresource']
     # evidence are stored in memory
     memory: List['InformationItem']
@@ -40,6 +41,7 @@ class ZeroShotFormat(BaseModel):
 
 class ZeroShotOutput(BaseModel):
     ans: List[ZeroShotFormat]
+
 
 # --- Pydantic Models for Tentative Diagnosis Output ---
 class DiagnosisFormat(BaseModel):
@@ -88,3 +90,16 @@ class webresource(TypedDict):
     title: str
     url: str
     snippet: str
+
+# --- Pydantic Model for Phenotype-based Embedding Search Output (新規追加) ---
+class OMIMEntry(BaseModel):
+    OMIM_id: str
+    disease_name: str
+    synonym: Optional[str] = None
+    definition: Optional[str] = None
+    phenotype: Optional[List[str]] = None
+
+
+class PhenotypeSearchFormat(BaseModel):
+    disease_info: OMIMEntry = Field(..., description="Information about the disease from the OMIM database.")
+    similarity_score: float = Field(..., description="Cosine similarity score with the patient's phenotypes.")

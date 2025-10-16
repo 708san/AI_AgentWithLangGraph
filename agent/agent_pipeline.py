@@ -10,7 +10,7 @@ from agent.nodes import (
     diseaseNormalizeNode, diseaseSearchNode, reflectionNode,
     BeginningOfFlowNode, finalDiagnosisNode, GestaltMatcherNode,
     diseaseNormalizeForFinalNode, HPOwebSearchNode,
-    NormalizePCFNode, NormalizeGestaltMatcherNode, NormalizeZeroShotNode
+    NormalizePCFNode, NormalizeGestaltMatcherNode, NormalizeZeroShotNode, DiseaseSearchWithHPONode
 )
 
 class RareDiseaseDiagnosisPipeline:
@@ -70,6 +70,7 @@ class RareDiseaseDiagnosisPipeline:
         graph_builder.add_node("createHPODictNode", wrap_node(createHPODictNode, "createHPODictNode"))
         graph_builder.add_node("createAbsentHPODictNode", wrap_node(createAbsentHPODictNode, "createAbsentHPODictNode"))
         graph_builder.add_node("HPOwebSearchNode", wrap_node(HPOwebSearchNode, "HPOwebSearchNode"))
+        graph_builder.add_node("DiseaseSearchWithHPONode", wrap_node(DiseaseSearchWithHPONode, "DiseaseSearchWithHPONode"))
         graph_builder.add_node("createDiagnosisNode", wrap_node(createDiagnosisNode, "createDiagnosisNode"))
         graph_builder.add_node("diseaseNormalizeNode", wrap_node(diseaseNormalizeNode, "diseaseNormalizeNode"))
         graph_builder.add_node("diseaseSearchNode", wrap_node(diseaseSearchNode, "diseaseSearchNode"))
@@ -99,7 +100,8 @@ class RareDiseaseDiagnosisPipeline:
         graph_builder.add_edge(["createHPODictNode","createAbsentHPODictNode"], "createZeroShotNode")
         graph_builder.add_edge("createZeroShotNode", "NormalizeZeroShotNode")
         graph_builder.add_edge("createHPODictNode", "HPOwebSearchNode")
-        graph_builder.add_edge(["NormalizeZeroShotNode", "NormalizePCFNode", "NormalizeGestaltMatcherNode", "HPOwebSearchNode"], "createDiagnosisNode")
+        graph_builder.add_edge("createHPODictNode", "DiseaseSearchWithHPONode")
+        graph_builder.add_edge(["NormalizeZeroShotNode", "NormalizePCFNode", "NormalizeGestaltMatcherNode", "HPOwebSearchNode", "DiseaseSearchWithHPONode"], "createDiagnosisNode")
         graph_builder.add_edge("createDiagnosisNode", "diseaseNormalizeNode")
         graph_builder.add_edge("diseaseNormalizeNode", "diseaseSearchNode")
         graph_builder.add_edge("diseaseSearchNode", "reflectionNode")

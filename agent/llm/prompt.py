@@ -1,29 +1,43 @@
 NUM_DIAGNOSES = 8
 
 prompt_dict = {
-    "diagnosis_prompt": f"""You are a senior clinical geneticist acting as a lead diagnostician. You have received preliminary reports from three different sources: a phenotype-based analysis (PubCaseFinder), a generative AI analysis (Zero-Shot Diagnosis), and an expert facial dysmorphology analysis (GestaltMatcher). Your task is to synthesize these disparate findings into a single, cohesive differential diagnosis, re-ranking the candidates based on the convergence and strength of evidence.
+    "diagnosis_prompt": f"""You are a senior clinical geneticist acting as a lead diagnostician. You have received preliminary reports from multiple analytical tools and supporting literature. Your task is to synthesize these disparate findings into a single, cohesive differential diagnosis, citing evidence for your reasoning.
 
-Your final output **must** be an object that strictly adheres to the `DiagnosisOutput` Pydantic model.
+Your final output **must** be a JSON object that strictly adheres to the following Pydantic model structure:
+```python
+class DiagnosisFormat(BaseModel):
+    disease_name: str = Field(..., description="The formal name of the most likely rare disease, derived from synthesizing multiple data sources (HPO, PubCaseFinder, ZeroShot, GestaltMatcher).")
+    OMIM_id: Optional[str] = Field(None, description="The OMIM identifier for the disease, if available.")
+    description: str = Field(..., description="A detailed, structured diagnostic reasoning. It must explain the evidence for and against the diagnosis, citing sources for each point, and conclude with a summary of the clinical plausibility.")
+    rank: int = Field(..., description="The final rank of the disease in the differential diagnosis list, where 1 is the most likely.")
+
+class DiagnosisOutput(BaseModel):
+    ans: list['DiagnosisFormat']
+    reference: Optional[str] = Field(None, description="A numbered list of all sources cited in the 'description' field. Each entry must include the source type, a summary of its content, and a URL if available.")
+```
 
 To generate this output, follow this structured clinical reasoning process:
 
 **Step 1: Consolidate All Potential Candidates**
-- First, create a master list of all unique disease candidates mentioned across PubCaseFinder, Zero-Shot Diagnosis, and GestaltMatcher.
+- First, create a master list of all unique disease candidates mentioned across all reports (PubCaseFinder, Zero-Shot Diagnosis, GestaltMatcher, and Phenotype Similarity Search).
 
 **Step 2: Synthesize Evidence for Each Candidate**
-- For each unique candidate from your master list, systematically evaluate it by answering the following questions:
-- **Phenotypic Match (HPO & PubCaseFinder):** How well do the patient's HPO terms match this diagnosis? Is it strongly supported by the PubCaseFinder score?
-- **Facial Dysmorphology Match (GestaltMatcher):** Is this diagnosis supported by the GestaltMatcher results? Is it strongly supported by the GestaltMatcher score?
-- **Generative Model Plausibility (Zero-Shot):** Is this diagnosis considered plausible by the Zero-Shot analysis?
-- **Convergence of Evidence:** How many of the three sources support this diagnosis? A diagnosis supported by multiple sources is significantly more likely.
+- For each unique candidate, internally review which pieces of evidence from the INPUT CONTEXT support or contradict the diagnosis. Note the source of each piece of evidence for later citation.
 
-**Step 3: Re-Rank and Formulate Final Diagnosis**
-- Based on your synthesis in Step 2, create a new, final ranking of the top {NUM_DIAGNOSES} most likely diagnoses. The top 1 candidate from PubCaseFinder and the top 1 candidate from GestaltMatcher must always be included in the final ranking. Prioritize candidates with strong, multi-source evidence.
-- For each of the top {NUM_DIAGNOSES} diagnoses, formulate the diagnostic reasoning (`description`) by summarizing the key evidence from Step 2 that justifies its rank.
+**Step 3: Formulate Final Diagnosis with Detailed, Structured Reasoning**
+- Based on your synthesis, create a new, final ranking of the top {NUM_DIAGNOSES} most likely diagnoses.
+- **For each diagnosis in your final list (`ans`), write a detailed `description` following this exact structure:**
+    1.  **Supporting Evidence:** Clearly state which of the patient's symptoms are consistent with this diagnosis. Cite the specific reports or literature that support this connection (e.g., "The patient's arachnodactyly is a key feature of Marfan Syndrome [1][5].").
+    2.  **Contradictory or Missing Evidence:** Explicitly identify any patient symptoms that are atypical for the diagnosis, or list key, expected symptoms of the diagnosis that are MISSING from the patient's phenotype (e.g., "While ectopia lentis is common, its absence in this patient is noted but does not exclude the diagnosis, as penetrance is not 100% [9]."). Briefly explain why these inconsistencies might not rule out the diagnosis, citing evidence if possible.
+    3.  **Synthesis and Conclusion:** Provide a concluding sentence that summarizes the overall clinical plausibility based on the balance of evidence.
+- **After creating the list of diagnoses, create the `reference` section:**
+    - This must be a single string containing a numbered list of all sources you cited in the `description` fields.
+    - Each numbered entry must correspond to an in-text citation.
+    - For each reference, specify its source type (e.g., "PubCaseFinder Report", "Web Search Result"), provide a brief summary of the relevant information, and include a URL if available.
 
-Now, perform this evaluation for the following case and provide the final output.
+Now, perform this evaluation for the following case and provide the final, complete JSON output.
 ---
-**INPUT CONTEXT**
+**INPUT CONTEXT (Sources for Citation)**
 
 **1. Patient's Phenotype (HPO List):**
 {{hpo_list}}
@@ -36,13 +50,20 @@ Now, perform this evaluation for the following case and provide the final output
 **4. Sex:** {{sex}}
 
 **5. PubCaseFinder Report (Phenotype-based):**
-{{pcf_result}}
+{{pcf_results}}
 
 **6. Zero-Shot Diagnosis Report (Generative AI-based):**
-{{zeroShotResult}}
+{{zeroshot_results}}
 
 **7. GestaltMatcher Report (Facial Dysmorphology-based):**
-{{gestaltMatcherResult}}""",
+{{gestalt_matcher_results}}
+
+**8. Phenotype Similarity Search Report (Vector-based):**
+{{phenotype_search_results}}
+
+**9. Web Search Results (Literature/Case Reports):**
+{{web_search_results}}
+""",
 
     "zero-shot-diagnosis-prompt": """You are a specialist in the field of rare diseases.
 You will be provided and asked about a complicated clinical case; read it carefully and then provide a diverse and comprehensive differential diagnosis.
