@@ -10,7 +10,7 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     Integrates multiple information sources (PCF, ZeroShot, GestaltMatcher, PhenotypeSearch) 
     to generate a tentative diagnosis.
     """
-    hpo_list = state.get("hpo_list", [])
+    hpo_list = list(state.get("hpoDict", {}).values())
     absent_hpo_list = list(state.get("absentHpoDict", {}).values())
     onset = state.get("onset", "Unknown")
     sex = state.get("sex", "Unknown")
@@ -33,8 +33,25 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
 
     # Web search results
     web_text = "\n".join([f"- {res.get('title', 'No Title')}: {res.get('content', 'No Content')}" for res in web_search_results]) if web_search_results else "No relevant web search results found."
-    # Phenotype search results
-    phenotype_search_text = "\n".join([f"{i+1}. {res.disease_info.disease_name} (OMIM: {res.disease_info.OMIM_id}, Similarity score: {res.similarity_score:.3f})" for i, res in enumerate(phenotype_search_results)]) if phenotype_search_results else "No results from Phenotype Similarity Search."
+    
+    # Phenotype search results (修正箇所)
+    phenotype_lines = []
+    if phenotype_search_results:
+        for i, res in enumerate(phenotype_search_results):
+            disease_info = res.disease_info
+            definition_text = disease_info.definition or "not provided"
+            phenotype_list_text = ", ".join(disease_info.phenotype) if disease_info.phenotype else "not provided"
+            
+            line = (
+                f"{i+1}. {disease_info.disease_name} (OMIM: {disease_info.OMIM_id}, Similarity score: {res.similarity_score:.3f})\n"
+                f"   - Definition: {definition_text}\n"
+                f"   - Typical Phenotypes: {phenotype_list_text}"
+            )
+            phenotype_lines.append(line)
+        phenotype_search_text = "\n".join(phenotype_lines)
+    else:
+        phenotype_search_text = "No results from Phenotype Similarity Search."
+
 
     # Assemble the prompt
     prompt = prompt_dict["diagnosis_prompt"].format(
