@@ -1,63 +1,29 @@
 import os
 import datetime
 import json
-from typing import Optional, List, Dict, Any
 from langgraph.graph import StateGraph, START, END
 from agent.state.state_types import State, ZeroShotOutput, DiagnosisOutput, ReflectionOutput
 from agent.utils.logger import log_node_result
-from agent.config.llm_config import LLMConfig
-from agent.config.llm_factory import LLMFactory
 
 from agent.nodes import (
-    PCFnode, createDiagnosisNode, createZeroShotNode, createHPODictNode, createAbsentHPODictNode, 
+    PCFnode, createDiagnosisNode, createZeroShotNode, createHPODictNode,createAbsentHPODictNode, 
     diseaseNormalizeNode, diseaseSearchNode, reflectionNode,
     BeginningOfFlowNode, finalDiagnosisNode, GestaltMatcherNode,
     diseaseNormalizeForFinalNode, HPOwebSearchNode,
     NormalizePCFNode, NormalizeGestaltMatcherNode, NormalizeZeroShotNode, DiseaseSearchWithHPONode
 )
 
-
 class RareDiseaseDiagnosisPipeline:
-    """稀少疾患診断パイプラインクラス"""
-    
-    def __init__(
-        self,
-        llm_config: Optional[LLMConfig] = None,
-        enable_log: bool = False,
-        log_filename: Optional[str] = None,
-    ):
-        """
-        初期化
-        
-        Args:
-            llm_config: LLM設定（Noneの場合は環境変数から取得）
-            enable_log: ログ出力の有効化
-            log_filename: ログファイル名
-        """
-        # LLM設定の初期化
-        if llm_config is None:
-            llm_config = LLMConfig.from_env(cache_key="default")
-        self.llm_config = llm_config
-        self._initialize_llm()
-        
-        # グラフの構築
+    def __init__(self, enable_log=False, log_filename=None):
         self.graph = self._build_graph()
-        
-        # ログ設定
         self.enable_log = enable_log
-        self.logfile_path: Optional[str] = None
+        self.logfile_path = None
         self.log_filename = log_filename
         if self.enable_log:
             self.logfile_path = self._get_logfile_path()
             self._write_graph_ascii_to_log()
-    
-    def _initialize_llm(self) -> None:
-        """LLMインスタンスを初期化"""
-        factory = LLMFactory()
-        factory.create_azure_openai(self.llm_config)
-    
-    def _get_logfile_path(self) -> str:
-        """ログファイルのパスを取得"""
+            
+    def _get_logfile_path(self):
         log_dir = os.path.join(os.getcwd(), "log")
         os.makedirs(log_dir, exist_ok=True)
         if self.log_filename:
@@ -65,8 +31,8 @@ class RareDiseaseDiagnosisPipeline:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         return os.path.join(log_dir, f"agent_log_{timestamp}.log")
     
-    def _write_graph_ascii_to_log(self) -> None:
-        """エージェントフロー図をASCIIでログファイルに出力"""
+    def _write_graph_ascii_to_log(self):
+        # エージェントフロー図をASCIIでlogファイルの先頭に出力
         try:
             ascii_graph = self.graph.get_graph().draw_ascii()
         except Exception as e:
@@ -76,18 +42,15 @@ class RareDiseaseDiagnosisPipeline:
             f.write(ascii_graph)
             f.write("\n\n")
 
-    def _log(self, node_name: str, result: Any) -> None:
-        """ノード結果をログに記録"""
+    def _log(self, node_name, result):
         if not self.enable_log:
             return
         log_node_result(self.logfile_path, node_name, result)
 
-    def _build_graph(self) -> Any:
-        """LangGraphを構築"""
+    def _build_graph(self):
         graph_builder = StateGraph(State)
-        
-        # ノード結果をラップしてログに記録
-        def wrap_node(node_func, node_name: str):
+        # ラップして各ノードの結果をログに記録
+        def wrap_node(node_func, node_name):
             def wrapped(state):
                 result = node_func(state)
                 self._log(node_name, result)
@@ -115,8 +78,7 @@ class RareDiseaseDiagnosisPipeline:
         graph_builder.add_node("finalDiagnosisNode", wrap_node(finalDiagnosisNode, "finalDiagnosisNode"))
         graph_builder.add_node("diseaseNormalizeForFinalNode", wrap_node(diseaseNormalizeForFinalNode, "diseaseNormalizeForFinalNode"))
 
-        
-        def after_reflection_edge(state: State) -> str:
+        def after_reflection_edge(state: State):
             if state.get("depth", 0) > 2:
                 print("depth limit reached, force to finalDiagnosisNode")
                 return "ProceedToFinalDiagnosisNode"
@@ -153,31 +115,7 @@ class RareDiseaseDiagnosisPipeline:
         graph_builder.add_edge("diseaseNormalizeForFinalNode", END)
         return graph_builder.compile()
 
-    def run(
-        self,
-        hpo_list: List[str],
-        image_path: Optional[str] = None,
-        verbose: bool = True,
-        absent_hpo_list: Optional[List[str]] = None,
-        onset: Optional[str] = None,
-        sex: Optional[str] = None,
-        patient_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """
-        パイプラインを実行
-        
-        Args:
-            hpo_list: HPOリスト
-            image_path: 画像ファイルのパス
-            verbose: 詳細出力の有効化
-            absent_hpo_list: 欠落HPOリスト
-            onset: 発症時期
-            sex: 性別
-            patient_id: 患者ID
-        
-        Returns:
-            実行結果の辞書
-        """
+    def run(self, hpo_list, image_path=None, verbose=True, absent_hpo_list=None, onset=None, sex=None, patient_id=None):
         initial_state = {
             "depth": 0,
             "clinicalText": None,
@@ -200,8 +138,7 @@ class RareDiseaseDiagnosisPipeline:
             self.pretty_print(result)
         return result
 
-    def pretty_print(self, result: Dict[str, Any]) -> None:
-        """結果を見やすく表示"""
+    def pretty_print(self, result):
         print("=== result of reflection ===")
         reflection = result.get("reflection", None)
         if reflection is None:
