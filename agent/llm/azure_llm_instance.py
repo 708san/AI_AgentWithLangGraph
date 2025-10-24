@@ -1,4 +1,10 @@
 import os
+
+from dotenv import load_dotenv
+
+# カレントディレクトリの.envファイルを読み込む
+load_dotenv()
+
 from .llm_wrapper import AzureOpenAIWrapper
 
 azure_llm = AzureOpenAIWrapper(
