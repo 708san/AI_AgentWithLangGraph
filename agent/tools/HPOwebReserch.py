@@ -1,7 +1,7 @@
 from ..state.state_types import State, webresource
 from typing import List
 from ddgs import DDGS
-from ..llm.azure_llm_instance import azure_llm
+from ..llm.llm_wrapper import AzureOpenAIWrapper
 
 webresearch_prompt_dict = {
    "generate_query_prompt": """You are a medical research assistant specializing in clinical genetics and bioinformatics. Your task is to generate effective DDGS(DuckDuckGo Search) queries to identify potential syndromes or genetic disorders based on a provided list of Human Phenotype Ontology (HPO) terms.
@@ -69,54 +69,84 @@ ARTICLE TO SUMMARIZE:
 }
 
 def extract_hpo_labels(hpo_dict: dict) -> List[str]:
+    """Extracts HPO term labels from the HPO dictionary."""
     return list(hpo_dict.values())
 
-def generate_queries(hpo_labels: List[str]) -> List[str]:
+def generate_queries(state: State, hpo_labels: List[str]) -> List[str]:
+    """Generates search queries using the LLM from the state."""
+    llm = state.get("llm")
+    if not llm:
+        print("LLM instance not found in state for generating queries.")
+        return []
+        
     prompt = webresearch_prompt_dict["generate_query_prompt"].format(hpo_terms=', '.join(hpo_labels))
-    # Azure OpenAI でクエリ生成
-    queries_msg = azure_llm.generate(prompt)
-    # 返り値が文字列の場合は分割、リストの場合はそのまま
-    if isinstance(queries_msg, str):
-        # 1. ... 2. ... の形式を想定して分割
-        queries = [q.strip().lstrip("0123456789. ") for q in queries_msg.split('\n') if q.strip()]
-        queries = [q for q in queries if q]  # 空要素除去
-        return queries[:2]
-    elif hasattr(queries_msg, "content"):
-        # content属性がある場合
-        lines = queries_msg.content.split('\n')
-        queries = [q.strip().lstrip("0123456789. ") for q in lines if q.strip()]
-        queries = [q for q in queries if q]
-        return queries[:2]
-    else:
-        return list(queries_msg)[:2]
+    queries_msg = llm.generate(prompt)
+    
+    content = queries_msg.content if hasattr(queries_msg, "content") else str(queries_msg)
 
-def summarize_content(article_text: str) -> str:
+    if isinstance(content, str):
+        lines = content.strip().split('\n')
+        queries = [q.strip().lstrip("0123456789. ") for q in lines if q.strip()]
+        return [q for q in queries if q][:2]
+    elif isinstance(content, list):
+        return content[:2]
+    return []
+
+def summarize_content(state: State, article_text: str) -> str:
+    """Summarizes article text using the LLM from the state."""
+    llm = state.get("llm")
+    if not llm:
+        print("LLM instance not found in state for summarizing content.")
+        return "not a medical-related page"
+        
+    if not article_text or not article_text.strip():
+        return "not a medical-related page"
+        
     prompt = webresearch_prompt_dict["summarize_results_prompt"].format(article_text=article_text)
-    summary_msg = azure_llm.generate(prompt)
+    summary_msg = llm.generate(prompt)
     summary = summary_msg.content if hasattr(summary_msg, "content") else str(summary_msg)
     return summary.strip()
 
 def search_hpo_terms(state: State) -> List[webresource]:
-    hpo_labels = extract_hpo_labels(state["hpoDict"])
-    queries = generate_queries(hpo_labels)
+    """
+    Performs a web search based on HPO terms, summarizes the results,
+    and returns a list of new webresource objects.
+    """
+    hpo_dict = state.get("hpoDict", {})
+    if not hpo_dict:
+        return []
+        
+    hpo_labels = extract_hpo_labels(hpo_dict)
+    queries = generate_queries(state, hpo_labels)
+    
     new_webresources = []
-    existing_urls = {w["url"] for w in state.get("webresources", [])}
+    existing_webresources = state.get("webresources", [])
+    existing_urls = {w.url for w in existing_webresources if hasattr(w, 'url')}
+    
     with DDGS() as ddgs:
         for query in queries:
-            results = list(ddgs.text(query, max_results=2))
+            try:
+                results = list(ddgs.text(query, max_results=2))
+            except Exception as e:
+                print(f"DDGS search failed for query '{query}': {e}")
+                continue
+
             for result in results:
-                url = result.get("href") or result.get("url")
-                title = result.get("title") or ""
-                snippet = result.get("body") or result.get("snippet") or ""
+                url = result.get("href")
+                snippet = result.get("body")
+                
                 if not url or url in existing_urls:
                     continue
-                summary = summarize_content(snippet)
-                if summary.lower().startswith("not a medical-related page"):
+                
+                summary = summarize_content(state, snippet)
+                if "not a medical-related page" in summary.lower():
                     continue
+                
                 new_webresources.append(webresource(
-                    title=title,
+                    title=result.get("title", "No Title"),
                     url=url,
                     snippet=summary
                 ))
                 existing_urls.add(url)
+                
     return new_webresources

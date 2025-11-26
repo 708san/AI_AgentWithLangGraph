@@ -2,7 +2,6 @@ from langchain.schema import HumanMessage
 from typing_extensions import Optional
 from ..state.state_types import State, DiagnosisOutput
 from ..llm.prompt import prompt_dict, build_prompt
-from ..llm.azure_llm_instance import azure_llm
 
 
 def createFinalDiagnosis(state: State) -> Optional[DiagnosisOutput]:
@@ -17,6 +16,11 @@ def createFinalDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     judgements = state.get("reflection", None)
     onset=state.get("onset", "Unknown")
     sex=state.get("sex", "Unknown")
+    llm = state.get("llm")
+
+    if not llm:
+        print("LLM instance not found in state.")
+        return None, None
 
     # Format tentativeDiagnosis (DiagnosisOutput type or None) as string, including reference
     if tentative_result is not None and hasattr(tentative_result, "ans"):
@@ -65,6 +69,6 @@ def createFinalDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     
     
     messages = [HumanMessage(content=prompt)]
-    structured_llm = azure_llm.get_structured_llm(DiagnosisOutput)
+    structured_llm = llm.get_structured_llm(DiagnosisOutput)
     result = structured_llm.invoke(messages)
     return result, prompt

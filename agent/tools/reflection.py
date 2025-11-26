@@ -1,7 +1,6 @@
 from langchain.schema import HumanMessage
-from ..state.state_types import ReflectionFormat
+from ..state.state_types import ReflectionFormat, State
 from ..llm.prompt import prompt_dict, build_prompt
-from ..llm.azure_llm_instance import azure_llm
 
 
 def format_disease_knowledge(info_list, disease_name):
@@ -19,8 +18,20 @@ def format_disease_knowledge(info_list, disease_name):
         return "No disease knowledge available for this rank."
     return "\n".join(lines)
 
-def create_reflection(hpo_dict, diagnosis_to_judge, disease_knowledge_list, absent_hpo_dict=None, onset=None, sex=None):
+def create_reflection(state: State, diagnosis_to_judge):
     prompt_template = prompt_dict["reflection_prompt"]
+    
+    hpo_dict = state.get("hpoDict", {})
+    absent_hpo_dict = state.get("absentHpoDict", {})
+    disease_knowledge_list = state.get("memory", [])
+    onset = state.get("onset")
+    sex = state.get("sex")
+    llm = state.get("llm")
+
+    if not llm:
+        print("LLM instance not found in state.")
+        return None, None
+
     diagnosis_name = diagnosis_to_judge.disease_name
     description = diagnosis_to_judge.description
     rank = diagnosis_to_judge.rank
@@ -39,7 +50,7 @@ def create_reflection(hpo_dict, diagnosis_to_judge, disease_knowledge_list, abse
         "diagnosis_to_judge": f"{diagnosis_name} (Rank: {rank})\nDescription: {description}",
         "disease_knowledge": disease_knowledge_str
     }
-    structured_llm = azure_llm.get_structured_llm(ReflectionFormat)
+    structured_llm = llm.get_structured_llm(ReflectionFormat)
     prompt = build_prompt(prompt_template, inputs)
     
     print("reflection prompt\n")

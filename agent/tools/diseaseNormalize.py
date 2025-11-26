@@ -90,11 +90,13 @@ def normalize_zeroshot_results(state: State) -> Optional[ZeroShotOutput]:
     normalized_ans = []
 
     for diag in zeroshot_output.ans:
-        disease_name_upper = diag.disease_name.upper()
+        cleaned_name = diag.disease_name.strip().strip('*')
+        cleaned_name = re.sub(r'\s*\(.*\)\s*', '', cleaned_name).strip()
+        disease_name_upper = cleaned_name.upper()
         omim_id, omim_label, sim = disease_normalize(disease_name_upper)
 
         # 類似度が高い場合のみ採用し、OMIM IDがユニークであることを確認
-        if sim >= 0.75 and omim_id not in unique_omim_ids:
+        if sim >= 0.70 and omim_id not in unique_omim_ids:
             diag.OMIM_id = omim_id
             diag.disease_name = omim_label
             normalized_ans.append(diag)

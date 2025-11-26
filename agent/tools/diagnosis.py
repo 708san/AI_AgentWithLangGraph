@@ -3,7 +3,6 @@ from typing import List, Optional
 from langchain.schema import HumanMessage
 from ..state.state_types import State, DiagnosisOutput, ZeroShotOutput, PCFres, PhenotypeSearchFormat
 from ..llm.prompt import prompt_dict
-from ..llm.azure_llm_instance import azure_llm # get_structured_llmを直接使うためにインポート
 
 def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     """
@@ -19,6 +18,11 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     gestalt_matcher_results = state.get("GestaltMatcher", [])
     web_search_results = state.get("webresources", [])
     phenotype_search_results = state.get("phenotypeSearchResult", [])
+    llm = state.get("llm")
+
+    if not llm:
+        print("LLM instance not found in state.")
+        return None, None
 
     # --- Format each result into a string for the prompt ---
     
@@ -68,7 +72,7 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
 
     # --- Query the LLM to get the diagnosis result ---
     # Get a structured LLM instance that outputs in the DiagnosisOutput format
-    structured_llm = azure_llm.get_structured_llm(DiagnosisOutput)
+    structured_llm = llm.get_structured_llm(DiagnosisOutput)
 
     # Create the message payload for the LLM
     messages = [HumanMessage(content=prompt)]
@@ -79,4 +83,4 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     if diagnosis_json:
         return (diagnosis_json, prompt)
     
-    return None
+    return None, None

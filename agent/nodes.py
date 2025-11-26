@@ -1,5 +1,5 @@
 from typing_extensions import List, Optional
-from .state.state_types import State, PCFres, DiagnosisOutput, ReflectionOutput
+from .state.state_types import State, PCFres, DiagnosisOutput, ReflectionOutput, ReflectionFormat
 from .tools.pcf_api import callingPCF
 from .tools.diagnosis import createDiagnosis
 from .tools.ZeroShot import createZeroshot
@@ -59,7 +59,7 @@ def DiseaseSearchWithHPONode(state: State):
     return {"phenotypeSearchResult": search_results}
 
 
-@save_result("PCFNode")
+
 def PCFnode(state: State):
     print("PCFnode called")
     depth = state.get("depth", 0)
@@ -70,7 +70,7 @@ def PCFnode(state: State):
     return {"pubCaseFinder": result}
 
 
-
+@save_result("NormalizePCFNode")
 def NormalizePCFNode(state: State):
     """PCFの結果に含まれる病名をOMIM IDに基づいて正規化する"""
     print("NormalizePCFNode called")
@@ -79,7 +79,7 @@ def NormalizePCFNode(state: State):
         return {}
     return {"pubCaseFinder": normalized_results}
 
-@save_result("GestaltMatcherNode")
+
 def GestaltMatcherNode(state: State):
     print("GestaltMatcherNode called")
     image_path = state.get("imagePath", None)
@@ -103,7 +103,7 @@ def GestaltMatcherNode(state: State):
         print(f"Error calling GestaltMatcher API: {e}")
         return {"GestaltMatcher": []}
     
-
+@save_result("NormalizeGestaltMatcherNode")
 def NormalizeGestaltMatcherNode(state: State):
     """GestaltMatcherの結果に含まれる病名をOMIM IDに基づいて正規化する"""
     print("NormalizeGestaltMatcherNode called")
@@ -128,12 +128,11 @@ def createAbsentHPODictNode(state: State):
 def createZeroShotNode(state: State):
     print("createZeroShotNode called")
     hpo_dict = state.get("hpoDict", {})
-    absent_hpo_dict = state.get("absentHpoDict", {})
     if state.get("zeroShotResult") is not None:
         return {"zeroShotResult": state["zeroShotResult"]}
     if hpo_dict:
         # createZeroshotが(result, prompt)を返すように修正
-        result, prompt = createZeroshot(hpo_dict, absent_hpo_dict=absent_hpo_dict,onset=state.get("onset", "Unknown"),sex=state.get("sex", "Unknown"))
+        result, prompt = createZeroshot(state)
         if result:
             # promptはstateに保存しないので、ここでは返さない
             return {"zeroShotResult": result, "prompt": prompt}
@@ -185,32 +184,35 @@ def diseaseSearchNode(state: State):
     
     return diseaseSearchForDiagnosis(state)
 
-
 @save_result("reflectionNode")
 def reflectionNode(state: State):
     print("reflectionNode called")
-    tentativeDiagnosis = state.get("tentativeDiagnosis", None)
-    hpo_dict = state.get("hpoDict", {})
-    absent_hpo_dict = state.get("absentHpoDict", {})
-    disease_knowledge = state.get("memory", [])
-    patient_id = state.get("patient_id", "unknown")
-
-    if tentativeDiagnosis and hpo_dict:
+    tentativeDiagnosis = state.get("tentativeDiagnosis")
+    hpo_dict = state.get("hpoDict")
+    if tentativeDiagnosis and hpo_dict and hasattr(tentativeDiagnosis, 'ans'):
         diagnosis_to_judge_lis = tentativeDiagnosis.ans
         reflection_result_list = []
         prompts = []
         for diagnosis_to_judge in diagnosis_to_judge_lis:
             reflection_result, prompt = create_reflection(
-                hpo_dict, diagnosis_to_judge, disease_knowledge,
-                absent_hpo_dict=absent_hpo_dict,
-                onset=state.get("onset", "Unknown"),
-                sex=state.get("sex", "Unknown")
+                state, diagnosis_to_judge
             )
-            reflection_result_list.append(reflection_result)
-            prompts.append(prompt)
-        print(type(reflection_result_list[0]))
-        return {"reflection": ReflectionOutput(ans=reflection_result_list), "prompt": "\n---\n".join(prompts)}
-    return {"reflection": None}
+            if reflection_result:
+                reflection_result_list.append(reflection_result)
+                prompts.append(prompt)
+        
+        if not reflection_result_list:
+            return {"reflection": ReflectionOutput(ans=[])}
+
+        # 返す直前で、stateの型定義に合わせてReflectionOutputオブジェクトでラップする
+        reflection_output = ReflectionOutput(ans=reflection_result_list)
+        
+        return {"reflection": reflection_output, "prompt": prompts}
+        
+    # 条件に合致しない場合は、空のansを持つReflectionOutputを返す
+    return {"reflection": ReflectionOutput(ans=[])}
+
+
 
 @save_result("finalDiagnosisNode")
 def finalDiagnosisNode(state: State):
@@ -227,3 +229,25 @@ def diseaseNormalizeForFinalNode(state: State):
         normalizedDiagnosis = diseaseNormalizeForDiagnosis(finalDiagnosis)
         return {"finalDiagnosis": normalizedDiagnosis}
     return {"finalDiagnosis": None}
+
+
+"""
+@save_result("reflectionNode")
+def reflectionNode(state: State):
+    print("reflectionNode called")
+    tentativeDiagnosis = state.get("tentativeDiagnosis")
+    hpo_dict = state.get("hpoDict")
+    if tentativeDiagnosis and hpo_dict:
+        diagnosis_to_judge_lis = tentativeDiagnosis.ans
+        reflection_result_list = []
+        prompts = []
+        for diagnosis_to_judge in diagnosis_to_judge_lis:
+            reflection_result, prompt = create_reflection(
+                state, diagnosis_to_judge
+            )
+            reflection_result_list.append(reflection_result)
+            prompts.append(prompt)
+        print(type(reflection_result_list[0]))
+        return {"reflection": {"ans": reflection_result_list}, "prompt": prompts}
+    return {"reflection": None}
+"""

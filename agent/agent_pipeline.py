@@ -4,6 +4,7 @@ import json
 from langgraph.graph import StateGraph, START, END
 from agent.state.state_types import State, ZeroShotOutput, DiagnosisOutput, ReflectionOutput
 from agent.utils.logger import log_node_result
+from agent.llm.azure_llm_instance import get_llm_instance
 
 from agent.nodes import (
     PCFnode, createDiagnosisNode, createZeroShotNode, createHPODictNode,createAbsentHPODictNode, 
@@ -14,7 +15,7 @@ from agent.nodes import (
 )
 
 class RareDiseaseDiagnosisPipeline:
-    def __init__(self, enable_log=False, log_filename=None):
+    def __init__(self, model_name: str = 'gpt-4o', enable_log=False, log_filename=None):
         self.graph = self._build_graph()
         self.enable_log = enable_log
         self.logfile_path = None
@@ -22,6 +23,8 @@ class RareDiseaseDiagnosisPipeline:
         if self.enable_log:
             self.logfile_path = self._get_logfile_path()
             self._write_graph_ascii_to_log()
+        
+        self.llm = get_llm_instance(model_name)
             
     def _get_logfile_path(self):
         log_dir = os.path.join(os.getcwd(), "log")
@@ -77,18 +80,50 @@ class RareDiseaseDiagnosisPipeline:
         graph_builder.add_node("reflectionNode", wrap_node(reflectionNode, "reflectionNode"))
         graph_builder.add_node("finalDiagnosisNode", wrap_node(finalDiagnosisNode, "finalDiagnosisNode"))
         graph_builder.add_node("diseaseNormalizeForFinalNode", wrap_node(diseaseNormalizeForFinalNode, "diseaseNormalizeForFinalNode"))
-
+        
         def after_reflection_edge(state: State):
-            if state.get("depth", 0) > 2:
-                print("depth limit reached, force to finalDiagnosisNode")
+            print("\n--- Running after_reflection_edge ---")
+
+            # 1. depthのチェック
+            depth = state.get("depth", 0)
+            print(f"Current depth: {depth}")
+            if depth > 2:
+                print("Depth limit reached, forcing to finalDiagnosisNode.")
                 return "ProceedToFinalDiagnosisNode"
+
+            # 2. reflectionオブジェクトの存在と内容を確認
             reflection = state.get("reflection")
+            print(f"Type of reflection object: {type(reflection)}")
             if not reflection or not hasattr(reflection, "ans") or not reflection.ans:
+                print("Reflection object is missing, empty, or has no 'ans'. Returning to beginning.")
                 return "ReturnToBeginningNode"
-            if all(not getattr(ans, "Correctness", False) for ans in reflection.ans):
-                print("think again.")
+            
+            # 3. reflection.ans の中身と、各要素のCorrectnessの型と値を調べる
+            correctness_values_for_any = []
+            print("Inspecting items in reflection.ans:")
+            for i, ans_item in enumerate(reflection.ans):
+                disease_name = getattr(ans_item, "disease_name", "Unknown Disease")
+                correctness_val = getattr(ans_item, "Correctness", "N/A")
+                
+                # any()で評価する実際の値を取得
+                bool_val = getattr(ans_item, "Correctness", False)
+                correctness_values_for_any.append(bool_val)
+                
+                
+
+            # 4. any()の評価結果を確認
+            should_proceed = any(correctness_values_for_any)
+            print(f"\nList of boolean values for 'any()': {correctness_values_for_any}")
+            print(f"Result of 'any(correctness_values_for_any)': {should_proceed}")
+
+            if should_proceed:
+                print("Decision: Proceeding to final diagnosis.")
+                print("--- End of after_reflection_edge ---\n")
+                return "ProceedToFinalDiagnosisNode"
+            else:
+                print("Decision: All 'Correctness' are False or missing. Looping back.")
+                print("--- End of after_reflection_edge ---\n")
                 return "ReturnToBeginningNode"
-            return "ProceedToFinalDiagnosisNode"
 
         graph_builder.add_edge(START, "BeginningOfFlowNode")
         graph_builder.add_edge("BeginningOfFlowNode", "PCFnode")
@@ -103,6 +138,10 @@ class RareDiseaseDiagnosisPipeline:
         graph_builder.add_edge("createHPODictNode", "DiseaseSearchWithHPONode")
         graph_builder.add_edge(["NormalizeZeroShotNode", "NormalizePCFNode", "NormalizeGestaltMatcherNode", "HPOwebSearchNode", "DiseaseSearchWithHPONode"], "createDiagnosisNode")
         graph_builder.add_edge("createDiagnosisNode", "diseaseNormalizeNode")
+        ###中断用
+        graph_builder.add_edge("diseaseNormalizeNode", END)
+        ###
+        """
         graph_builder.add_edge("diseaseNormalizeNode", "diseaseSearchNode")
         graph_builder.add_edge("diseaseSearchNode", "reflectionNode")
         graph_builder.add_conditional_edges(
@@ -113,6 +152,7 @@ class RareDiseaseDiagnosisPipeline:
         )
         graph_builder.add_edge("finalDiagnosisNode", "diseaseNormalizeForFinalNode")
         graph_builder.add_edge("diseaseNormalizeForFinalNode", END)
+        """
         return graph_builder.compile()
 
     def run(self, hpo_list, image_path=None, verbose=True, absent_hpo_list=None, onset=None, sex=None, patient_id=None):
@@ -132,6 +172,7 @@ class RareDiseaseDiagnosisPipeline:
             "onset": onset if onset else "Unknown",
             "sex": sex if sex else "Unknown",
             "patient_id": patient_id if patient_id else "unknown",
+            "llm": self.llm,
         }
         result = self.graph.invoke(initial_state)
         if verbose:
@@ -175,3 +216,18 @@ class RareDiseaseDiagnosisPipeline:
         else:
             print(final_diag)
         print("\n")
+
+
+"""
+        def after_reflection_edge(state: State):
+            if state.get("depth", 0) > 2:
+                print("depth limit reached, force to finalDiagnosisNode")
+                return "ProceedToFinalDiagnosisNode"
+            reflection = state.get("reflection")
+            if not reflection or not hasattr(reflection, "ans") or not reflection.ans:
+                return "ReturnToBeginningNode"
+            if any(getattr(ans, "Correctness", False) for ans in reflection.ans):
+                return "ProceedToFinalDiagnosisNode"
+            print("think again.")
+            return "ReturnToBeginningNode"
+"""

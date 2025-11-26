@@ -1,14 +1,19 @@
 from langchain.schema import HumanMessage
-from ..state.state_types import ZeroShotOutput
+from ..state.state_types import ZeroShotOutput, State
 from ..llm.prompt import prompt_dict, build_prompt
-from ..llm.azure_llm_instance import azure_llm
 
 
-def createZeroshot(hpo_dict, absent_hpo_dict=None, onset=None, sex=None):
+def createZeroshot(state: State):
     """
     hpo_dictとabsent_hpo_dictを使ってZero-Shot診断プロンプトを作成し、LLMに投げる
     """
-    if not hpo_dict:
+    hpo_dict = state.get("hpoDict", {})
+    absent_hpo_dict = state.get("absentHpoDict", {})
+    onset = state.get("onset")
+    sex = state.get("sex")
+    llm = state.get("llm")
+
+    if not hpo_dict or not llm:
         return None, None
 
     present_hpo = ", ".join([v for k, v in hpo_dict.items() if v])
@@ -25,7 +30,7 @@ def createZeroshot(hpo_dict, absent_hpo_dict=None, onset=None, sex=None):
     )
 
     # structured_llmを使う場合
-    structured_llm = azure_llm.get_structured_llm(ZeroShotOutput)
+    structured_llm = llm.get_structured_llm(ZeroShotOutput)
     messages = [HumanMessage(content=prompt)]
     result = structured_llm.invoke(messages)
     return result, prompt

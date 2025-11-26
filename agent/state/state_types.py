@@ -1,5 +1,6 @@
 from typing_extensions import List, TypedDict, Optional
 from pydantic import BaseModel, Field
+from ..llm.llm_wrapper import AzureOpenAIWrapper
 
 class PCFres(TypedDict):
     omim_disease_name_en: str
@@ -32,6 +33,7 @@ class State(TypedDict):
     onset: Optional[str]
     sex: Optional[str]
     patient_id: Optional[str]
+    llm: Optional[AzureOpenAIWrapper]
     
 # --- Pydantic Model for Zero-Shot Diagnosis Output ---
 class ZeroShotFormat(BaseModel):
