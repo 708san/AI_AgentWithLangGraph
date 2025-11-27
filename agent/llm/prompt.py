@@ -1,4 +1,4 @@
-NUM_DIAGNOSES = 10
+NUM_DIAGNOSES = 5
 
 prompt_dict = {
     "diagnosis_prompt": f"""You are a senior clinical geneticist acting as a lead diagnostician. You have received preliminary reports from a suite of analytical tools (**PubCaseFinder, Zero-Shot Diagnosis, GestaltMatcher, and Phenotype Similarity Search**) and supporting literature from web searches. Your task is to synthesize these disparate findings from **all provided sources** into a single, cohesive differential diagnosis, citing evidence for your reasoning.
