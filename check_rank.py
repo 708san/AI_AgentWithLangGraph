@@ -28,12 +28,30 @@ RANKING_PROMPT_TEMPLATE = """You are a senior clinical geneticist. Your task is 
 
 Create a master list of all unique disease candidates from all reports. Then, rank them from most to least plausible based on the strength of the evidence (consensus across tools, high scores/ranks).
 
-Your final output must be a numbered list. Each line should contain only the rank, disease name, and OMIM ID. Do not include any reasoning or other text.
+**Output Format Requirements:**
+- Do NOT use JSON or code blocks. Use a plain text structured format.
+- For each diagnosis, use a specific block format separated by a dashed line "---".
+- The format must be exactly as follows:
+
+---
+Rank: [Integer]
+Disease: [Disease Name]
+OMIM: [OMIM ID]
+Description: [The diagnostic reasoning explaining why this diagnosis is clinically plausible. Must specify which of the patient's symptoms support this diagnosis and include in-text citations [1], [2] to the evidence sources.]
+---
 
 **Example Output:**
-1. DISEASE NAME 1 (OMIM:XXXXXX)
-2. DISEASE NAME 2 (OMIM:YYYYYY)
-3. DISEASE NAME 3 (OMIM:ZZZZZZ)
+---
+Rank: 1
+Disease: Kabuki syndrome 1
+OMIM: OMIM:147920
+Description: This diagnosis is strongly supported by the patient's facial dysmorphology, specifically long palpebral fissures and eversion of the lateral third of the lower eyelid [1]. Additionally, the overlap of global developmental delay and hypotonia matches the phenotype consensus [2].
+---
+Rank: 2
+Disease: CHARGE syndrome
+OMIM: OMIM:214800
+Description: Although the facial features show some overlap, the key reasoning here is the presence of coloboma and heart defects noted in the phenotype report [3].
+---
 
 ---
 INPUT CONTEXT
