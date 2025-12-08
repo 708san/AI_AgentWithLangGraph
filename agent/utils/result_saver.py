@@ -1,5 +1,6 @@
 import os
 import json
+import fcntl  # 追加: 排他制御用
 from functools import wraps
 from pydantic import BaseModel
 import copy
@@ -37,24 +38,41 @@ def save_result(node_name):
                 os.makedirs(res_dir, exist_ok=True)
                 out_path = os.path.join(res_dir, f"{patient_id}.json")
 
-                # 既存のデータを読み込む
-                if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
-                    with open(out_path, 'r', encoding='utf-8') as f:
-                        # JSONからデコードされた辞書
-                        data_for_saving = json.load(f)
-                else:
-                    data_for_saving = {}
+                # ファイルが存在しない場合は空のJSONを作成しておく
+                if not os.path.exists(out_path):
+                    with open(out_path, 'w', encoding='utf-8') as f:
+                        json.dump({}, f)
 
-                # 今回の結果をマージ
-                # result_data は {"reflection": PydanticObject} のような形式
-                data_for_saving.update(result_data)
+                # 排他制御付きで読み書きを行う
+                with open(out_path, 'r+', encoding='utf-8') as f:
+                    # 排他ロックを取得 (ブロッキング)
+                    fcntl.flock(f, fcntl.LOCK_EX)
+                    try:
+                        content = f.read()
+                        if content.strip():
+                            try:
+                                data_for_saving = json.loads(content)
+                            except json.JSONDecodeError:
+                                # JSONが壊れている場合は空からやり直す（またはログ出力）
+                                print(f"[WARNING] JSON decode error in {out_path}. Overwriting.")
+                                data_for_saving = {}
+                        else:
+                            data_for_saving = {}
 
-                # ファイル保存用に、Pydanticオブジェクトを再帰的に辞書へ変換
-                serializable_data = _convert_pydantic_objects(data_for_saving)
+                        # 今回の結果をマージ
+                        data_for_saving.update(result_data)
 
-                # ファイルに書き込む
-                with open(out_path, 'w', encoding='utf-8') as f:
-                    json.dump(serializable_data, f, ensure_ascii=False, indent=2)
+                        # ファイル保存用に、Pydanticオブジェクトを再帰的に辞書へ変換
+                        serializable_data = _convert_pydantic_objects(data_for_saving)
+
+                        # ファイルの先頭に戻って書き込む
+                        f.seek(0)
+                        f.truncate()
+                        json.dump(serializable_data, f, ensure_ascii=False, indent=2)
+                        
+                    finally:
+                        # ロック解放
+                        fcntl.flock(f, fcntl.LOCK_UN)
             
             except Exception as e:
                 print(f"[ERROR in result_saver for node '{node_name}']: {e}")
