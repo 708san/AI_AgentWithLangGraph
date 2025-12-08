@@ -7,6 +7,7 @@ class AzureOpenAIWrapper:
             "api_key": api_key,
             "deployment_name": deployment_name,
             "api_version": api_version,
+            "max_tokens": 8192,
         }
         if model_name == 'gpt-4o':
             llm_params['temperature'] = 0.0

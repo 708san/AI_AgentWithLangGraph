@@ -1,73 +1,62 @@
 NUM_DIAGNOSES = 5
 
 prompt_dict = {
-    "diagnosis_prompt": """You are a senior clinical geneticist acting as a lead diagnostician. You have received preliminary reports from a suite of analytical tools (**PubCaseFinder, Zero-Shot Diagnosis, GestaltMatcher, and Phenotype Similarity Search**) and supporting literature from web searches. Your task is to synthesize these disparate findings from **all provided sources** into a single, cohesive differential diagnosis, citing evidence for your reasoning.
+    "diagnosis_prompt": """You are a senior clinical geneticist acting as a lead diagnostician. 
+**CRITICAL MISSION:** You must consolidate ALL potential diagnoses from the provided analytical tool reports into a single, comprehensive list. 
+**ABSOLUTE RULE:** DO NOT OMIT ANY CANDIDATE. Even if a disease appears only once with a low score, it MUST be included in the final output. 
 
-**Strict Output Format Rules:**
-- Do NOT use JSON, XML, or code blocks.
-- Do NOT use markdown bolding (**), italics (*), or other styling (these cause parsing errors).
-- Each diagnosis candidate must be strictly enclosed within `===CASE_START===` and `===CASE_END===` lines.
-- Each item must follow the `KEY::VALUE` format.
-- The `DESCRIPTION` value must be a single long line of text without line breaks.
-- After all diagnoses are listed, provide the references enclosed within `===REFERENCES_START===` and `===REFERENCES_END===`.
+**Input Sources:** 
+- PubCaseFinder (Phenotype-based) 
+- Zero-Shot Diagnosis (Generative AI) 
+- GestaltMatcher (Facial Analysis) 
+- Phenotype Similarity Search (Vector Search) 
 
-**Output Format Structure:**
+**Task:** 
+1. Extract every unique disease name mentioned in ANY of the input reports. 
+2. Remove exact duplicates (normalize names if obvious, e.g., "CDLS1" and "Cornelia de Lange Syndrome 1"). 
+3. Rank them based on multi-tool consensus and score strength. 
+4. Output the result strictly following the format below. 
 
-===CASE_START===
-RANK::[Integer]
-DISEASE::[The formal name of the most likely rare disease]
-OMIM::[The OMIM identifier, if available]
-DESCRIPTION::[A detailed, structured diagnostic reasoning. It must explain the evidence for and against the diagnosis, citing sources. IMPORTANT: Although the content must cover 'Clinical Rationale', 'Evidence from Analytical Tools', and 'Synthesis and Conclusion', you must write this as a SINGLE LONG LINE of text without line breaks.]
-===CASE_END===
+**Strict Output Format Rules:** 
+- Do NOT use JSON, XML, or code blocks. 
+- Do NOT use markdown bolding (**), italics (*), or other styling. 
+- Each diagnosis candidate must be strictly enclosed within `===CASE_START===` and `===CASE_END===` lines. 
+- Each item must follow the `KEY::VALUE` format. 
+- The `DESCRIPTION` value must be a **SINGLE LINE** of text. 
+- After all diagnoses are listed, provide the references enclosed within `===REFERENCES_START===` and `===REFERENCES_END===`. 
 
-(Repeat for EVERY unique diagnosis found in the reports)
+**Output Format Structure:** 
 
-===REFERENCES_START===
-[A numbered list of all sources cited in the 'description' field. Each entry must include the source type, a summary, and URL if available.]
-===REFERENCES_END===
+===CASE_START=== 
+RANK::[Integer] 
+DISEASE::[The formal name of the disease] 
+OMIM::[The OMIM identifier, or "N/A"] 
+DESCRIPTION::[A concise summary (max 2 sentences) stating WHY this disease is a candidate. Mention which tools supported it (e.g., "Supported by PCF (score 0.9) and ZeroShot (rank 1). Matches phenotype X, Y, Z.")] 
+===CASE_END=== 
 
-**Diagnostic Process Instructions:**
+(Repeat for EVERY unique diagnosis found. If there are 20 candidates, output 20 blocks.) 
 
-To generate this output, follow this structured clinical reasoning process:
+===REFERENCES_START=== 
+[A numbered list of all sources cited in the 'description' field.] 
+===REFERENCES_END=== 
 
-Step 1: Consolidate All Potential Candidates
-First, create a master list of all unique disease candidates mentioned across all reports (PubCaseFinder, Zero-Shot Diagnosis, GestaltMatcher, and Phenotype Similarity Search). Ensure there are no duplicates.
+--- 
+INPUT CONTEXT 
 
-Step 2: Synthesize Evidence and Re-rank Candidates
-For each unique candidate, systematically review which pieces of evidence from the INPUT CONTEXT support or contradict the diagnosis.
-You must prioritize candidates that are supported by multiple, independent analytical tools (e.g., a disease appearing in both Phenotype Similarity Search and PubCaseFinder). High scores from a single tool are less significant than multi-tool consensus.
-Based on this synthesis, create a new, final ranking. This ranking must include EVERY unique candidate identified across all reports. Do not omit any candidate, even if the likelihood seems low.
+I. Patient Information 
+Phenotype: {hpo_list} 
+Absent: {absent_hpo_list} 
+Onset: {onset} 
+Sex: {sex} 
 
-Step 3: Formulate Final Diagnosis with Detailed, Structured Reasoning
-For each diagnosis in your final list, write a detailed description in the `DESCRIPTION::` field. Within that single line of text, you must incorporate the following logic:
-1. Clinical Rationale: Systematically list the patient's phenotypes that are consistent with this diagnosis (Supporting Features) and identify atypical features (Contradictory Features). Cite sources.
-2. Evidence from Analytical Tools: Summarize the support from each analytical tool, including ranks and scores.
-3. Synthesis and Conclusion: Summarize the overall clinical plausibility.
+II. Analytical Tool Reports 
+[PubCaseFinder]: {pcf_results} 
+[Zero-Shot]: {zeroshot_results} 
+[GestaltMatcher]: {gestalt_matcher_results} 
+[Phenotype Search]: {phenotype_search_results} 
 
----
-INPUT CONTEXT (Sources for Citation)
-
-I. Patient Information
-
-Patient's Phenotype (HPO List): {hpo_list}
-
-Patient's Absent Phenotype (Absent HPO List): {absent_hpo_list}
-
-Onset: {onset}
-
-Sex: {sex}
-
-II. Analytical Tool Reports [IMPORTANT: Each tool's results are presented as a numbered list. Each item in the list is a separate potential diagnosis.]
-
-PubCaseFinder Report (Phenotype-based): {pcf_results}
-
-Zero-Shot Diagnosis Report (Generative AI-based): {zeroshot_results}
-
-GestaltMatcher Report (Facial Dysmorphology-based): {gestalt_matcher_results}
-
-Phenotype Similarity Search Report (Vector-based): {phenotype_search_results}
-
-III. Supporting Literature 9. Web Search Results (Literature/Case Reports): {web_search_results}
+III. Web Search 
+{web_search_results} 
 """,
 
     "zero-shot-diagnosis-prompt": """You are a specialist in the field of rare diseases.
