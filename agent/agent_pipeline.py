@@ -139,9 +139,9 @@ class RareDiseaseDiagnosisPipeline:
         graph_builder.add_edge(["NormalizeZeroShotNode", "NormalizePCFNode", "NormalizeGestaltMatcherNode", "HPOwebSearchNode", "DiseaseSearchWithHPONode"], "createDiagnosisNode")
         graph_builder.add_edge("createDiagnosisNode", "diseaseNormalizeNode")
         ###中断用
-        graph_builder.add_edge("diseaseNormalizeNode", END)
+        #graph_builder.add_edge("diseaseNormalizeNode", END)
         ###
-        """
+        
         graph_builder.add_edge("diseaseNormalizeNode", "diseaseSearchNode")
         graph_builder.add_edge("diseaseSearchNode", "reflectionNode")
         graph_builder.add_conditional_edges(
@@ -152,7 +152,7 @@ class RareDiseaseDiagnosisPipeline:
         )
         graph_builder.add_edge("finalDiagnosisNode", "diseaseNormalizeForFinalNode")
         graph_builder.add_edge("diseaseNormalizeForFinalNode", END)
-        """
+        
         return graph_builder.compile()
 
     def run(self, hpo_list, image_path=None, verbose=True, absent_hpo_list=None, onset=None, sex=None, patient_id=None):
