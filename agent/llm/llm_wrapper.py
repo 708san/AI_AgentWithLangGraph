@@ -10,10 +10,6 @@ class AzureOpenAIWrapper:
         }
         if model_name == 'gpt-4o':
             llm_params['temperature'] = 0.0
-            llm_params['max_tokens'] = 8192 
-        elif model_name == 'gpt-5':
-            # gpt-5では temperature は指定せず、max_completion_tokens を使用
-            llm_params['max_completion_tokens'] = 8192
         self.llm = AzureChatOpenAI(**llm_params)
 
     def get_structured_llm(self, output_schema):
