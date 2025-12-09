@@ -1,85 +1,63 @@
-NUM_DIAGNOSES = 10
+NUM_DIAGNOSES = 5
 
 prompt_dict = {
-    "diagnosis_prompt": f"""You are a senior clinical geneticist acting as a lead diagnostician. You have received preliminary reports from a suite of analytical tools (**PubCaseFinder, Zero-Shot Diagnosis, GestaltMatcher, and Phenotype Similarity Search**) and supporting literature from web searches. Your task is to synthesize these disparate findings from **all provided sources** into a single, cohesive differential diagnosis, citing evidence for your reasoning.
+    "diagnosis_prompt": """You are a senior clinical geneticist acting as a lead diagnostician. 
+**CRITICAL MISSION:** You must consolidate ALL potential diagnoses from the provided analytical tool reports into a single, comprehensive list. 
+**ABSOLUTE RULE:** DO NOT OMIT ANY CANDIDATE. Even if a disease appears only once with a low score, it MUST be included in the final output. 
 
-Your final output **must** be a JSON object that strictly adheres to the following Pydantic model structure:
-```python
-class DiagnosisFormat(BaseModel):
-    disease_name: str = Field(..., description="The formal name of the most likely rare disease, derived from synthesizing multiple data sources.")
-    OMIM_id: Optional[str] = Field(None, description="The OMIM identifier for the disease, if available.")
-    description: str = Field(..., description="A detailed, structured diagnostic reasoning. It must explain the evidence for and against the diagnosis, citing sources for each point, and conclude with a summary of the clinical plausibility.")
-    rank: int = Field(..., description="The final rank of the disease in the differential diagnosis list, where 1 is the most likely.")
+**Input Sources:** 
+- PubCaseFinder (Phenotype-based) 
+- Zero-Shot Diagnosis (Generative AI) 
+- GestaltMatcher (Facial Analysis) 
+- Phenotype Similarity Search (Vector Search) 
 
-class DiagnosisOutput(BaseModel):
-    ans: list['DiagnosisFormat']
-    reference: Optional[str] = Field(None, description="A numbered list of all sources cited in the 'description' field. Each entry must include the source type, a summary of its content, and a URL if available.")
-To generate this output, follow this structured clinical reasoning process:
+**Task:** 
+1. Extract every unique disease name mentioned in ANY of the input reports. 
+2. Remove exact duplicates (normalize names if obvious, e.g., "CDLS1" and "Cornelia de Lange Syndrome 1"). 
+3. Rank them based on multi-tool consensus and score strength. 
+4. Output the result strictly following the format below. 
 
-Step 1: Consolidate All Potential Candidates
+**Strict Output Format Rules:** 
+- Do NOT use JSON, XML, or code blocks. 
+- Do NOT use markdown bolding (**), italics (*), or other styling. 
+- Each diagnosis candidate must be strictly enclosed within `===CASE_START===` and `===CASE_END===` lines. 
+- Each item must follow the `KEY::VALUE` format. 
+- The `DESCRIPTION` value must be a **SINGLE LINE** of text. 
+- After all diagnoses are listed, provide the references enclosed within `===REFERENCES_START===` and `===REFERENCES_END===`. 
 
-First, create a master list of all unique disease candidates mentioned across all reports (PubCaseFinder, Zero-Shot Diagnosis, GestaltMatcher, and Phenotype Similarity Search).
+**Output Format Structure:** 
 
-Step 2: Synthesize Evidence and Re-rank Candidates
+===CASE_START=== 
+RANK::[Integer] 
+DISEASE::[The formal name of the disease] 
+OMIM::[The OMIM identifier, or "N/A"] 
+DESCRIPTION::[A concise summary (max 2 sentences) stating WHY this disease is a candidate. Mention which tools supported it (e.g., "Supported by PCF (score 0.9) and ZeroShot (rank 1). Matches phenotype X, Y, Z.")] 
+===CASE_END=== 
 
-For each unique candidate, systematically review which pieces of evidence from the INPUT CONTEXT support or contradict the diagnosis.
+(Repeat for EVERY unique diagnosis found. If there are 20 candidates, output 20 blocks.) 
 
-You must prioritize candidates that are supported by multiple, independent analytical tools (e.g., a disease appearing in both Phenotype Similarity Search and PubCaseFinder). High scores from a single tool are less significant than multi-tool consensus.
+===REFERENCES_START=== 
+[A numbered list of all sources cited in the 'description' field.] 
+===REFERENCES_END=== 
 
-Based on this synthesis, create a new, final ranking. This ranking must strictly contain exactly {NUM_DIAGNOSES} diagnoses.
+--- 
+INPUT CONTEXT 
 
-To achieve this, you must rank the top {NUM_DIAGNOSES} most plausible candidates from your consolidated list, from most to least likely. Do not omit lower-ranked candidates even if their clinical plausibility seems low.
+I. Patient Information 
+Phenotype: {hpo_list} 
+Absent: {absent_hpo_list} 
+Onset: {onset} 
+Sex: {sex} 
 
-Step 3: Formulate Final Diagnosis with Detailed, Structured Reasoning
+II. Analytical Tool Reports 
+[PubCaseFinder]: {pcf_results} 
+[Zero-Shot]: {zeroshot_results} 
+[GestaltMatcher]: {gestalt_matcher_results} 
+[Phenotype Search]: {phenotype_search_results} 
 
-For each diagnosis in your final list (ans), write a detailed description following this exact structure with markdown headings:
-
-### Clinical Rationale
-
-Supporting Features: Systematically list the patient's phenotypes that are consistent with this diagnosis. For each feature, cite the source(s) that establish its relevance to the disease (e.g., "The patient's synophrys is a hallmark feature of CdLS [8][9].").
-
-Contradictory or Atypical Features: Explicitly identify any patient phenotypes that are atypical for the diagnosis, or list key, expected symptoms that are MISSING. Explain why these inconsistencies might not rule out the diagnosis, citing evidence on phenotypic variability if possible.
-
-### Evidence from Analytical Tools
-
-Summarize the support from each analytical tool that mentioned this diagnosis. State the rank and score if available (e.g., "This diagnosis was ranked #1 by Phenotype Similarity Search with a high score of 0.901 [8], and also appeared in the PubCaseFinder report [5].").
-
-### Synthesis and Conclusion
-
-Provide a concluding sentence that summarizes the overall clinical plausibility based on the balance of evidence, especially highlighting the convergence of evidence from multiple tools.
-
-After creating the list of diagnoses, create the reference section:
-
-This must be a single string containing a numbered list of all sources you cited in the description fields.
-
-Each numbered entry must correspond to an in-text citation.
-
-For each reference, specify its source type (e.g., "PubCaseFinder Report", "Phenotype Similarity Search Report", "Web Search Result"), provide a brief summary of the relevant information, and include a URL if available.
-
-Now, perform this evaluation for the following case and provide the final, complete JSON output.
-INPUT CONTEXT (Sources for Citation)
-
-I. Patient Information
-
-Patient's Phenotype (HPO List): {{hpo_list}}
-
-Patient's Absent Phenotype (Absent HPO List): {{absent_hpo_list}}
-
-Onset: {{onset}}
-
-Sex: {{sex}}
-
-II. Analytical Tool Reports [IMPORTANT: Each tool's results are presented as a numbered list. Each item in the list is a separate potential diagnosis.]
-
-PubCaseFinder Report (Phenotype-based): {{pcf_results}}
-
-Zero-Shot Diagnosis Report (Generative AI-based): {{zeroshot_results}}
-
-GestaltMatcher Report (Facial Dysmorphology-based): {{gestalt_matcher_results}}
-
-Phenotype Similarity Search Report (Vector-based): {{phenotype_search_results}}
-
-III. Supporting Literature 9. Web Search Results (Literature/Case Reports): {{web_search_results}} """,
+III. Web Search 
+{web_search_results} 
+""",
 
     "zero-shot-diagnosis-prompt": """You are a specialist in the field of rare diseases.
 You will be provided and asked about a complicated clinical case; read it carefully and then provide a diverse and comprehensive differential diagnosis.
