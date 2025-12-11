@@ -16,8 +16,9 @@ class AzureOpenAIWrapper:
             # gpt-5では temperature は指定せず、max_completion_tokens を使用
             llm_params['model_kwargs'] = {
                 "extra_body": {
-                    "max_completion_tokens": 15000,
-                    "verbosity": "low"
+                    "max_completion_tokens": 8192,
+                    "verbosity": "medium",
+                    "reasoning_effort": "none"
                 }
             }
 

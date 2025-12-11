@@ -215,7 +215,7 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     diagnosis_output = parse_diagnosis_text(content)
 
     
-    if diagnosis_json:
-        return (diagnosis_json, prompt)
+    if diagnosis_output and diagnosis_output.ans:
+        return (diagnosis_output, prompt)
     
     return None, None
