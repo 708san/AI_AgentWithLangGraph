@@ -207,9 +207,10 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     # llm is AzureOpenAIWrapper, llm.llm is AzureChatOpenAI
     response = llm.llm.invoke(messages)
     content = response.content
-    print("\n[DEBUG] createDiagnosis Raw Output:")
-    print(content)
-    print("[DEBUG] End of Raw Output\n")
+    
+    #print("\n[DEBUG] createDiagnosis Raw Output:")
+    #print(content)
+    #print("[DEBUG] End of Raw Output\n")
     
     # Parse the text content into DiagnosisOutput
     diagnosis_output = parse_diagnosis_text(content)
