@@ -1,46 +1,8 @@
 import json
-import re
 from typing import List, Optional
 from langchain.schema import HumanMessage
-from ..state.state_types import State, DiagnosisOutput, DiagnosisFormat, ZeroShotOutput, PCFres, PhenotypeSearchFormat
-from ..llm.prompt import prompt_dict, build_prompt
-
-def parse_diagnosis_text(text: str) -> DiagnosisOutput:
-    """
-    LLMのテキスト出力をパースしてDiagnosisOutputオブジェクトに変換する。
-    """
-    cases = []
-    # Extract cases
-    case_blocks = re.findall(r"===CASE_START===(.*?)===CASE_END===", text, re.DOTALL)
-    
-    for block in case_blocks:
-        rank_match = re.search(r"RANK::(\d+)", block)
-        disease_match = re.search(r"DISEASE::(.*)", block)
-        omim_match = re.search(r"OMIM::(.*)", block)
-        desc_match = re.search(r"DESCRIPTION::(.*)", block, re.DOTALL)
-        
-        if rank_match and disease_match and desc_match:
-            rank = int(rank_match.group(1).strip())
-            disease = disease_match.group(1).strip()
-            omim = omim_match.group(1).strip() if omim_match else None
-            desc = desc_match.group(1).strip()
-            
-            # Clean up OMIM if it's "None" or empty or "N/A"
-            if omim and (omim.lower() == "none" or omim.lower() == "n/a" or not omim):
-                omim = None
-                
-            cases.append(DiagnosisFormat(
-                rank=rank,
-                disease_name=disease,
-                OMIM_id=omim,
-                description=desc
-            ))
-            
-    # Extract references
-    ref_match = re.search(r"===REFERENCES_START===(.*?)===REFERENCES_END===", text, re.DOTALL)
-    references = ref_match.group(1).strip() if ref_match else None
-    
-    return DiagnosisOutput(ans=cases, reference=references)
+from ..state.state_types import State, DiagnosisOutput, ZeroShotOutput, PCFres, PhenotypeSearchFormat
+from ..llm.prompt import prompt_dict
 
 def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     """
@@ -76,7 +38,7 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     # Web search results
     web_text = "\n".join([f"- {res.get('title', 'No Title')}: {res.get('content', 'No Content')}" for res in web_search_results]) if web_search_results else "No relevant web search results found."
     
-    # Phenotype search results
+    # Phenotype search results (修正箇所)
     phenotype_lines = []
     if phenotype_search_results:
         for i, res in enumerate(phenotype_search_results):
@@ -93,6 +55,7 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
         phenotype_search_text = "\n".join(phenotype_lines)
     else:
         phenotype_search_text = "No results from Phenotype Similarity Search."
+
 
     # Assemble the prompt
     # prompt_dict["diagnosis_prompt"] は f-string ではないため、.format() を使用して値を埋め込む
@@ -219,8 +182,8 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     else:
         phenotype_search_text = "No results from Phenotype Similarity Search."
 
+
     # Assemble the prompt
-    # prompt_dict["diagnosis_prompt"] は f-string ではないため、.format() を使用して値を埋め込む
     prompt = prompt_dict["diagnosis_prompt"].format(
         hpo_list=", ".join(hpo_list),
         absent_hpo_list=", ".join(absent_hpo_list),
@@ -234,9 +197,13 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     )
 
     # --- Query the LLM to get the diagnosis result ---
-    # Use standard invoke to get text output, then parse it
+    # Get a structured LLM instance that outputs in the DiagnosisOutput format
+    structured_llm = llm.get_structured_llm(DiagnosisOutput)
+
+    # Create the message payload for the LLM
     messages = [HumanMessage(content=prompt)]
     
+
     # llm is AzureOpenAIWrapper, llm.llm is AzureChatOpenAI
     response = llm.llm.invoke(messages)
     content = response.content
@@ -246,8 +213,9 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     
     # Parse the text content into DiagnosisOutput
     diagnosis_output = parse_diagnosis_text(content)
+
     
-    if diagnosis_output and diagnosis_output.ans:
-        return (diagnosis_output, prompt)
+    if diagnosis_json:
+        return (diagnosis_json, prompt)
     
     return None, None

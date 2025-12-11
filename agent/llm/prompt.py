@@ -1,6 +1,7 @@
-NUM_DIAGNOSES = 5
+NUM_DIAGNOSES = 10
 
 prompt_dict = {
+
     "diagnosis_prompt": """You are a senior clinical geneticist acting as a lead diagnostician. 
 **CRITICAL MISSION:** You must consolidate ALL potential diagnoses from the provided analytical tool reports into a single, comprehensive list. 
 **ABSOLUTE RULE:** DO NOT OMIT ANY CANDIDATE. Even if a disease appears only once with a low score, it MUST be included in the final output. 
@@ -58,6 +59,7 @@ II. Analytical Tool Reports
 III. Web Search 
 {web_search_results} 
 """,
+
 
     "zero-shot-diagnosis-prompt": """You are a specialist in the field of rare diseases.
 You will be provided and asked about a complicated clinical case; read it carefully and then provide a diverse and comprehensive differential diagnosis.

@@ -87,7 +87,7 @@ class RareDiseaseDiagnosisPipeline:
             # 1. depthのチェック
             depth = state.get("depth", 0)
             print(f"Current depth: {depth}")
-            if depth > 0:
+            if depth > 2:
                 print("Depth limit reached, forcing to finalDiagnosisNode.")
                 return "ProceedToFinalDiagnosisNode"
 
