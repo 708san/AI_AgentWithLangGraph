@@ -73,7 +73,7 @@ def embedding_search_with_hpo(state: State) -> Optional[List[PhenotypeSearchForm
         print("Generated query text is empty. Skipping phenotype search.")
         return None
     
-    print(f"Phenotype search query: {query_text}")
+    #print(f"Phenotype search query: {query_text}")
 
     try:
         # 2. Vectorize the query

@@ -34,7 +34,7 @@ OMIM::[The OMIM identifier, or "N/A"]
 DESCRIPTION::[A concise summary (max 2 sentences) stating WHY this disease is a candidate. Mention which tools supported it (e.g., "Supported by PCF (score 0.9) and ZeroShot (rank 1). Matches phenotype X, Y, Z.")] 
 ===CASE_END=== 
 
-(Repeat for EVERY unique diagnosis found. If there are 20 candidates, output 20 blocks.) 
+(Repeat for EVERY unique diagnosis found.) 
 
 ===REFERENCES_START=== 
 [A numbered list of all sources cited in the 'description' field.] 
