@@ -155,7 +155,7 @@ class RareDiseaseDiagnosisPipeline:
         
         return graph_builder.compile()
 
-    def run(self, hpo_list, image_path=None, verbose=True, absent_hpo_list=None, onset=None, sex=None, patient_id=None):
+    def run(self, hpo_list, image_path=None, verbose=False, absent_hpo_list=None, onset=None, sex=None, patient_id=None):
         initial_state = {
             "depth": 0,
             "clinicalText": None,
