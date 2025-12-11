@@ -53,9 +53,9 @@ def create_reflection(state: State, diagnosis_to_judge):
     structured_llm = llm.get_structured_llm(ReflectionFormat)
     prompt = build_prompt(prompt_template, inputs)
     
-    print("reflection prompt\n")
-    print(prompt)
-    print("\n")
+    #print("reflection prompt\n")
+    #print(prompt)
+    #print("\n")
     
     messages = [HumanMessage(content=prompt)]
     result = structured_llm.invoke(messages)
