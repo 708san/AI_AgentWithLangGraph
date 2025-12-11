@@ -1,0 +1,639 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "properties": {
+        "id": {
+            "type": "string",
+            "pattern": "^PMID.*"
+        },
+        "subject": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "sex": {
+                    "type": "string",
+                    "enum": [
+                        "MALE",
+                        "FEMALE",
+                        "UNKNOWN_SEX",
+                        "OTHER_SEX"
+                    ]
+                },
+                "timeAtLastEncounter": {
+                    "type": "object",
+                    "properties": {
+                        "age": {
+                            "type": "object",
+                            "properties": {
+                                "iso8601duration": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "iso8601duration"
+                            ],
+                            "additionalProperties": false
+                        },
+                        "ontologyClass": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "pattern": "^HP:.*"
+                                },
+                                "label": {
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "id",
+                                "label"
+                            ],
+                            "additionalProperties": false
+                        }
+                    },
+                    "anyOf": [
+                        { "required": ["age"] },          
+                        { "required": ["ontologyClass"] } 
+                    ],
+                    "additionalProperties": false
+                },
+                "vitalStatus": {
+                    "type": "object",
+                    "properties": {
+                        "status": {
+                            "type": "string",
+                            "enum": [
+                                "ALIVE",
+                                "UNKNOWN_STATUS",
+                                "DECEASED"
+                            ]
+                        },
+                         "timeOfDeath":{
+                            "type":"object",
+                            "properties": {
+                                "age":{
+                                    "type":"object",
+                                    "properties": {
+                                        "iso8601duration":{
+                                            "type":"string"
+                                        }
+                                    },
+                                    "required": ["iso8601duration"],
+                                    "additionalProperties": false
+                                },
+                                "ontologyClass":{
+                                    "type":"object",
+                                    "properties": {
+                                    "id": {
+                                        "type": "string",
+                                        "pattern": "^HP:.*"
+                                    },
+                                    "label": {
+                                        "type": "string"
+                                    }
+                                },
+                                "required": [
+                                    "id",
+                                    "label"
+                                ],
+                                "additionalProperties": false
+                                }
+                            },
+                            "anyOf": [
+                                { "required": ["age"] },         
+                                { "required": ["ontologyClass"] } 
+                            ],
+                            "additionalProperties": false
+                        }
+                    },
+                    "additionalProperties": false,
+                   "allOf": [
+        {
+            
+            "if": {
+                "not": {
+                    "properties": {
+                        "status": {
+                            "const": "DECEASED"
+                        }
+                    },
+                    "required": ["status"] 
+                }
+            },
+            "then": {
+                
+                "properties": {
+                    "timeOfDeath": false
+                }
+               
+            }
+           
+        }
+    ]
+                    }
+                    },
+            "required": ["id"],
+            "additionalProperties": false
+            },
+        "phenotypicFeatures": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "type": {
+                        "type": "object",
+                        "properties": {
+                            "id": {
+                                "type": "string",
+                                "pattern": "^HP:.*"
+                            },
+                            "label": {
+                                "type": "string"
+                            }
+                        },
+                        "required": [
+                            "id",
+                            "label"
+                        ],
+                        "additionalProperties": false
+                    },
+                    "onset": {
+                        "type": "object",
+                        "properties": {
+                            "ontologyClass": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {
+                                        "type": "string",
+                                        "pattern": "^HP:.*"
+                                    },
+                                    "label": {
+                                        "type": "string"
+                                    }
+                                },
+                                "required": [
+                                    "id",
+                                    "label"
+                                ],
+                                "additionalProperties": false
+                            },
+                            "age":{
+                                "type":"object",
+                                    "properties": {
+                                        "iso8601duration":{
+                                            "type":"string"
+                                        }
+                                    },
+                                    "required": ["iso8601duration"],
+                                    "additionalProperties": false
+                            }
+                        },
+                        "anyOf": [
+                                { "required": ["age"] },         
+                                { "required": ["ontologyClass"] } 
+                            ],
+                        "additionalProperties": false
+                    },
+                    "excluded": {
+                        "type": "boolean"
+                    }
+                },
+                "required": [
+                    "type"
+                ],
+                "additionalProperties": false
+            },
+            "minItems":1
+        },
+        "measurements": {
+            "type": "array",
+            "items": {
+                "type": "object",
+            
+            "properties": {
+                "assay": {
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "string"
+                        },
+                        "label": {
+                            "type": "string"
+                        }
+                    },
+                    "required": ["id","label"],
+                    "additionalProperties": false
+                },
+                "value": {
+                    "type": "object",
+                    "properties": {
+                        "quantity": {
+                            "type": "object",
+                            "properties": {
+                                "unit": {
+                                    "type": "object",
+                                    "properties": {
+                                        "id": {
+                                            "type": "string"
+                                        },
+                                        "label": {
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "id",
+                                        "label"
+                                    ],
+                                    "additionalProperties": false
+                                },
+                                "value": {
+                                    "type": "number"
+                                },
+                                "referenceRange": {
+                                    "type": "object",
+                                    "properties": {
+                                        "unit": {
+                                            "type": "object",
+                                            "properties": {
+                                                "id": {
+                                                    "type": "string"
+                                                },
+                                                "label": {
+                                                    "type": "string"
+                                                }
+                                            },
+                                            "required": [
+                                                "id",
+                                                "label"
+                                            ],
+                                            "additionalProperties": false
+                                        },
+                                        "low": {
+                                            "type": "number"
+                                        },
+                                        "high": {
+                                            "type": "number"
+                                        }
+                                    },
+                                    "required": [
+                                        "unit",
+                                        "low",
+                                        "high"
+                                    ],
+                                    "additionalProperties": false
+                                }
+                            },
+                            "additionalProperties": false,
+                            "required": [
+                                "unit",
+                                "value"
+                            ]
+                        }
+                    },
+                    "required": [
+                        "quantity"
+                    ],
+                    "additionalProperties": false
+                }
+            },
+            "required": ["assay","value"],
+            "additionalProperties": false
+        }
+    },
+        "interpretations": {
+            "type": "array",
+            "minItems":1,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string"
+                    },
+                    "progressStatus": {
+                        "type": "string",
+                        "enum": [
+                            "UNKNOWN_PROGRESS",
+                            "IN_PROGRESS",
+                            "COMPLETED",
+                            "SOLVED",
+                            "UNSOLVED"
+                        ]
+                    },
+                    "diagnosis": {
+                        "type": "object",
+                        "properties": {
+                            "disease": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {
+                                        "type": "string",
+                                        "pattern": "^OMIM:.*"
+                                    },
+                                    "label": {
+                                        "type": "string"
+                                    }
+                                },
+                                "required": [
+                                    "id",
+                                    "label"
+                                ],
+                                "additionalProperties": false
+                            },
+                            "genomicInterpretations": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "subjectOrBiosampleId": {
+                                            "type": "string"
+                                        },
+                                        "interpretationStatus": {
+                                            "type": "string",
+                                            "enum": [
+                                                "UNKNOWN_STATUS",
+                                                "REJECTED",
+                                                "CANDIDATE",
+                                                "CONTRIBUTORY",
+                                                "CAUSATIVE"
+                                            ]
+                                        },
+                                        "variantInterpretation": {
+                                            "type": "object",
+                                            "properties": {
+                                                "variationDescriptor": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "id": {
+                                                            "type": "string",
+                                                            "pattern": "^var_[a-zA-Z]{25}$"
+                                                        },
+                                                        "label": {
+                                                            "type": "string"
+                                                        },
+                                                        "description": {
+                                                            "type": "string"
+                                                        },
+                                                        "geneContext": {
+                                                            "type": "object",
+                                                            "properties": {
+                                                                "valueId": {
+                                                                    "type": "string",
+                                                                    "pattern": "^HGNC:.*"
+                                                                },
+                                                                "symbol": {
+                                                                    "type": "string"
+                                                                }
+                                                            },
+                                                            "required": [
+                                                                "valueId",
+                                                                "symbol"
+                                                            ],
+                                                            "additionalProperties": false
+                                                        },
+                                                        "expressions": {
+                                                            "type": "array",
+                                                            "items": {
+                                                                "type": "object",
+                                                                "properties": {
+                                                                    "syntax": {
+                                                                        "type": "string",
+                                                                        "enum": [
+                                                                            "hgvs.g",
+                                                                            "hgvs.c",
+                                                                            "hgvs.p",
+                                                                            "hgvs.m",
+                                                                            "hgvs.n",
+                                                                            "hgvs.r"
+                                                                        ]
+                                                                    },
+                                                                    "value": {
+                                                                        "type": "string"
+                                                                    }
+                                                                },
+                                                                "required": [
+                                                                    "syntax",
+                                                                    "value"
+                                                                ],
+                                                                "additionalProperties": false
+                                                            }
+                                                        },
+                                                        "vcfRecord": {
+                                                            "type": "object",
+                                                            "properties": {
+                                                                "genomeAssembly": {
+                                                                    "type": "string",
+                                                                    "pattern": "^hg38$"
+                                                                },
+                                                                "chrom": {
+                                                                    "type": "string",
+                                                                    "pattern": "^chr.*"
+                                                                },
+                                                                "pos": {
+                                                                    "type": "string"
+                                                                },
+                                                                "ref": {
+                                                                    "type": "string",
+                                                                    "pattern": "^[ATGC]+$"
+                                                                },
+                                                                "alt": {
+                                                                    "type": "string",
+                                                                    "pattern": "^[ATGC]+$"
+                                                                }
+                                                            },
+                                                            "required": [
+                                                                "genomeAssembly",
+                                                                "chrom",
+                                                                "pos",
+                                                                "ref",
+                                                                "alt"
+                                                            ],
+                                                            "additionalProperties": false
+                                                        },
+                                                        "moleculeContext": {
+                                                            "type": "string"
+                                                        },
+                                                        "allelicState": {
+                                                            "type": "object",
+                                                            "properties": {
+                                                                "id": {
+                                                                    "type": "string",
+                                                                    "pattern": "^(HP|GENO):.*$"
+                                                                },
+                                                                "label": {
+                                                                    "type": "string"
+                                                                }
+                                                            },
+                                                            "required": [
+                                                                "id",
+                                                                "label"
+                                                            ],
+                                                            "additionalProperties": false
+                                                        },
+                                                        "structuralType": {
+                                                            "type": "object",
+                                                            "properties": {
+                                                                "id": {
+                                                                    "type": "string"
+                                                                },
+                                                                "label": {
+                                                                    "type": "string"
+                                                                }
+                                                            },
+                                                            "required": ["id","label"],
+                                                            "additionalProperties": false
+                                                        }
+                                                    },
+                                                    "required": [ "id", "allelicState"],
+                                                    "additionalProperties": false
+                                                }
+                                            },
+                                            "required": [ "variationDescriptor"],
+                                            "additionalProperties": false
+                                        }
+                                    },
+                                    "required": ["subjectOrBiosampleId", "interpretationStatus", "variantInterpretation"],
+                                    "additionalProperties": false
+                                }
+                            }
+                        },
+                        "required": ["disease", "genomicInterpretations"]
+                    }
+                },
+                "required": [ "id","progressStatus", "diagnosis"],
+                "additionalProperties": false
+            }
+        },
+        "diseases": {
+            "type": "array",
+            "minItems":1,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "term": {
+                        "type": "object",
+                        "properties": {
+                            "id": {
+                                "type": "string",
+                                "pattern": "OMIM.*"
+                            },
+                            "label": {
+                                "type": "string"
+                            }
+                        },
+                        "required": [ "id", "label" ],
+                        "additionalProperties": false
+                    },
+                    "onset": {
+                        "type": "object",
+                        "properties": {
+                            "ontologyClass": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {
+                                        "type": "string",
+                                        "pattern": "^HP:.*"
+                                    },
+                                    "label": {
+                                        "type": "string"
+                                    }
+                                },
+                                "required": ["id", "label"],
+                                "additionalProperties": false
+                            },
+                            "age": {
+                                "type": "object",
+                                "properties": {
+                                    "iso8601duration": {
+                                        "type": "string"
+                                    }
+                                },
+                                "required": ["iso8601duration"],
+                                "additionalProperties": false
+                            }
+                        },
+                        "anyOf": [
+                                { "required": ["age"] },         
+                                { "required": ["ontologyClass"] } 
+                            ],
+                        "additionalProperties": false
+                    }
+                },
+                "required": ["term"],
+                "additionalProperties": false
+            }
+        },
+        "metaData": {
+            "type": "object",
+            "properties": {
+                "created": {
+                    "type": "string",
+                    "format": "date-time"
+                },
+                "createdBy": {
+                    "type": "string"
+                },
+                "resources": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {
+                                "type": "string"
+                            },
+                            "name": {
+                                "type": "string"
+                            },
+                            "url": {
+                                "type": "string",
+                                "format": "uri"
+                            },
+                            "version": {
+                                "type": "string"
+                            },
+                            "namespacePrefix": {
+                                "type": "string"
+                            },
+                            "iriPrefix": {
+                                "type": "string",
+                                "format": "uri"
+                            }
+                        },
+                        "required": ["id", "name", "url", "version", "namespacePrefix", "iriPrefix"],
+                        "additionalProperties": false
+                    }
+                },
+                "phenopacketSchemaVersion": {
+                    "type": "string"
+                },
+                "externalReferences": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "id": {
+                                "type": "string",
+                                "pattern": "^PMID:.*"
+                            },
+                            "reference": {
+                                "type": "string",
+                                "pattern": "^http.*"
+                            },
+                            "description": {
+                                "type": "string"
+                            }
+                        },
+                        "required": ["id", "reference", "description"],
+                        "additionalProperties": false
+                    }
+                }
+            },
+            "required": ["created", "createdBy", "resources", "phenopacketSchemaVersion", "externalReferences"],
+            "additionalProperties": false
+        }
+    },
+    "required": ["id", "subject", "interpretations", "diseases", "metaData"],
+    "additionalProperties": false
+}
