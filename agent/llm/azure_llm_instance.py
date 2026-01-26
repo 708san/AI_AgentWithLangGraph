@@ -16,12 +16,18 @@ def get_llm_instance(model_name: str = 'gpt-4o'):
         api_key = os.environ.get("AZURE_OPENAI_4o_API_KEY")
         deployment_name = os.environ.get("AZURE_OPENAI_4o_DEPLOYMENT_NAME")
         api_version = os.environ.get("AZURE_OPENAI_4o_API_VERSION")
-    elif model_name == 'gpt-5':
+    elif model_name == 'gpt-5-1':
         # GPT-5用の環境変数を設定（.envファイルに追記が必要）
-        endpoint = os.environ.get("AZURE_OPENAI_5_ENDPOINT")
-        api_key = os.environ.get("AZURE_OPENAI_5_API_KEY")
-        deployment_name = os.environ.get("AZURE_OPENAI_5_DEPLOYMENT_NAME")
-        api_version = os.environ.get("AZURE_OPENAI_5_API_VERSION")
+        endpoint = os.environ.get("AZURE_OPENAI_5-1_ENDPOINT")
+        api_key = os.environ.get("AZURE_OPENAI_5-1_API_KEY")
+        deployment_name = os.environ.get("AZURE_OPENAI_5-1_DEPLOYMENT_NAME")
+        api_version = os.environ.get("AZURE_OPENAI_5-1_API_VERSION")
+    elif model_name == 'gpt-5-2':
+        # GPT-5.2用の環境変数を設定（.envファイルに追記が必要）
+        endpoint = os.environ.get("AZURE_OPENAI_5-2_ENDPOINT")
+        api_key = os.environ.get("AZURE_OPENAI_5-2_API_KEY")
+        deployment_name = os.environ.get("AZURE_OPENAI_5-2_DEPLOYMENT_NAME")
+        api_version = os.environ.get("AZURE_OPENAI_5-2_API_VERSION")
     else:
         raise ValueError(f"Unsupported model_name: {model_name}")
 

@@ -147,6 +147,8 @@ def log_node_result(logfile_path: str, node_name: str, result: any):
                 # reflectionNodeの場合、結果本体は"reflection"キーの中身
                 if node_name == "reflectionNode":
                     core_result = result.get("reflection", result)
+                elif node_name == "finalDiagnosisNode":
+                    core_result = result.get("finalDiagnosis", result)
                 else:
                     core_result = result.get("result", result)
 

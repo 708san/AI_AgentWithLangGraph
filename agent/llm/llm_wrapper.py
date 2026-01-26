@@ -12,7 +12,7 @@ class AzureOpenAIWrapper:
             llm_params['temperature'] = 0.0
 
             llm_params['max_tokens'] = 8192 
-        elif model_name == 'gpt-5':
+        elif model_name in ['gpt-5-1', 'gpt-5-2']:
             # gpt-5では temperature は指定せず、max_completion_tokens を使用
             llm_params['model_kwargs'] = {
                 "extra_body": {

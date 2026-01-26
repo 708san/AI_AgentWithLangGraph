@@ -1,12 +1,12 @@
 from typing import List, Dict, Any
 from langchain_community.retrievers import PubMedRetriever, WikipediaRetriever
 from ..state.state_types import State, InformationItem
-from ..llm.azure_llm_instance import azure_llm
+from ..llm.llm_wrapper import AzureOpenAIWrapper
 
 
-def summarize_text(text: str) -> str:
+def summarize_text(text: str, llm: AzureOpenAIWrapper) -> str:
     """
-    入力テキストを要約する関数（azure_llmを利用）
+    入力テキストを要約する関数
     """
     try:
         prompt = """
@@ -65,31 +65,35 @@ Unique Constellation: [Describe a diagnostically powerful combination of symptom
 
 Now, process the following text:
 
-""" + text  
-        summary_msg = azure_llm.generate(prompt)
+""" + text
+        summary_msg = llm.generate(prompt)
         summary = summary_msg.content if hasattr(summary_msg, "content") else str(summary_msg)
         return summary.strip()
     except Exception as e:
         print(f"要約時にエラー: {e}")
-        return text  
+        return text
 
 def diseaseSearchForDiagnosis(state: State) -> Dict[str, List[InformationItem]]:
     """
     暫定診断リストの各疾患について知識検索を実行し、重複を避けながらStateのmemoryに結果を追加する。
     """
     print("🔬 知識検索を開始します...")
-    
+
     # Stateから必要な情報を取得
+    llm = state.get("llm")
     tentativeDiagnosis = state.get("tentativeDiagnosis")
     search_depth = state.get("depth", 1)
-    
+
+    if not llm:
+        print("LLMインスタンスがstate内に見つかりません。検索をスキップします。")
+        return {"memory": state.get("memory", [])}
+
     # 既存のmemoryと、そこに含まれるURLのセットを取得
     memory = state.get("memory", [])
     retrieved_urls = {item['url'] for item in memory}
 
     if not tentativeDiagnosis or not hasattr(tentativeDiagnosis, "ans"):
         print("暫定診断が見つからないため、検索をスキップします。")
-        # 変更がない場合でも、現在のmemoryを返すのが安全
         return {"memory": memory}
 
     disease_names = [diag.disease_name for diag in tentativeDiagnosis.ans]
@@ -105,12 +109,12 @@ def diseaseSearchForDiagnosis(state: State) -> Dict[str, List[InformationItem]]:
         for name in disease_names:
             print(f"    - [Wikipedia] 「{name}」を検索中...")
             wiki_docs = wiki_retriever.invoke(name)
-            
+
             for doc in wiki_docs:
                 url = doc.metadata.get("source", "N/A")
                 if url not in retrieved_urls:
                     print(f"      - 新規情報を追加: {url}")
-                    summary = summarize_text(doc.page_content)
+                    summary = summarize_text(doc.page_content, llm)
                     memory.append({
                         "title": doc.metadata.get("title", name),
                         "url": url,
@@ -132,18 +136,18 @@ def diseaseSearchForDiagnosis(state: State) -> Dict[str, List[InformationItem]]:
                 url = f"https://pubmed.ncbi.nlm.nih.gov/{doc.metadata['uid']}/"
                 if url not in retrieved_urls:
                     print(f"      - 新規情報を追加: {url}")
-                    summary = summarize_text(doc.page_content)
+                    summary = summarize_text(doc.page_content, llm)
                     memory.append({
                         "title": doc.metadata.get("Title", name),
                         "url": url,
                         "content": f"[Source: PubMed] {summary}",
-                        "disease_name": name  
+                        "disease_name": name
                     })
                     retrieved_urls.add(url)
     except Exception as e:
         print(f"    - [PubMed] 検索でエラーが発生しました: {e}")
-            
+
     print("✅ 知識検索が完了しました。")
-    
+
     return {"memory": memory}
     

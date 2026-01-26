@@ -36,13 +36,26 @@ def createFinalDiagnosis(state: State) -> Optional[DiagnosisOutput]:
 
     # Format reflection (ReflectionOutput type or None) as string, including reference
     if judgements is not None and hasattr(judgements, "ans"):
-        judgements_str = "\n".join([
-            f"{i+1}. {getattr(item, 'disease_name', '')}\nCorrectness: {getattr(item, 'Correctness', '')}\nPatientSummary: {getattr(item, 'PatientSummary', '')}\nDiagnosisAnalysis: {getattr(item, 'DiagnosisAnalysis', '')}\nReference: {getattr(item, 'reference', '')}"
-            for i, item in enumerate(judgements.ans)
-        ])
+        judgements_list = []
+        for i, item in enumerate(judgements.ans):
+            # referencesリストを文字列に変換
+            refs = getattr(item, 'references', [])
+            refs_str = "\n".join([f"  - {r}" for r in refs]) if refs else "No specific references listed."
+            
+            judgement_entry = (
+                f"{i+1}. {getattr(item, 'disease_name', '')}\n"
+                f"Correctness: {getattr(item, 'Correctness', '')}\n"
+                f"PatientSummary: {getattr(item, 'PatientSummary', '')}\n"
+                f"DiagnosisAnalysis: {getattr(item, 'DiagnosisAnalysis', '')}\n"
+                f"References:\n{refs_str}" # ここでreferencesを含める
+            )
+            judgements_list.append(judgement_entry)
+            
+        judgements_str = "\n\n".join(judgements_list)
        
+        # ReflectionOutput全体のreferenceがあればそれも追加（定義上はないかもしれないが念のため）
         if hasattr(judgements, "reference") and judgements.reference:
-            judgements_str += f"\n[ReflectionOutput Reference]: {judgements.reference}"
+            judgements_str += f"\n\n[ReflectionOutput Reference]: {judgements.reference}"
     else:
         judgements_str = ""
 

@@ -43,23 +43,25 @@ def parse_phenopacket(file_path: str) -> dict:
         "absent_hpo_list": absent_hpo_list
     }
 
-def format_final_diagnosis(final_diagnosis_obj) -> list:
+def format_final_diagnosis(final_diagnosis_obj) -> dict:
     """
-    パイプラインから返されたfinalDiagnosisオブジェクトを単純なリスト/辞書に変換する。
+    パイプラインから返されたfinalDiagnosisオブジェクトを整形された辞書に変換する。
     """
     if not final_diagnosis_obj or not hasattr(final_diagnosis_obj, "ans"):
-        return []
+        return {"ans": [], "reference": ""}
     
-    output = []
+    ans_list = []
     for diag in final_diagnosis_obj.ans:
-        output.append({
+        ans_list.append({
             "rank": getattr(diag, "rank", "N/A"),
             "disease_name": getattr(diag, "disease_name", "Unknown"),
             "omim_id": getattr(diag, "OMIM_id", "N/A"),
             "description": getattr(diag, "description", ""),
-            "reference": getattr(diag, "reference", "")
         })
-    return output
+    
+    top_level_reference = getattr(final_diagnosis_obj, "reference", "")
+    
+    return {"ans": ans_list, "reference": top_level_reference}
 
 def run_pipeline_from_phenopacket(phenopacket_path: str, model_name: str, image_path_arg: str = None, output_mode: str = 'file'):
     """
@@ -69,7 +71,6 @@ def run_pipeline_from_phenopacket(phenopacket_path: str, model_name: str, image_
     start_time = time.time()
 
     project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    img_dir = os.path.join(project_root, 'sampleData', 'PhenoPacketStore_25072025')
     
     try:
         patient_data = parse_phenopacket(phenopacket_path)
@@ -82,7 +83,7 @@ def run_pipeline_from_phenopacket(phenopacket_path: str, model_name: str, image_
 
     result_file_path = None
     if output_mode == 'file':
-        res_dir_name = f'res_{model_name.replace("gpt-", "")}'
+        res_dir_name = f'ans_{model_name.replace("gpt-", "")}'
         res_dir = os.path.join(project_root, res_dir_name)
         os.makedirs(res_dir, exist_ok=True)
         result_file_path = os.path.join(res_dir, f"{patient_id}.json")
@@ -90,17 +91,16 @@ def run_pipeline_from_phenopacket(phenopacket_path: str, model_name: str, image_
             print(f"結果ファイルが既に存在するため、処理をスキップします。")
             return 0
 
+    # 画像パスの処理: 引数で指定された場合のみ使用する
     image_path = None
     if image_path_arg:
         if os.path.exists(image_path_arg):
             image_path = image_path_arg
-    else:
-        base_filename, _ = os.path.splitext(os.path.basename(phenopacket_path))
-        for ext in ['.jpg', '.jpeg', '.png', '.JPG', '.JPEG']:
-            potential_path = os.path.join(img_dir, base_filename + ext)
-            if os.path.exists(potential_path):
-                image_path = potential_path
-                break
+            if output_mode in ['file', 'print']:
+                print(f"画像ファイルを使用します: {image_path}")
+        else:
+            if output_mode in ['file', 'print']:
+                print(f"警告: 指定された画像ファイルが見つかりません: {image_path_arg}")
     
     if output_mode in ['file', 'print']:
         print(f"診断パイプラインを実行します... (モデル: {model_name})")
@@ -142,13 +142,18 @@ def run_pipeline_from_phenopacket(phenopacket_path: str, model_name: str, image_
     
     # --- 以下、コマンドライン実行時の処理 (file または print モード) ---
     print("\n--- 最終診断結果 ---")
-    if not final_diagnosis_data:
+    if not final_diagnosis_data or not final_diagnosis_data.get("ans"):
         print("最終診断結果は得られませんでした。")
     else:
-        for diag in final_diagnosis_data:
+        for diag in final_diagnosis_data["ans"]:
             print(f"Rank {diag['rank']}: {diag['disease_name']} ({diag['omim_id']})")
             print(f"  Description: {diag['description']}")
             print("-" * 20)
+        
+        reference_text = final_diagnosis_data.get("reference")
+        if reference_text:
+            print("\n--- References ---")
+            print(reference_text)
 
     elapsed = time.time() - start_time
     print(f"\n処理が完了しました。経過時間: {elapsed:.2f}秒")
@@ -158,7 +163,7 @@ def run_pipeline_from_phenopacket(phenopacket_path: str, model_name: str, image_
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the rare disease diagnosis pipeline using a Phenopacket JSON file.")
     parser.add_argument("--phenopacket", type=str, required=True, help="Path to the input Phenopacket JSON file.")
-    parser.add_argument("--model", type=str, default="gpt-4o", choices=["gpt-4o", "gpt-5"], help="The name of the model to use.")
+    parser.add_argument("--model", type=str, default="gpt-4o", choices=["gpt-4o", "gpt-5-1", "gpt-5-2"], help="The name of the model to use.")
     parser.add_argument("--image", type=str, default=None, help="Optional path to the patient's image file.")
     parser.add_argument("--output_mode", type=str, default="file", choices=["file", "print", "return"], help="Output mode: 'file' to save JSON, 'print' to print to stdout.")
     

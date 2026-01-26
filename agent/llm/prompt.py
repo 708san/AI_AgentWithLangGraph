@@ -1,7 +1,63 @@
 NUM_DIAGNOSES = 10
 
 prompt_dict = {
+    "diagnosis_prompt_no_gestalt": """You are a senior clinical geneticist acting as a lead diagnostician. 
+**CRITICAL MISSION:** You must consolidate ALL potential diagnoses from the provided analytical tool reports into a single, comprehensive list. 
+**ABSOLUTE RULE:** DO NOT OMIT ANY CANDIDATE. Even if a disease appears only once with a low score, it MUST be included in the final output. 
 
+**Input Sources:** 
+- PubCaseFinder (Phenotype-based) 
+- Zero-Shot Diagnosis (Generative AI) 
+- Phenotype Similarity Search (Vector Search) 
+
+**Note:** Facial image analysis (GestaltMatcher) is not available for this case. 
+
+**Task:** 
+1. Extract every unique disease name mentioned in ANY of the input reports. 
+2. Remove exact duplicates (normalize names if obvious, e.g., "CDLS1" and "Cornelia de Lange Syndrome 1"). 
+3. Rank them based on multi-tool consensus and score strength. 
+4. Output the result strictly following the format below. 
+
+**Strict Output Format Rules:** 
+- Do NOT use JSON, XML, or code blocks. 
+- Do NOT use markdown bolding (**), italics (*), or other styling. 
+- Each diagnosis candidate must be strictly enclosed within `===CASE_START===` and `===CASE_END===` lines. 
+- Each item must follow the `KEY::VALUE` format. 
+- The `DESCRIPTION` value must be a **SINGLE LINE** of text. 
+- After all diagnoses are listed, provide the references enclosed within `===REFERENCES_START===` and `===REFERENCES_END===`. 
+
+**Output Format Structure:** 
+
+===CASE_START=== 
+RANK::[Integer] 
+DISEASE::[The formal name of the disease] 
+OMIM::[The OMIM identifier, or "N/A"] 
+DESCRIPTION::[A concise summary (max 2 sentences) stating WHY this disease is a candidate. Mention which tools supported it (e.g., "Supported by PCF (score 0.9) and ZeroShot (rank 1). Matches phenotype X, Y, Z.")] 
+===CASE_END=== 
+
+(Repeat for EVERY unique diagnosis found.) 
+
+===REFERENCES_START=== 
+[A numbered list of all sources cited in the 'description' field.] 
+===REFERENCES_END=== 
+
+--- 
+INPUT CONTEXT 
+
+I. Patient Information 
+Phenotype: {hpo_list} 
+Absent: {absent_hpo_list} 
+Onset: {onset} 
+Sex: {sex} 
+
+II. Analytical Tool Reports 
+[PubCaseFinder]: {pcf_results} 
+[Zero-Shot]: {zeroshot_results} 
+[Phenotype Search]: {phenotype_search_results} 
+
+III. Web Search 
+{web_search_results} 
+""",
     "diagnosis_prompt": """You are a senior clinical geneticist acting as a lead diagnostician. 
 **CRITICAL MISSION:** You must consolidate ALL potential diagnoses from the provided analytical tool reports into a single, comprehensive list. 
 **ABSOLUTE RULE:** DO NOT OMIT ANY CANDIDATE. Even if a disease appears only once with a low score, it MUST be included in the final output. 
@@ -102,7 +158,7 @@ Contradictory Features: Are there any patient symptoms that are atypical, un-rep
 
 Synthesize: Combine the "FOR" and "AGAINST" points into a detailed, balanced analysis. In your analysis, explicitly weigh the significance of the missing features against the strength of the present features. Your analysis must logically connect the patient's symptoms with evidence from the provided medical literature.
 
-Step 3: Extract Supporting References Extract and number the most relevant evidence from the provided medical literature that supports your conclusion. This list of strings will become the value for references.
+Step 3: Extract Supporting References Extract the most relevant evidence from the provided medical literature. Each string in the list must explicitly include the Source https://www.google.com/search?q=URL if available. Format each reference strictly as: "[Source Name] (URL): Extracted evidence text..."
 
 Step 4: Determine Final Correctness Based on your holistic analysis, determine the final Correctness using the revised, more flexible guidelines below.
 
