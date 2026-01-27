@@ -1,13 +1,14 @@
 from typing import List, Dict, Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
 from langchain_community.retrievers import PubMedRetriever, WikipediaRetriever
 from ..state.state_types import State, InformationItem
 from ..llm.llm_wrapper import AzureOpenAIWrapper
+import time
 
 
 def summarize_text(text: str, llm: AzureOpenAIWrapper) -> str:
-    """
-    入力テキストを要約する関数
-    """
+    """入力テキストを要約する関数"""
     try:
         prompt = """
 You are an expert clinical geneticist and a diagnostician. Your critical task is to analyze a medical text and convert it into a high-yield, structured summary designed specifically for differential diagnosis. Your output must not only list symptoms but also highlight features that distinguish the condition from its clinical mimics.
@@ -73,11 +74,65 @@ Now, process the following text:
         print(f"要約時にエラー: {e}")
         return text
 
+
+def search_single_disease_wikipedia(disease_name: str, search_depth: int, llm: AzureOpenAIWrapper) -> List[Dict[str, Any]]:
+    """
+    1つの疾患についてWikipediaを検索する（並列実行用）
+    retrieved_urlsチェックは呼び出し側で行うため、ここでは全結果を返す
+    """
+    results = []
+    try:
+        wiki_retriever = WikipediaRetriever(top_k_results=search_depth * 1, doc_content_chars_max=2000)
+        print(f"    - [Wikipedia] 「{disease_name}」を検索中...")
+        wiki_docs = wiki_retriever.invoke(disease_name)
+
+        for doc in wiki_docs:
+            url = doc.metadata.get("source", "N/A")
+            summary = summarize_text(doc.page_content, llm)
+            results.append({
+                "title": doc.metadata.get("title", disease_name),
+                "url": url,
+                "content": f"[Source: Wikipedia] {summary}",
+                "disease_name": disease_name
+            })
+    except Exception as e:
+        print(f"    - [Wikipedia] 「{disease_name}」の検索でエラー: {e}")
+    
+    return results
+
+
+def search_single_disease_pubmed(disease_name: str, search_depth: int, llm: AzureOpenAIWrapper) -> List[Dict[str, Any]]:
+    """
+    1つの疾患についてPubMedを検索する（並列実行用）
+    retrieved_urlsチェックは呼び出し側で行うため、ここでは全結果を返す
+    """
+    results = []
+    try:
+        pubmed_retriever = PubMedRetriever(top_k_results=search_depth * 3, doc_content_chars_max=3000)
+        print(f"    - [PubMed] 「{disease_name}」を検索中...")
+        pubmed_docs = pubmed_retriever.invoke(disease_name)
+
+        for doc in pubmed_docs:
+            url = f"https://pubmed.ncbi.nlm.nih.gov/{doc.metadata['uid']}/"
+            summary = summarize_text(doc.page_content, llm)
+            results.append({
+                "title": doc.metadata.get("Title", disease_name),
+                "url": url,
+                "content": f"[Source: PubMed] {summary}",
+                "disease_name": disease_name
+            })
+    except Exception as e:
+        print(f"    - [PubMed] 「{disease_name}」の検索でエラー: {e}")
+    
+    return results
+
+
 def diseaseSearchForDiagnosis(state: State) -> Dict[str, List[InformationItem]]:
     """
-    暫定診断リストの各疾患について知識検索を実行し、重複を避けながらStateのmemoryに結果を追加する。
+    暫定診断リストの各疾患について知識検索を並列実行し、重複を避けながらStateのmemoryに結果を追加する。
     """
-    print("🔬 知識検索を開始します...")
+    print("🔬 知識検索を開始します（並列処理）...")
+    start_time = time.time()
 
     # Stateから必要な情報を取得
     llm = state.get("llm")
@@ -103,51 +158,63 @@ def diseaseSearchForDiagnosis(state: State) -> Dict[str, List[InformationItem]]:
 
     print(f"  - 検索深度: {search_depth}, 対象疾患: {disease_names}")
 
-    # --- Wikipediaからの情報取得 ---
-    try:
-        wiki_retriever = WikipediaRetriever(top_k_results=search_depth * 1, doc_content_chars_max=2000)
-        for name in disease_names:
-            print(f"    - [Wikipedia] 「{name}」を検索中...")
-            wiki_docs = wiki_retriever.invoke(name)
+    # --- 並列実行の準備 ---
+    max_workers = min(len(disease_names) * 2, 10)  # 最大10スレッド
+    
+    # 並列実行で取得した全結果を一時保存
+    all_results = []
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # 全ての検索タスクを投入
+        futures = {}
+        
+        # Wikipedia検索タスク
+        for disease_name in disease_names:
+            future = executor.submit(
+                search_single_disease_wikipedia,
+                disease_name,
+                search_depth,
+                llm
+            )
+            futures[future] = ('wikipedia', disease_name)
+        
+        # PubMed検索タスク
+        for disease_name in disease_names:
+            future = executor.submit(
+                search_single_disease_pubmed,
+                disease_name,
+                search_depth,
+                llm
+            )
+            futures[future] = ('pubmed', disease_name)
+        
+        # 結果を収集（as_completedで完了順に処理）
+        completed_count = 0
+        total_tasks = len(futures)
+        
+        for future in as_completed(futures, timeout=300):
+            source, disease_name = futures[future]
+            try:
+                results = future.result(timeout=10)  # 個別タスクは10秒タイムアウト
+                all_results.extend(results)
+                
+                completed_count += 1
+                print(f"  進捗: {completed_count}/{total_tasks} 完了 ({source}: {disease_name}, {len(results)}件)")
+                
+            except Exception as e:
+                print(f"    - [{source}] 「{disease_name}」の処理でエラー: {e}")
+                completed_count += 1
 
-            for doc in wiki_docs:
-                url = doc.metadata.get("source", "N/A")
-                if url not in retrieved_urls:
-                    print(f"      - 新規情報を追加: {url}")
-                    summary = summarize_text(doc.page_content, llm)
-                    memory.append({
-                        "title": doc.metadata.get("title", name),
-                        "url": url,
-                        "content": f"[Source: Wikipedia] {summary}",
-                        "disease_name": name
-                    })
-                    retrieved_urls.add(url)
-    except Exception as e:
-        print(f"    - [Wikipedia] 検索でエラーが発生しました: {e}")
+    # --- スレッドプール終了後に重複チェックして追加（スレッドセーフ） ---
+    new_items_count = 0
+    for item in all_results:
+        if item['url'] not in retrieved_urls:
+            memory.append(item)
+            retrieved_urls.add(item['url'])
+            new_items_count += 1
 
-    # --- PubMedからの情報取得 ---
-    try:
-        pubmed_retriever = PubMedRetriever(top_k_results=search_depth * 3, doc_content_chars_max=3000)
-        for name in disease_names:
-            print(f"    - [PubMed] 「{name}」を検索中...")
-            pubmed_docs = pubmed_retriever.invoke(name)
-
-            for doc in pubmed_docs:
-                url = f"https://pubmed.ncbi.nlm.nih.gov/{doc.metadata['uid']}/"
-                if url not in retrieved_urls:
-                    print(f"      - 新規情報を追加: {url}")
-                    summary = summarize_text(doc.page_content, llm)
-                    memory.append({
-                        "title": doc.metadata.get("Title", name),
-                        "url": url,
-                        "content": f"[Source: PubMed] {summary}",
-                        "disease_name": name
-                    })
-                    retrieved_urls.add(url)
-    except Exception as e:
-        print(f"    - [PubMed] 検索でエラーが発生しました: {e}")
-
-    print("✅ 知識検索が完了しました。")
+    elapsed_time = time.time() - start_time
+    print(f"✅ 知識検索が完了しました（{elapsed_time:.2f}秒, {new_items_count}件の新規情報を追加）")
 
     return {"memory": memory}
     
