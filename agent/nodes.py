@@ -13,10 +13,12 @@ from .tools.HPOwebReserch import search_hpo_terms
 from .tools.embeddingSearchWithHPO import embedding_search_with_hpo
 
 from .utils.result_saver import save_result
+from .utils.profiler import profile_node
 
 import os
 import json
 
+@profile_node
 def BeginningOfFlowNode(state: State):
     print("BeginningOfFlowNode called")
     state["depth"] += 1
@@ -25,6 +27,7 @@ def BeginningOfFlowNode(state: State):
     
     return {"depth": state["depth"], "tentativeDiagnosis": None, "reflection": None}
 
+@profile_node
 @save_result("HPOwebSearchNode")
 def HPOwebSearchNode(state: State):
     print("HPOwebSearchNode called")
@@ -38,6 +41,7 @@ def HPOwebSearchNode(state: State):
         print(f"Error in HPOwebSearchNode: {e}")
         return {"webresources": state.get("webresources", [])}
     
+@profile_node
 @save_result("DiseaseSearchWithHPONode")
 def DiseaseSearchWithHPONode(state: State):
     """
@@ -59,7 +63,7 @@ def DiseaseSearchWithHPONode(state: State):
     return {"phenotypeSearchResult": search_results}
 
 
-
+@profile_node
 def PCFnode(state: State):
     print("PCFnode called")
     depth = state.get("depth", 0)
@@ -69,7 +73,7 @@ def PCFnode(state: State):
     result = callingPCF(hpo_list, depth)
     return {"pubCaseFinder": result}
 
-
+@profile_node
 @save_result("NormalizePCFNode")
 def NormalizePCFNode(state: State):
     """PCFの結果に含まれる病名をOMIM IDに基づいて正規化する"""
@@ -79,7 +83,7 @@ def NormalizePCFNode(state: State):
         return {}
     return {"pubCaseFinder": normalized_results}
 
-
+@profile_node
 def GestaltMatcherNode(state: State):
     print("GestaltMatcherNode called")
     image_path = state.get("imagePath", None)
@@ -103,6 +107,7 @@ def GestaltMatcherNode(state: State):
         print(f"Error calling GestaltMatcher API: {e}")
         return {"GestaltMatcher": []}
     
+@profile_node    
 @save_result("NormalizeGestaltMatcherNode")
 def NormalizeGestaltMatcherNode(state: State):
     """GestaltMatcherの結果に含まれる病名をOMIM IDに基づいて正規化する"""
@@ -112,19 +117,21 @@ def NormalizeGestaltMatcherNode(state: State):
         return {}
     return {"GestaltMatcher": normalized_results}
 
+@profile_node
 def createHPODictNode(state: State):
     print("createHPODictNode called")
     hpo_list = state.get("hpoList", [])
     hpo_dict = make_hpo_dic(hpo_list, None)
     return {"hpoDict": hpo_dict}
 
+@profile_node
 def createAbsentHPODictNode(state: State):
     print("createAbsentHPODictNode called")
     absent_hpo_list = state.get("absentHpoList", [])
     absent_hpo_dict = make_hpo_dic(absent_hpo_list, None)
     return {"absentHpoDict": absent_hpo_dict}
 
-
+@profile_node
 def createZeroShotNode(state: State):
     print("createZeroShotNode called")
     hpo_dict = state.get("hpoDict", {})
@@ -138,7 +145,7 @@ def createZeroShotNode(state: State):
             return {"zeroShotResult": result, "prompt": prompt}
     return {"zeroShotResult": None}
 
-
+@profile_node
 @save_result("NormalizeZeroShotNode")
 def NormalizeZeroShotNode(state: State):
     """ZeroShotの結果に含まれる病名を正規化し、重複を排除する"""
@@ -150,7 +157,7 @@ def NormalizeZeroShotNode(state: State):
     # 既存のキー 'zeroShotResult' を上書きする
     return {"zeroShotResult": normalized_result}
 
-
+@profile_node
 @save_result("createDiagnosisNode")
 def createDiagnosisNode(state: State):
     """
@@ -168,7 +175,7 @@ def createDiagnosisNode(state: State):
     return {}
 
 
-
+@profile_node
 @save_result("diseaseNormalizeNode")
 def diseaseNormalizeNode(state: State):
     print("diseaseNormalizeNode called")
@@ -178,12 +185,13 @@ def diseaseNormalizeNode(state: State):
         return {"tentativeDiagnosis": normalizedDiagnosis}
     return {"tentativeDiagnosis": None}
 
-
+@profile_node
 def diseaseSearchNode(state: State):
     print("diseaseSearchNode called")
     
     return diseaseSearchForDiagnosis(state)
 
+@profile_node
 @save_result("reflectionNode")
 def reflectionNode(state: State):
     print("reflectionNode called")
@@ -213,14 +221,14 @@ def reflectionNode(state: State):
     return {"reflection": ReflectionOutput(ans=[])}
 
 
-
+@profile_node
 @save_result("finalDiagnosisNode")
 def finalDiagnosisNode(state: State):
     print("finalDiagnosisNode called")
     finalDiagnosis, prompt = createFinalDiagnosis(state)
     return {"finalDiagnosis": finalDiagnosis, "prompt": prompt}
 
-
+@profile_node
 @save_result("diseaseNormalizeForFinalNode")
 def diseaseNormalizeForFinalNode(state: State):
     print("diseaseNormalizeForFinalNode called")
