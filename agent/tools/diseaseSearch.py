@@ -1,10 +1,10 @@
 from typing import List, Dict, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from threading import Lock
 from langchain_community.retrievers import PubMedRetriever, WikipediaRetriever
 from ..state.state_types import State, InformationItem
 from ..llm.llm_wrapper import AzureOpenAIWrapper
 import time
+import random
 
 
 def summarize_text(text: str, llm: AzureOpenAIWrapper) -> str:
@@ -104,25 +104,46 @@ def search_single_disease_wikipedia(disease_name: str, search_depth: int, llm: A
 def search_single_disease_pubmed(disease_name: str, search_depth: int, llm: AzureOpenAIWrapper) -> List[Dict[str, Any]]:
     """
     1つの疾患についてPubMedを検索する（並列実行用）
-    retrieved_urlsチェックは呼び出し側で行うため、ここでは全結果を返す
+    429エラー時はリトライする
     """
     results = []
-    try:
-        pubmed_retriever = PubMedRetriever(top_k_results=search_depth * 3, doc_content_chars_max=3000)
-        print(f"    - [PubMed] 「{disease_name}」を検索中...")
-        pubmed_docs = pubmed_retriever.invoke(disease_name)
+    max_retries = 3
+    base_delay = 2.0
+    
+    for attempt in range(max_retries):
+        try:
+            pubmed_retriever = PubMedRetriever(top_k_results=search_depth * 3, doc_content_chars_max=3000)
+            print(f"    - [PubMed] 「{disease_name}」を検索中...")
+            pubmed_docs = pubmed_retriever.invoke(disease_name)
 
-        for doc in pubmed_docs:
-            url = f"https://pubmed.ncbi.nlm.nih.gov/{doc.metadata['uid']}/"
-            summary = summarize_text(doc.page_content, llm)
-            results.append({
-                "title": doc.metadata.get("Title", disease_name),
-                "url": url,
-                "content": f"[Source: PubMed] {summary}",
-                "disease_name": disease_name
-            })
-    except Exception as e:
-        print(f"    - [PubMed] 「{disease_name}」の検索でエラー: {e}")
+            for doc in pubmed_docs:
+                url = f"https://pubmed.ncbi.nlm.nih.gov/{doc.metadata['uid']}/"
+                summary = summarize_text(doc.page_content, llm)
+                results.append({
+                    "title": doc.metadata.get("Title", disease_name),
+                    "url": url,
+                    "content": f"[Source: PubMed] {summary}",
+                    "disease_name": disease_name
+                })
+            
+            return results
+            
+        except Exception as e:
+            error_msg = str(e)
+            
+            if "429" in error_msg or "Too Many Requests" in error_msg:
+                if attempt < max_retries - 1:
+                    delay = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                    print(f"    - [PubMed] 「{disease_name}」でレート制限エラー (429)")
+                    print(f"      -> {delay:.1f}秒待機してリトライします...")
+                    time.sleep(delay)
+                    continue
+                else:
+                    print(f"    - [PubMed] 「{disease_name}」で最大リトライ回数到達。スキップします。")
+                    return []
+            else:
+                print(f"    - [PubMed] 「{disease_name}」の検索でエラー: {e}")
+                return []
     
     return results
 
@@ -217,4 +238,3 @@ def diseaseSearchForDiagnosis(state: State) -> Dict[str, List[InformationItem]]:
     print(f"✅ 知識検索が完了しました（{elapsed_time:.2f}秒, {new_items_count}件の新規情報を追加）")
 
     return {"memory": memory}
-    

@@ -19,6 +19,7 @@ def format_disease_knowledge(info_list, disease_name):
         return "No disease knowledge available for this rank."
     return "\n".join(lines)
 
+
 def create_reflection(state: State, diagnosis_to_judge):
     prompt_template = prompt_dict["reflection_prompt"]
     
@@ -62,30 +63,11 @@ def create_reflection(state: State, diagnosis_to_judge):
         try:
             print(f"[Reflection] 試行 {attempt}/{len(token_limits)}: max_completion_tokens={max_tokens}")
             
-            # 動的にmax_completion_tokensを設定したLLMを取得
-            from langchain_openai import AzureChatOpenAI
-            
-            # 元のLLMの設定を取得
-            base_llm = llm.llm
-            
-            # 新しいmax_completion_tokensでLLMを再構築
-            llm_params = {
-                "azure_endpoint": base_llm._client._base_url.host,
-                "api_key": base_llm.openai_api_key,
-                "deployment_name": base_llm.deployment_name,
-                "api_version": base_llm.openai_api_version,
-                "model_kwargs": {
-                    "extra_body": {
-                        "max_completion_tokens": max_tokens,
-                        "verbosity": "medium",
-                        "reasoning_effort": "none"
-                    }
-                }
-            }
-            
-            temp_llm = AzureChatOpenAI(**llm_params)
+            # 一時的なLLMインスタンスを作成（元のllmは変更しない）
+            temp_llm = llm.get_temp_llm_with_max_tokens(max_tokens)
             structured_llm = temp_llm.with_structured_output(ReflectionFormat)
             
+            # 推論実行
             result = structured_llm.invoke(messages)
             
             print(f"[Reflection] 成功 (max_completion_tokens={max_tokens})")

@@ -17,6 +17,7 @@ from .utils.profiler import profile_node
 
 import os
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 @profile_node
 def BeginningOfFlowNode(state: State):
@@ -197,27 +198,48 @@ def reflectionNode(state: State):
     print("reflectionNode called")
     tentativeDiagnosis = state.get("tentativeDiagnosis")
     hpo_dict = state.get("hpoDict")
+    
     if tentativeDiagnosis and hpo_dict and hasattr(tentativeDiagnosis, 'ans'):
         diagnosis_to_judge_lis = tentativeDiagnosis.ans
         reflection_result_list = []
         prompts = []
-        for diagnosis_to_judge in diagnosis_to_judge_lis:
-            reflection_result, prompt = create_reflection(
-                state, diagnosis_to_judge
-            )
-            if reflection_result:
-                reflection_result_list.append(reflection_result)
-                prompts.append(prompt)
+        
+        # 並列実行関数
+        def process_single_reflection(diagnosis_to_judge):
+            try:
+                reflection_result, prompt = create_reflection(state, diagnosis_to_judge)
+                return reflection_result, prompt
+            except Exception as e:
+                print(f"[ERROR] Reflection failed for {diagnosis_to_judge.disease_name}: {e}")
+                return None, None
+        
+        # ThreadPoolExecutorで並列実行
+        thread_num = 10
+        max_workers = min(len(diagnosis_to_judge_lis), thread_num)  # 最大5並列
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            # 全タスクをサブミット
+            future_to_diagnosis = {
+                executor.submit(process_single_reflection, diagnosis): diagnosis 
+                for diagnosis in diagnosis_to_judge_lis
+            }
+            
+            # 完了順に結果を取得
+            for future in as_completed(future_to_diagnosis):
+                diagnosis = future_to_diagnosis[future]
+                try:
+                    reflection_result, prompt = future.result()
+                    if reflection_result:
+                        reflection_result_list.append(reflection_result)
+                        prompts.append(prompt)
+                except Exception as e:
+                    print(f"[ERROR] Future exception for {diagnosis.disease_name}: {e}")
         
         if not reflection_result_list:
             return {"reflection": ReflectionOutput(ans=[])}
-
-        # 返す直前で、stateの型定義に合わせてReflectionOutputオブジェクトでラップする
+        
         reflection_output = ReflectionOutput(ans=reflection_result_list)
-        
         return {"reflection": reflection_output, "prompt": prompts}
-        
-    # 条件に合致しない場合は、空のansを持つReflectionOutputを返す
+    
     return {"reflection": ReflectionOutput(ans=[])}
 
 
