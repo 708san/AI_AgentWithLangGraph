@@ -1,4 +1,5 @@
 from langchain_openai import AzureChatOpenAI
+from typing import Any, Dict
 
 class AzureOpenAIWrapper:
     def __init__(self, model_name, azure_endpoint, api_key, deployment_name, api_version):
@@ -15,7 +16,7 @@ class AzureOpenAIWrapper:
         # 初期LLMインスタンスを作成
         self.llm = self._create_llm(self.default_max_tokens)
     
-    def _create_llm(self, max_completion_tokens):
+    def _create_llm(self, max_completion_tokens: int) -> AzureChatOpenAI:
         """
         指定されたトークン数でLLMインスタンスを作成
         
@@ -25,7 +26,7 @@ class AzureOpenAIWrapper:
         Returns:
             AzureChatOpenAI: 新しいLLMインスタンス
         """
-        llm_params = {
+        llm_params: Dict[str, Any] = {
             "azure_endpoint": self.azure_endpoint,
             "api_key": self.api_key,
             "deployment_name": self.deployment_name,
@@ -46,7 +47,7 @@ class AzureOpenAIWrapper:
         
         return AzureChatOpenAI(**llm_params)
     
-    def get_temp_llm_with_max_tokens(self, max_completion_tokens):
+    def get_temp_llm_with_max_tokens(self, max_completion_tokens: int) -> AzureChatOpenAI:
         """
         一時的なLLMインスタンスを作成（元のインスタンスは変更しない）
         

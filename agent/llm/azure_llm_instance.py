@@ -7,29 +7,30 @@ load_dotenv()
 
 from .llm_wrapper import AzureOpenAIWrapper
 
+
+MODEL_ENV_PREFIX = {
+    "gpt-4o": "AZURE_OPENAI_4o",
+    "gpt-5-1": "AZURE_OPENAI_5-1",
+    "gpt-5-2": "AZURE_OPENAI_5-2",
+}
+
+
+def _get_model_env_values(model_name: str):
+    prefix = MODEL_ENV_PREFIX.get(model_name)
+    if not prefix:
+        raise ValueError(f"Unsupported model_name: {model_name}")
+
+    endpoint = os.environ.get(f"{prefix}_ENDPOINT")
+    api_key = os.environ.get(f"{prefix}_API_KEY")
+    deployment_name = os.environ.get(f"{prefix}_DEPLOYMENT_NAME")
+    api_version = os.environ.get(f"{prefix}_API_VERSION")
+    return endpoint, api_key, deployment_name, api_version
+
 def get_llm_instance(model_name: str = 'gpt-4o'):
     """
     指定されたモデル名に基づいてAzureOpenAIWrapperのインスタンスを生成して返す。
     """
-    if model_name == 'gpt-4o':
-        endpoint = os.environ.get("AZURE_OPENAI_4o_ENDPOINT")
-        api_key = os.environ.get("AZURE_OPENAI_4o_API_KEY")
-        deployment_name = os.environ.get("AZURE_OPENAI_4o_DEPLOYMENT_NAME")
-        api_version = os.environ.get("AZURE_OPENAI_4o_API_VERSION")
-    elif model_name == 'gpt-5-1':
-        # GPT-5用の環境変数を設定（.envファイルに追記が必要）
-        endpoint = os.environ.get("AZURE_OPENAI_5-1_ENDPOINT")
-        api_key = os.environ.get("AZURE_OPENAI_5-1_API_KEY")
-        deployment_name = os.environ.get("AZURE_OPENAI_5-1_DEPLOYMENT_NAME")
-        api_version = os.environ.get("AZURE_OPENAI_5-1_API_VERSION")
-    elif model_name == 'gpt-5-2':
-        # GPT-5.2用の環境変数を設定（.envファイルに追記が必要）
-        endpoint = os.environ.get("AZURE_OPENAI_5-2_ENDPOINT")
-        api_key = os.environ.get("AZURE_OPENAI_5-2_API_KEY")
-        deployment_name = os.environ.get("AZURE_OPENAI_5-2_DEPLOYMENT_NAME")
-        api_version = os.environ.get("AZURE_OPENAI_5-2_API_VERSION")
-    else:
-        raise ValueError(f"Unsupported model_name: {model_name}")
+    endpoint, api_key, deployment_name, api_version = _get_model_env_values(model_name)
 
     if not all([endpoint, api_key, deployment_name, api_version]):
         raise ValueError(f"Environment variables for model '{model_name}' are not fully set.")

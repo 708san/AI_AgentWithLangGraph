@@ -1,5 +1,4 @@
-from typing_extensions import List, Optional
-from .state.state_types import State, PCFres, DiagnosisOutput, ReflectionOutput, ReflectionFormat
+from .state.state_types import State, ReflectionOutput
 from .tools.pcf_api import callingPCF
 from .tools.diagnosis import createDiagnosis
 from .tools.ZeroShot import createZeroshot
@@ -15,9 +14,11 @@ from .tools.embeddingSearchWithHPO import embedding_search_with_hpo
 from .utils.result_saver import save_result
 from .utils.profiler import profile_node
 
-import os
-import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+def _empty_reflection_output() -> ReflectionOutput:
+    return ReflectionOutput(ans=[])
 
 @profile_node
 def BeginningOfFlowNode(state: State):
@@ -201,6 +202,9 @@ def reflectionNode(state: State):
     
     if tentativeDiagnosis and hpo_dict and hasattr(tentativeDiagnosis, 'ans'):
         diagnosis_to_judge_lis = tentativeDiagnosis.ans
+        if not diagnosis_to_judge_lis:
+            return {"reflection": _empty_reflection_output()}
+
         reflection_result_list = []
         prompts = []
         
@@ -215,7 +219,7 @@ def reflectionNode(state: State):
         
         # ThreadPoolExecutorで並列実行
         thread_num = 10
-        max_workers = min(len(diagnosis_to_judge_lis), thread_num)  # 最大5並列
+        max_workers = min(len(diagnosis_to_judge_lis), thread_num)
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # 全タスクをサブミット
             future_to_diagnosis = {
@@ -235,12 +239,12 @@ def reflectionNode(state: State):
                     print(f"[ERROR] Future exception for {diagnosis.disease_name}: {e}")
         
         if not reflection_result_list:
-            return {"reflection": ReflectionOutput(ans=[])}
+            return {"reflection": _empty_reflection_output()}
         
         reflection_output = ReflectionOutput(ans=reflection_result_list)
         return {"reflection": reflection_output, "prompt": prompts}
     
-    return {"reflection": ReflectionOutput(ans=[])}
+    return {"reflection": _empty_reflection_output()}
 
 
 @profile_node

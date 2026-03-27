@@ -1,8 +1,7 @@
 import os
 import datetime
-import json
 from langgraph.graph import StateGraph, START, END
-from agent.state.state_types import State, ZeroShotOutput, DiagnosisOutput, ReflectionOutput
+from agent.state.state_types import State
 from agent.utils.logger import log_node_result
 from agent.llm.azure_llm_instance import get_llm_instance
 
@@ -13,6 +12,53 @@ from agent.nodes import (
     diseaseNormalizeForFinalNode, HPOwebSearchNode,
     NormalizePCFNode, NormalizeGestaltMatcherNode, NormalizeZeroShotNode, DiseaseSearchWithHPONode
 )
+
+
+NODE_DEFINITIONS = [
+    ("BeginningOfFlowNode", BeginningOfFlowNode),
+    ("createZeroShotNode", createZeroShotNode),
+    ("PCFnode", PCFnode),
+    ("GestaltMatcherNode", GestaltMatcherNode),
+    ("NormalizeZeroShotNode", NormalizeZeroShotNode),
+    ("NormalizePCFNode", NormalizePCFNode),
+    ("NormalizeGestaltMatcherNode", NormalizeGestaltMatcherNode),
+    ("createHPODictNode", createHPODictNode),
+    ("createAbsentHPODictNode", createAbsentHPODictNode),
+    ("HPOwebSearchNode", HPOwebSearchNode),
+    ("DiseaseSearchWithHPONode", DiseaseSearchWithHPONode),
+    ("createDiagnosisNode", createDiagnosisNode),
+    ("diseaseNormalizeNode", diseaseNormalizeNode),
+    ("diseaseSearchNode", diseaseSearchNode),
+    ("reflectionNode", reflectionNode),
+    ("finalDiagnosisNode", finalDiagnosisNode),
+    ("diseaseNormalizeForFinalNode", diseaseNormalizeForFinalNode),
+]
+
+EDGES = [
+    (START, "BeginningOfFlowNode"),
+    ("BeginningOfFlowNode", "PCFnode"),
+    ("PCFnode", "NormalizePCFNode"),
+    ("BeginningOfFlowNode", "createHPODictNode"),
+    ("BeginningOfFlowNode", "GestaltMatcherNode"),
+    ("GestaltMatcherNode", "NormalizeGestaltMatcherNode"),
+    ("BeginningOfFlowNode", "createAbsentHPODictNode"),
+    (["createHPODictNode", "createAbsentHPODictNode"], "createZeroShotNode"),
+    ("createZeroShotNode", "NormalizeZeroShotNode"),
+    ("createHPODictNode", "HPOwebSearchNode"),
+    ("createHPODictNode", "DiseaseSearchWithHPONode"),
+    (["NormalizeZeroShotNode", "NormalizePCFNode", "NormalizeGestaltMatcherNode", "HPOwebSearchNode", "DiseaseSearchWithHPONode"], "createDiagnosisNode"),
+    ("createDiagnosisNode", "diseaseNormalizeNode"),
+    ("diseaseNormalizeNode", "diseaseSearchNode"),
+    ("diseaseSearchNode", "reflectionNode"),
+    ("finalDiagnosisNode", "diseaseNormalizeForFinalNode"),
+    ("diseaseNormalizeForFinalNode", END),
+]
+
+
+def _has_any_correct_reflection(reflection) -> bool:
+    if not reflection or not hasattr(reflection, "ans") or not reflection.ans:
+        return False
+    return any(getattr(ans_item, "Correctness", False) for ans_item in reflection.ans)
 
 class RareDiseaseDiagnosisPipeline:
     def __init__(self, model_name: str = 'gpt-4o', enable_log=False, log_filename=None):
@@ -63,23 +109,8 @@ class RareDiseaseDiagnosisPipeline:
                 return result
             return wrapped
 
-        graph_builder.add_node("BeginningOfFlowNode", wrap_node(BeginningOfFlowNode, "BeginningOfFlowNode"))
-        graph_builder.add_node("createZeroShotNode", wrap_node(createZeroShotNode, "createZeroShotNode"))
-        graph_builder.add_node("PCFnode", wrap_node(PCFnode, "PCFnode"))
-        graph_builder.add_node("GestaltMatcherNode", wrap_node(GestaltMatcherNode, "GestaltMatcherNode"))
-        graph_builder.add_node("NormalizeZeroShotNode", wrap_node(NormalizeZeroShotNode, "NormalizeZeroShotNode"))
-        graph_builder.add_node("NormalizePCFNode", wrap_node(NormalizePCFNode, "NormalizePCFNode"))
-        graph_builder.add_node("NormalizeGestaltMatcherNode", wrap_node(NormalizeGestaltMatcherNode, "NormalizeGestaltMatcherNode"))
-        graph_builder.add_node("createHPODictNode", wrap_node(createHPODictNode, "createHPODictNode"))
-        graph_builder.add_node("createAbsentHPODictNode", wrap_node(createAbsentHPODictNode, "createAbsentHPODictNode"))
-        graph_builder.add_node("HPOwebSearchNode", wrap_node(HPOwebSearchNode, "HPOwebSearchNode"))
-        graph_builder.add_node("DiseaseSearchWithHPONode", wrap_node(DiseaseSearchWithHPONode, "DiseaseSearchWithHPONode"))
-        graph_builder.add_node("createDiagnosisNode", wrap_node(createDiagnosisNode, "createDiagnosisNode"))
-        graph_builder.add_node("diseaseNormalizeNode", wrap_node(diseaseNormalizeNode, "diseaseNormalizeNode"))
-        graph_builder.add_node("diseaseSearchNode", wrap_node(diseaseSearchNode, "diseaseSearchNode"))
-        graph_builder.add_node("reflectionNode", wrap_node(reflectionNode, "reflectionNode"))
-        graph_builder.add_node("finalDiagnosisNode", wrap_node(finalDiagnosisNode, "finalDiagnosisNode"))
-        graph_builder.add_node("diseaseNormalizeForFinalNode", wrap_node(diseaseNormalizeForFinalNode, "diseaseNormalizeForFinalNode"))
+        for node_name, node_func in NODE_DEFINITIONS:
+            graph_builder.add_node(node_name, wrap_node(node_func, node_name))
         
         def after_reflection_edge(state: State):
             print("\n--- Running after_reflection_edge ---")
@@ -112,7 +143,7 @@ class RareDiseaseDiagnosisPipeline:
                 
 
             # 4. any()の評価結果を確認
-            should_proceed = any(correctness_values_for_any)
+            should_proceed = _has_any_correct_reflection(reflection)
             print(f"\nList of boolean values for 'any()': {correctness_values_for_any}")
             print(f"Result of 'any(correctness_values_for_any)': {should_proceed}")
 
@@ -125,38 +156,20 @@ class RareDiseaseDiagnosisPipeline:
                 print("--- End of after_reflection_edge ---\n")
                 return "ReturnToBeginningNode"
 
-        graph_builder.add_edge(START, "BeginningOfFlowNode")
-        graph_builder.add_edge("BeginningOfFlowNode", "PCFnode")
-        graph_builder.add_edge("PCFnode", "NormalizePCFNode")
-        graph_builder.add_edge("BeginningOfFlowNode", "createHPODictNode")
-        graph_builder.add_edge("BeginningOfFlowNode", "GestaltMatcherNode")
-        graph_builder.add_edge("GestaltMatcherNode", "NormalizeGestaltMatcherNode")
-        graph_builder.add_edge("BeginningOfFlowNode", "createAbsentHPODictNode")
-        graph_builder.add_edge(["createHPODictNode","createAbsentHPODictNode"], "createZeroShotNode")
-        graph_builder.add_edge("createZeroShotNode", "NormalizeZeroShotNode")
-        graph_builder.add_edge("createHPODictNode", "HPOwebSearchNode")
-        graph_builder.add_edge("createHPODictNode", "DiseaseSearchWithHPONode")
-        graph_builder.add_edge(["NormalizeZeroShotNode", "NormalizePCFNode", "NormalizeGestaltMatcherNode", "HPOwebSearchNode", "DiseaseSearchWithHPONode"], "createDiagnosisNode")
-        graph_builder.add_edge("createDiagnosisNode", "diseaseNormalizeNode")
-        ###中断用
-        #graph_builder.add_edge("diseaseNormalizeNode", END)
-        ###
-        
-        graph_builder.add_edge("diseaseNormalizeNode", "diseaseSearchNode")
-        graph_builder.add_edge("diseaseSearchNode", "reflectionNode")
+        for src, dst in EDGES:
+            graph_builder.add_edge(src, dst)
+
         graph_builder.add_conditional_edges(
             "reflectionNode", after_reflection_edge, path_map={
                 "ReturnToBeginningNode": "BeginningOfFlowNode",
                 "ProceedToFinalDiagnosisNode": "finalDiagnosisNode"
             }
         )
-        graph_builder.add_edge("finalDiagnosisNode", "diseaseNormalizeForFinalNode")
-        graph_builder.add_edge("diseaseNormalizeForFinalNode", END)
         
         return graph_builder.compile()
 
-    def run(self, hpo_list, image_path=None, verbose=False, absent_hpo_list=None, onset=None, sex=None, patient_id=None):
-        initial_state = {
+    def _build_initial_state(self, hpo_list, image_path=None, absent_hpo_list=None, onset=None, sex=None, patient_id=None):
+        return {
             "depth": 0,
             "clinicalText": None,
             "hpoList": hpo_list,
@@ -174,6 +187,16 @@ class RareDiseaseDiagnosisPipeline:
             "patient_id": patient_id if patient_id else "unknown",
             "llm": self.llm,
         }
+
+    def run(self, hpo_list, image_path=None, verbose=False, absent_hpo_list=None, onset=None, sex=None, patient_id=None):
+        initial_state = self._build_initial_state(
+            hpo_list=hpo_list,
+            image_path=image_path,
+            absent_hpo_list=absent_hpo_list,
+            onset=onset,
+            sex=sex,
+            patient_id=patient_id,
+        )
         result = self.graph.invoke(initial_state)
         if verbose:
             self.pretty_print(result)

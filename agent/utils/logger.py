@@ -1,4 +1,5 @@
 import json
+from typing import Any
 from agent.state.state_types import ZeroShotOutput, DiagnosisOutput, ReflectionOutput, PhenotypeSearchFormat
 
 def _write_disease_search_prompt(f):
@@ -124,7 +125,7 @@ def _format_and_write_result(f, result):
     else:
         f.write(str(result))
 
-def log_node_result(logfile_path: str, node_name: str, result: any):
+def log_node_result(logfile_path: str, node_name: str, result: Any):
     """
     ノードの実行結果を整形してログファイルに追記する
     """
