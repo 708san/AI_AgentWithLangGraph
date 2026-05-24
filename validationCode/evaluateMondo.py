@@ -78,7 +78,7 @@ def main():
         print(f"Error: {MONDO_JSON} not found.")
         return
     
-    matcher = MondoOntologyMatcher(MONDO_JSON, child_threshold=4)
+    matcher = MondoOntologyMatcher(MONDO_JSON, child_threshold=50)
     
     # 正解データの読み込み
     df_tsv = pd.read_table(TSV_PATH)

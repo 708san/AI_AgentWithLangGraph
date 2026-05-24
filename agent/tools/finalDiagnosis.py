@@ -11,6 +11,7 @@ def createFinalDiagnosis(state: State) -> Optional[DiagnosisOutput]:
    
     hpo_dict = state.get("hpoDict", {})
     absent_hpo_dict = state.get("absentHpoDict", {}) 
+    use_absent_hpo = state.get("use_absentHPO", False)
     similar_case_detailed = state.get("clinicalText", "")
     tentative_result = state.get("tentativeDiagnosis", None)
     judgements = state.get("reflection", None)
@@ -60,7 +61,11 @@ def createFinalDiagnosis(state: State) -> Optional[DiagnosisOutput]:
         judgements_str = ""
 
     present_hpo = ", ".join([v for k, v in hpo_dict.items()]) if hpo_dict else ""
-    absent_hpo = ", ".join([v for k, v in (absent_hpo_dict or {}).items()]) if absent_hpo_dict else ""
+    absent_hpo = (
+        ", ".join([v for k, v in (absent_hpo_dict or {}).items() if v])
+        if use_absent_hpo and absent_hpo_dict
+        else ""
+    )
 
     # If memory (similar_case_detailed) is a list, join as string
     if isinstance(similar_case_detailed, list):

@@ -121,7 +121,7 @@ def search_hpo_terms(state: State) -> List[webresource]:
     
     new_webresources = []
     existing_webresources = state.get("webresources", [])
-    existing_urls = {w.url for w in existing_webresources if hasattr(w, 'url')}
+    existing_urls = {w.get("url") for w in existing_webresources if w.get("url")}
     
     with DDGS() as ddgs:
         for query in queries:

@@ -5,17 +5,15 @@ prompt_dict = {
 **CRITICAL MISSION:** You must consolidate ALL potential diagnoses from the provided analytical tool reports into a single, comprehensive list. 
 **ABSOLUTE RULE:** DO NOT OMIT ANY CANDIDATE. Even if a disease appears only once with a low score, it MUST be included in the final output. 
 
-**Input Sources:** 
-- PubCaseFinder (Phenotype-based) 
-- Zero-Shot Diagnosis (Generative AI) 
-- Phenotype Similarity Search (Vector Search) 
+**Input Source:** 
+- Merged Candidate Table created from PubCaseFinder, Zero-Shot Diagnosis, and Phenotype Similarity Search. 
 
 **Note:** Facial image analysis (GestaltMatcher) is not available for this case. 
 
 **Task:** 
-1. Extract every unique disease name mentioned in ANY of the input reports. 
-2. Remove exact duplicates (normalize names if obvious, e.g., "CDLS1" and "Cornelia de Lange Syndrome 1"). 
-3. Rank them based on multi-tool consensus and score strength. 
+1. Use the merged candidate table as the authoritative candidate list. 
+2. Do not split or duplicate candidates that have already been merged by OMIM ID or disease name. 
+3. Rank candidates based on multi-tool consensus, individual tool ranks, score strength, and clinical fit to the patient's HPO profile. 
 4. Output the result strictly following the format below. 
 
 **Strict Output Format Rules:** 
@@ -51,9 +49,8 @@ Onset: {onset}
 Sex: {sex} 
 
 II. Analytical Tool Reports 
-[PubCaseFinder]: {pcf_results} 
-[Zero-Shot]: {zeroshot_results} 
-[Phenotype Search]: {phenotype_search_results} 
+[Merged Candidate Table]: 
+{merged_candidate_results} 
 
 III. Web Search 
 {web_search_results} 
@@ -62,16 +59,13 @@ III. Web Search
 **CRITICAL MISSION:** You must consolidate ALL potential diagnoses from the provided analytical tool reports into a single, comprehensive list. 
 **ABSOLUTE RULE:** DO NOT OMIT ANY CANDIDATE. Even if a disease appears only once with a low score, it MUST be included in the final output. 
 
-**Input Sources:** 
-- PubCaseFinder (Phenotype-based) 
-- Zero-Shot Diagnosis (Generative AI) 
-- GestaltMatcher (Facial Analysis) 
-- Phenotype Similarity Search (Vector Search) 
+**Input Source:** 
+- Merged Candidate Table created from PubCaseFinder, Zero-Shot Diagnosis, GestaltMatcher, and Phenotype Similarity Search. 
 
 **Task:** 
-1. Extract every unique disease name mentioned in ANY of the input reports. 
-2. Remove exact duplicates (normalize names if obvious, e.g., "CDLS1" and "Cornelia de Lange Syndrome 1"). 
-3. Rank them based on multi-tool consensus and score strength. 
+1. Use the merged candidate table as the authoritative candidate list. 
+2. Do not split or duplicate candidates that have already been merged by OMIM ID or disease name. 
+3. Rank candidates based on multi-tool consensus, individual tool ranks, score strength, and clinical fit to the patient's HPO profile. 
 4. Output the result strictly following the format below. 
 
 **Strict Output Format Rules:** 
@@ -107,10 +101,8 @@ Onset: {onset}
 Sex: {sex} 
 
 II. Analytical Tool Reports 
-[PubCaseFinder]: {pcf_results} 
-[Zero-Shot]: {zeroshot_results} 
-[GestaltMatcher]: {gestalt_matcher_results} 
-[Phenotype Search]: {phenotype_search_results} 
+[Merged Candidate Table]: 
+{merged_candidate_results} 
 
 III. Web Search 
 {web_search_results} 

@@ -1,8 +1,7 @@
-import json
-from typing import List, Optional
+from typing import Optional
 import re
 from langchain.schema import HumanMessage
-from ..state.state_types import State, DiagnosisOutput,DiagnosisFormat, ZeroShotOutput, PCFres, PhenotypeSearchFormat
+from ..state.state_types import State, DiagnosisOutput, DiagnosisFormat
 from ..llm.prompt import prompt_dict
 
 def parse_diagnosis_text(text: str) -> DiagnosisOutput:
@@ -48,60 +47,59 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     to generate a tentative diagnosis.
     """
     hpo_list = list(state.get("hpoDict", {}).values())
-    absent_hpo_list = list(state.get("absentHpoDict", {}).values())
+    use_absent_hpo = state.get("use_absentHPO", False)
+    absent_hpo_list = (
+        [value for value in state.get("absentHpoDict", {}).values() if value]
+        if use_absent_hpo
+        else []
+    )
     onset = state.get("onset", "Unknown")
     sex = state.get("sex", "Unknown")
-    pcf_results = state.get("pubCaseFinder", [])
-    zeroshot_results = state.get("zeroShotResult")
     gestalt_matcher_results = state.get("GestaltMatcher", [])
     web_search_results = state.get("webresources", [])
-    phenotype_search_results = state.get("phenotypeSearchResult", [])
+    merged_candidates = state.get("mergedDiseaseCandidates", [])
     llm = state.get("llm")
 
     if not llm:
         print("LLM instance not found in state.")
         return None, None
 
-    # --- Format each result into a string for the prompt ---
-    
-    # PCF results
-    pcf_text = "\n".join([f"{i+1}. {res.get('disease_name', res.get('omim_disease_name_en', 'N/A'))} (score: {res.get('score', 0):.3f}) - {res.get('description', '')}" for i, res in enumerate(pcf_results)]) if pcf_results else "No results from PubCaseFinder."
-
-    # Zero-shot results
-    zeroshot_text = "\n".join([f"{i+1}. {res.disease_name} (rank: {res.rank})" for i, res in enumerate(zeroshot_results.ans)]) if zeroshot_results and zeroshot_results.ans else "No results from Zero-Shot Diagnosis."
-
-    # GestaltMatcher results - デバッグ出力追加
-    
     has_gestalt = gestalt_matcher_results and len(gestalt_matcher_results) > 0
-    
-    
+
+    candidate_lines = []
+    for index, candidate in enumerate(merged_candidates, 1):
+        tool_parts = []
+        for ranking in candidate.get("tool_rankings", []):
+            rank_text = f"rank {ranking.get('rank')}" if ranking.get("rank") is not None else "rank N/A"
+            score = ranking.get("score")
+            score_text = f", score {score:.3f}" if isinstance(score, (int, float)) else ""
+            matched_hpo = ranking.get("matched_hpo_id")
+            matched_text = f", matched HPO: {matched_hpo}" if matched_hpo else ""
+            note = ranking.get("note")
+            note_text = f", note: {note}" if note else ""
+            tool_parts.append(
+                f"{ranking.get('tool', 'UnknownTool')} ({rank_text}{score_text}{matched_text}{note_text})"
+            )
+        candidate_lines.append(
+            f"{index}. {candidate.get('disease_name', 'N/A')} "
+            f"(OMIM: {candidate.get('OMIM_id') or 'N/A'}, "
+            f"supported by {candidate.get('consensus_count', 0)} tool(s), "
+            f"best tool rank: {candidate.get('best_rank', 'N/A')})\n"
+            f"   Tool rankings: {'; '.join(tool_parts) if tool_parts else 'No tool ranking details.'}"
+        )
+
+    merged_candidate_text = "\n".join(candidate_lines) if candidate_lines else "No merged disease candidates."
+
     if has_gestalt:
-        gm_text = "\n".join([f"{i+1}. {res.get('syndrome_name', 'N/A')} (Similarity score: {res.get('score', 0):.3f})" for i, res in enumerate(gestalt_matcher_results)])
         print(f"[DEBUG] 使用するプロンプト: diagnosis_prompt (GestaltMatcher有り)")
     else:
-        gm_text = None
         print(f"[DEBUG] 使用するプロンプト: diagnosis_prompt_no_gestalt (GestaltMatcher無し)")
 
     # Web search results
-    web_text = "\n".join([f"- {res.get('title', 'No Title')}: {res.get('content', 'No Content')}" for res in web_search_results]) if web_search_results else "No relevant web search results found."
-    
-    # Phenotype search results
-    phenotype_lines = []
-    if phenotype_search_results:
-        for i, res in enumerate(phenotype_search_results):
-            disease_info = res.disease_info
-            definition_text = disease_info.definition or "not provided"
-            phenotype_list_text = ", ".join(disease_info.phenotype) if disease_info.phenotype else "not provided"
-            
-            line = (
-                f"{i+1}. {disease_info.disease_name} (OMIM: {disease_info.OMIM_id}, Similarity score: {res.similarity_score:.3f})\n"
-                f"   - Definition: {definition_text}\n"
-                f"   - Typical Phenotypes: {phenotype_list_text}"
-            )
-            phenotype_lines.append(line)
-        phenotype_search_text = "\n".join(phenotype_lines)
-    else:
-        phenotype_search_text = "No results from Phenotype Similarity Search."
+    web_text = "\n".join([
+        f"- {res.get('title', 'No Title')}: {res.get('content') or res.get('snippet', 'No Content')}"
+        for res in web_search_results
+    ]) if web_search_results else "No relevant web search results found."
 
     # GestaltMatcherの結果があるかどうかで異なるプロンプトを使用
     if has_gestalt:
@@ -111,10 +109,7 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
             absent_hpo_list=", ".join(absent_hpo_list),
             onset=onset,
             sex=sex,
-            pcf_results=pcf_text,
-            zeroshot_results=zeroshot_text,
-            gestalt_matcher_results=gm_text,
-            phenotype_search_results=phenotype_search_text,
+            merged_candidate_results=merged_candidate_text,
             web_search_results=web_text
         )
     else:
@@ -125,9 +120,7 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
             absent_hpo_list=", ".join(absent_hpo_list),
             onset=onset,
             sex=sex,
-            pcf_results=pcf_text,
-            zeroshot_results=zeroshot_text,
-            phenotype_search_results=phenotype_search_text,
+            merged_candidate_results=merged_candidate_text,
             web_search_results=web_text
         )
 

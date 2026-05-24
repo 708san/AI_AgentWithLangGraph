@@ -5,10 +5,12 @@ from ..llm.prompt import prompt_dict, build_prompt
 
 def createZeroshot(state: State):
     """
-    hpo_dictとabsent_hpo_dictを使ってZero-Shot診断プロンプトを作成し、LLMに投げる
+    hpo_dictを使ってZero-Shot診断プロンプトを作成し、LLMに投げる。
+    use_absentHPO=True の場合のみ、明示的に観察されなかったHPOもプロンプトへ含める。
     """
     hpo_dict = state.get("hpoDict", {})
     absent_hpo_dict = state.get("absentHpoDict", {})
+    use_absent_hpo = state.get("use_absentHPO", False)
     onset = state.get("onset")
     sex = state.get("sex")
     llm = state.get("llm")
@@ -17,7 +19,11 @@ def createZeroshot(state: State):
         return None, None
 
     present_hpo = ", ".join([v for k, v in hpo_dict.items() if v])
-    absent_hpo = ", ".join([v for k, v in (absent_hpo_dict or {}).items()]) if absent_hpo_dict else ""
+    absent_hpo = (
+        ", ".join([v for k, v in (absent_hpo_dict or {}).items() if v])
+        if use_absent_hpo and absent_hpo_dict
+        else ""
+    )
 
     prompt = build_prompt(
         prompt_dict["zero-shot-diagnosis-prompt"],

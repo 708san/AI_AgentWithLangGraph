@@ -25,6 +25,7 @@ def create_reflection(state: State, diagnosis_to_judge):
     
     hpo_dict = state.get("hpoDict", {})
     absent_hpo_dict = state.get("absentHpoDict", {})
+    use_absent_hpo = state.get("use_absentHPO", False)
     disease_knowledge_list = state.get("memory", [])
     onset = state.get("onset")
     sex = state.get("sex")
@@ -42,7 +43,11 @@ def create_reflection(state: State, diagnosis_to_judge):
     disease_knowledge_str = format_disease_knowledge(disease_knowledge_list, disease_name) if disease_knowledge_list is not None else ""
 
     present_hpo = ", ".join([v for k, v in hpo_dict.items()]) if hpo_dict else ""
-    absent_hpo = ", ".join([v for k, v in (absent_hpo_dict or {}).items()]) if absent_hpo_dict else ""
+    absent_hpo = (
+        ", ".join([v for k, v in (absent_hpo_dict or {}).items() if v])
+        if use_absent_hpo and absent_hpo_dict
+        else ""
+    )
 
     inputs = {
         "present_hpo": present_hpo,

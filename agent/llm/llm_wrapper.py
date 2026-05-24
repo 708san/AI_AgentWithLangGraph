@@ -37,12 +37,10 @@ class AzureOpenAIWrapper:
             llm_params['temperature'] = 0.0
             llm_params['max_tokens'] = max_completion_tokens
         elif self.model_name in ['gpt-5-1', 'gpt-5-2']:
-            llm_params['model_kwargs'] = {
-                "extra_body": {
-                    "max_completion_tokens": max_completion_tokens,
-                    "verbosity": "medium",
-                    "reasoning_effort": "none"
-                }
+            llm_params['extra_body'] = {
+                "max_completion_tokens": max_completion_tokens,
+                "verbosity": "medium",
+                "reasoning_effort": "none"
             }
         
         return AzureChatOpenAI(**llm_params)

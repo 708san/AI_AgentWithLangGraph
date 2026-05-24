@@ -3,6 +3,7 @@ import datetime
 from langgraph.graph import StateGraph, START, END
 from agent.state.state_types import State
 from agent.utils.logger import log_node_result
+from agent.utils.hpo_importance_filter import filter_hpo_by_importance
 from agent.llm.azure_llm_instance import get_llm_instance
 
 from agent.nodes import (
@@ -10,7 +11,8 @@ from agent.nodes import (
     diseaseNormalizeNode, diseaseSearchNode, reflectionNode,
     BeginningOfFlowNode, finalDiagnosisNode, GestaltMatcherNode,
     diseaseNormalizeForFinalNode, HPOwebSearchNode,
-    NormalizePCFNode, NormalizeGestaltMatcherNode, NormalizeZeroShotNode, DiseaseSearchWithHPONode
+    NormalizePCFNode, NormalizeGestaltMatcherNode, NormalizeZeroShotNode, DiseaseSearchWithHPONode,
+    mergeCandidateResultsNode
 )
 
 
@@ -26,6 +28,7 @@ NODE_DEFINITIONS = [
     ("createAbsentHPODictNode", createAbsentHPODictNode),
     ("HPOwebSearchNode", HPOwebSearchNode),
     ("DiseaseSearchWithHPONode", DiseaseSearchWithHPONode),
+    ("mergeCandidateResultsNode", mergeCandidateResultsNode),
     ("createDiagnosisNode", createDiagnosisNode),
     ("diseaseNormalizeNode", diseaseNormalizeNode),
     ("diseaseSearchNode", diseaseSearchNode),
@@ -46,7 +49,8 @@ EDGES = [
     ("createZeroShotNode", "NormalizeZeroShotNode"),
     ("createHPODictNode", "HPOwebSearchNode"),
     ("createHPODictNode", "DiseaseSearchWithHPONode"),
-    (["NormalizeZeroShotNode", "NormalizePCFNode", "NormalizeGestaltMatcherNode", "HPOwebSearchNode", "DiseaseSearchWithHPONode"], "createDiagnosisNode"),
+    (["NormalizeZeroShotNode", "NormalizePCFNode", "NormalizeGestaltMatcherNode", "DiseaseSearchWithHPONode"], "mergeCandidateResultsNode"),
+    (["mergeCandidateResultsNode", "HPOwebSearchNode"], "createDiagnosisNode"),
     ("createDiagnosisNode", "diseaseNormalizeNode"),
     ("diseaseNormalizeNode", "diseaseSearchNode"),
     ("diseaseSearchNode", "reflectionNode"),
@@ -168,27 +172,38 @@ class RareDiseaseDiagnosisPipeline:
         
         return graph_builder.compile()
 
-    def _build_initial_state(self, hpo_list, image_path=None, absent_hpo_list=None, onset=None, sex=None, patient_id=None):
+    def _build_initial_state(self, hpo_list, image_path=None, absent_hpo_list=None, onset=None, sex=None, patient_id=None, use_absentHPO=False, filter_impotance=False):
+        if filter_impotance:
+            hpo_list = filter_hpo_by_importance(hpo_list)
+            absent_hpo_list = filter_hpo_by_importance(absent_hpo_list or [])
+
         return {
             "depth": 0,
             "clinicalText": None,
             "hpoList": hpo_list,
             "absentHpoList": absent_hpo_list or [],
+            "use_absentHPO": use_absentHPO,
+            "filter_impotance": filter_impotance,
             "imagePath": image_path,
             "pubCaseFinder": [],
-            "GestaltMatcher": None,
+            "GestaltMatcher": [],
             "hpoDict": {},
+            "absentHpoDict": {},
             "zeroShotResult": None,
+            "phenotypeSearchResult": None,
+            "mergedDiseaseCandidates": [],
+            "webresources": [],
             "memory": [],
             "tentativeDiagnosis": None,
             "reflection": None,
+            "finalDiagnosis": None,
             "onset": onset if onset else "Unknown",
             "sex": sex if sex else "Unknown",
             "patient_id": patient_id if patient_id else "unknown",
             "llm": self.llm,
         }
 
-    def run(self, hpo_list, image_path=None, verbose=False, absent_hpo_list=None, onset=None, sex=None, patient_id=None):
+    def run(self, hpo_list, image_path=None, verbose=False, absent_hpo_list=None, onset=None, sex=None, patient_id=None, use_absentHPO=False, filter_impotance=False):
         initial_state = self._build_initial_state(
             hpo_list=hpo_list,
             image_path=image_path,
@@ -196,6 +211,8 @@ class RareDiseaseDiagnosisPipeline:
             onset=onset,
             sex=sex,
             patient_id=patient_id,
+            use_absentHPO=use_absentHPO,
+            filter_impotance=filter_impotance,
         )
         result = self.graph.invoke(initial_state)
         if verbose:

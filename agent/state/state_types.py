@@ -12,6 +12,20 @@ class HistoryItem(TypedDict):
     role: str  # "user" or "agent" or "tool"
     content: str
 
+class ToolRankingItem(TypedDict, total=False):
+    tool: str
+    rank: int
+    score: Optional[float]
+    matched_hpo_id: str
+    note: str
+
+class MergedDiseaseCandidate(TypedDict):
+    disease_name: str
+    OMIM_id: Optional[str]
+    consensus_count: int
+    best_rank: int
+    tool_rankings: List[ToolRankingItem]
+
 class State(TypedDict):
     depth: int
     imagePath: Optional[str]
@@ -20,9 +34,12 @@ class State(TypedDict):
     hpoDict: dict[str, str]
     absentHpoList: List[str]
     absentHpoDict: dict[str, str] 
+    use_absentHPO: bool
+    filter_impotance: bool
     pubCaseFinder: List[PCFres]
     GestaltMatcher: List['GestaltMatcherFormat']
     phenotypeSearchResult: Optional[List['PhenotypeSearchFormat']]
+    mergedDiseaseCandidates: List[MergedDiseaseCandidate]
     webresources: List['webresource']
     # evidence are stored in memory
     memory: List['InformationItem']

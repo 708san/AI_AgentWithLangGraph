@@ -1,3 +1,5 @@
+import os
+
 from .state.state_types import State, ReflectionOutput
 from .tools.pcf_api import callingPCF
 from .tools.diagnosis import createDiagnosis
@@ -10,11 +12,15 @@ from .tools.finalDiagnosis import createFinalDiagnosis
 from .tools.gestaltMathcher import call_gestalt_matcher_api
 from .tools.HPOwebReserch import search_hpo_terms
 from .tools.embeddingSearchWithHPO import embedding_search_with_hpo
+from .tools.rankingMerge import merge_ranked_disease_candidates
 
 from .utils.result_saver import save_result
 from .utils.profiler import profile_node
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+REFLECTION_MAX_WORKERS = int(os.getenv("REFLECTION_MAX_WORKERS", "3"))
 
 
 def _empty_reflection_output() -> ReflectionOutput:
@@ -160,6 +166,14 @@ def NormalizeZeroShotNode(state: State):
     return {"zeroShotResult": normalized_result}
 
 @profile_node
+@save_result("mergeCandidateResultsNode")
+def mergeCandidateResultsNode(state: State):
+    """各ツールの順位付き疾患候補を疾患単位に統合する"""
+    print("mergeCandidateResultsNode called")
+    merged_candidates = merge_ranked_disease_candidates(state)
+    return {"mergedDiseaseCandidates": merged_candidates}
+
+@profile_node
 @save_result("createDiagnosisNode")
 def createDiagnosisNode(state: State):
     """
@@ -217,17 +231,15 @@ def reflectionNode(state: State):
                 print(f"[ERROR] Reflection failed for {diagnosis_to_judge.disease_name}: {e}")
                 return None, None
         
-        # ThreadPoolExecutorで並列実行
-        thread_num = 10
-        max_workers = min(len(diagnosis_to_judge_lis), thread_num)
+        max_workers = min(len(diagnosis_to_judge_lis), REFLECTION_MAX_WORKERS)
+        print(f"[Reflection] max_workers={max_workers}")
+
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # 全タスクをサブミット
             future_to_diagnosis = {
                 executor.submit(process_single_reflection, diagnosis): diagnosis 
                 for diagnosis in diagnosis_to_judge_lis
             }
-            
-            # 完了順に結果を取得
+
             for future in as_completed(future_to_diagnosis):
                 diagnosis = future_to_diagnosis[future]
                 try:
