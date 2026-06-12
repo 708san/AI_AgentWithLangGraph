@@ -2,7 +2,7 @@ from typing import Optional
 import re
 from langchain.schema import HumanMessage
 from ..state.state_types import State, DiagnosisOutput, DiagnosisFormat
-from ..llm.prompt import prompt_dict
+from ..llm.prompt import prompt_dict, build_prompt
 
 def parse_diagnosis_text(text: str) -> DiagnosisOutput:
     """
@@ -104,30 +104,31 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     # GestaltMatcherの結果があるかどうかで異なるプロンプトを使用
     if has_gestalt:
         prompt_template = prompt_dict["diagnosis_prompt"]
-        prompt = prompt_template.format(
-            hpo_list=", ".join(hpo_list),
-            absent_hpo_list=", ".join(absent_hpo_list),
-            onset=onset,
-            sex=sex,
-            merged_candidate_results=merged_candidate_text,
-            web_search_results=web_text
-        )
     else:
         # GestaltMatcher情報がない場合のプロンプト
         prompt_template = prompt_dict["diagnosis_prompt_no_gestalt"]
-        prompt = prompt_template.format(
-            hpo_list=", ".join(hpo_list),
-            absent_hpo_list=", ".join(absent_hpo_list),
-            onset=onset,
-            sex=sex,
-            merged_candidate_results=merged_candidate_text,
-            web_search_results=web_text
-        )
+
+    prompt = build_prompt(
+        prompt_template,
+        {
+            "hpo_list": ", ".join(hpo_list),
+            "absent_hpo_list": ", ".join(absent_hpo_list),
+            "use_absentHPO": use_absent_hpo,
+            "onset": onset,
+            "sex": sex,
+            "merged_candidate_results": merged_candidate_text,
+            "web_search_results": web_text,
+        },
+    )
 
     # --- Query the LLM to get the diagnosis result ---
     messages = [HumanMessage(content=prompt)]
     
-    response = llm.llm.invoke(messages)
+    response = llm.invoke_with_content_filter_retry(
+        llm.llm,
+        messages,
+        context="Diagnosis",
+    )
     content = response.content
     """
     print("\n[DEBUG] createDiagnosis Raw Output:")

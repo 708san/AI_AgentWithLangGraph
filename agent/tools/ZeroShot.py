@@ -30,6 +30,7 @@ def createZeroshot(state: State):
         {
             "present_hpo": present_hpo,
             "absent_hpo": absent_hpo,
+            "use_absentHPO": use_absent_hpo,
             "onset": onset if onset else "Unknown",
             "sex": sex if sex else "Unknown"
         }
@@ -38,5 +39,9 @@ def createZeroshot(state: State):
     # structured_llmを使う場合
     structured_llm = llm.get_structured_llm(ZeroShotOutput)
     messages = [HumanMessage(content=prompt)]
-    result = structured_llm.invoke(messages)
+    result = llm.invoke_with_content_filter_retry(
+        structured_llm,
+        messages,
+        context="ZeroShot",
+    )
     return result, prompt

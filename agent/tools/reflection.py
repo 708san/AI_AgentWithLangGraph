@@ -1,7 +1,67 @@
+import os
+import time
 from langchain.schema import HumanMessage
 from openai import LengthFinishReasonError
 from ..state.state_types import ReflectionFormat, State
 from ..llm.prompt import prompt_dict, build_prompt
+from ..llm.llm_wrapper import is_content_filter_error
+
+
+def _reflection_token_limits() -> list[int]:
+    raw_limits = os.getenv("REFLECTION_TOKEN_LIMITS", "12000,16000,20000")
+    try:
+        limits = [int(value.strip()) for value in raw_limits.split(",") if value.strip()]
+    except ValueError:
+        limits = []
+    return limits or [12000, 16000, 20000]
+
+
+def _reflection_request_timeout_seconds() -> float:
+    return float(os.getenv("REFLECTION_REQUEST_TIMEOUT_SECONDS", "180"))
+
+
+def _reflection_retry_wait_seconds() -> float:
+    return float(os.getenv("REFLECTION_RETRY_WAIT_SECONDS", "20"))
+
+
+def _is_retryable_reflection_error(error: Exception) -> bool:
+    if is_content_filter_error(error):
+        return False
+    message = str(error).lower()
+    retryable_markers = [
+        "timeout",
+        "timed out",
+        "rate limit",
+        "too many requests",
+        "temporarily unavailable",
+        "connection",
+        "server error",
+        "service unavailable",
+        "gateway",
+    ]
+    return any(marker in message for marker in retryable_markers)
+
+
+def _invoke_reflection_with_retry(llm, structured_llm, messages, diagnosis_name: str):
+    retry_wait_seconds = _reflection_retry_wait_seconds()
+    retry_count = 0
+    while True:
+        try:
+            return llm.invoke_with_content_filter_retry(
+                structured_llm,
+                messages,
+                context=f"Reflection:{diagnosis_name}",
+            )
+        except Exception as e:
+            if not _is_retryable_reflection_error(e):
+                raise
+            retry_count += 1
+            print(
+                f"[Reflection] Retryable Azure error for {diagnosis_name} "
+                f"({type(e).__name__}: {e}). "
+                f"Retry #{retry_count} after {retry_wait_seconds:.1f}s."
+            )
+            time.sleep(retry_wait_seconds)
 
 
 def format_disease_knowledge(info_list, disease_name):
@@ -52,6 +112,7 @@ def create_reflection(state: State, diagnosis_to_judge):
     inputs = {
         "present_hpo": present_hpo,
         "absent_hpo": absent_hpo,
+        "use_absentHPO": use_absent_hpo,
         "onset": onset if onset else "Unknown",
         "sex": sex if sex else "Unknown",
         "diagnosis_to_judge": f"{diagnosis_name} (Rank: {rank})\nDescription: {description}",
@@ -61,19 +122,24 @@ def create_reflection(state: State, diagnosis_to_judge):
     prompt = build_prompt(prompt_template, inputs)
     messages = [HumanMessage(content=prompt)]
     
-    # トークン数を段階的に増やして再試行
-    token_limits = [25000, 35000, 50000]
+    # トークン数を段階的に増やして再試行する。
+    # 既存ログでは 25,000 での長さ上限到達がなく、出力も数千文字程度のため、
+    # gpt-5 系の内部推論分を見込んでも過剰になりにくい範囲へ抑える。
+    token_limits = _reflection_token_limits()
     
     for attempt, max_tokens in enumerate(token_limits, 1):
         try:
             print(f"[Reflection] 試行 {attempt}/{len(token_limits)}: max_completion_tokens={max_tokens}")
             
             # 一時的なLLMインスタンスを作成（元のllmは変更しない）
-            temp_llm = llm.get_temp_llm_with_max_tokens(max_tokens)
+            temp_llm = llm.get_temp_llm_with_max_tokens(
+                max_tokens,
+                timeout_seconds=_reflection_request_timeout_seconds(),
+            )
             structured_llm = temp_llm.with_structured_output(ReflectionFormat)
             
             # 推論実行
-            result = structured_llm.invoke(messages)
+            result = _invoke_reflection_with_retry(llm, structured_llm, messages, diagnosis_name)
             
             print(f"[Reflection] 成功 (max_completion_tokens={max_tokens})")
             

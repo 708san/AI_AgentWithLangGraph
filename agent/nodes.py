@@ -20,7 +20,7 @@ from .utils.profiler import profile_node
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
-REFLECTION_MAX_WORKERS = int(os.getenv("REFLECTION_MAX_WORKERS", "3"))
+REFLECTION_MAX_WORKERS = int(os.getenv("REFLECTION_MAX_WORKERS", "6"))
 
 
 def _empty_reflection_output() -> ReflectionOutput:

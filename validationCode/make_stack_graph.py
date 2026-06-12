@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # 1. データの読み込み
-df = pd.read_csv('MONDO_BASE_match.csv')
+df = pd.read_csv('MONDO_BASE_match_5-2.csv')
 
 # 2. 設定
 tools = ['PubCaseFinder', 'PhenotypeSearch', 'ZeroShot', 'GestaltMatcher', 'FinalDiagnosis']
@@ -25,6 +25,7 @@ for n in ranks:
             'Similar': similar_only_count / total_cases
         })
 plot_df = pd.DataFrame(plot_data)
+max_total_rate = (plot_df['Match'] + plot_df['Similar']).max()
 
 # 4. 描画設定
 fig, ax = plt.subplots(figsize=(20, 10))
@@ -58,11 +59,12 @@ for i, tool in enumerate(tools):
         ax.text(x_pos[j], -0.005, tool, ha='right', va='top', rotation=45, fontsize=8)
 
 # 5. 装飾
-ax.set_ylim(0, 0.6)
+# 棒の合計値と上部ラベルが見切れないよう、データに応じて余白を確保する。
+ax.set_ylim(0, min(1.1, max(0.6, max_total_rate + 0.10)))
 ax.set_xticks(x_base)
 ax.set_xticklabels([f'Rank {r}' for r in ranks], fontsize=14, fontweight='bold')
 ax.tick_params(axis='x', which='major', pad=60)
 ax.legend(loc='upper left', title="Tools", bbox_to_anchor=(1, 1))
 ax.grid(axis='y', linestyle=':', alpha=0.7)
 plt.tight_layout()
-plt.savefig('mondo_match_plot_v5.png')
+plt.savefig('mondo_match_plot_5-2.png', bbox_inches='tight', pad_inches=0.2, dpi=200)

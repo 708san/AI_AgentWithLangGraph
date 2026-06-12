@@ -3,8 +3,12 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from langchain_community.retrievers import PubMedRetriever, WikipediaRetriever
 from ..state.state_types import State, InformationItem
 from ..llm.llm_wrapper import AzureOpenAIWrapper
+import os
 import time
 import random
+
+
+DISEASE_SEARCH_MAX_WORKERS = int(os.getenv("DISEASE_SEARCH_MAX_WORKERS", "4"))
 
 
 def summarize_text(text: str, llm: AzureOpenAIWrapper) -> str:
@@ -180,7 +184,8 @@ def diseaseSearchForDiagnosis(state: State) -> Dict[str, List[InformationItem]]:
     print(f"  - 検索深度: {search_depth}, 対象疾患: {disease_names}")
 
     # --- 並列実行の準備 ---
-    max_workers = min(len(disease_names) * 2, 10)  # 最大10スレッド
+    max_workers = min(len(disease_names) * 2, DISEASE_SEARCH_MAX_WORKERS)
+    print(f"  - 知識検索 max_workers: {max_workers}")
     
     # 並列実行で取得した全結果を一時保存
     all_results = []
@@ -213,10 +218,10 @@ def diseaseSearchForDiagnosis(state: State) -> Dict[str, List[InformationItem]]:
         completed_count = 0
         total_tasks = len(futures)
         
-        for future in as_completed(futures, timeout=300):
+        for future in as_completed(futures):
             source, disease_name = futures[future]
             try:
-                results = future.result(timeout=10)  # 個別タスクは10秒タイムアウト
+                results = future.result()
                 all_results.extend(results)
                 
                 completed_count += 1
