@@ -22,7 +22,7 @@ def call_gestalt_matcher_api(image_path: str, depth: int, max_retries=3):
         list: suggested_genes_listの上位(depth+2)件
     """
     load_dotenv()
-    api_url = "https://dev-pubcasefinder.dbcls.jp/gm_endpoint/predict"
+    api_url = "https://pubcasefinder.dbcls.jp/gm_endpoint/predict"
     username = os.environ.get("GESTALT_API_USER")
     password = os.environ.get("GESTALT_API_PASS")
     if not username or not password:
