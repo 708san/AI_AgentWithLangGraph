@@ -6,10 +6,10 @@ import re
 from MondoMatcher import MondoOntologyMatcher
 
 # パス設定
-JSON_DIR = './res_5-2_filter_absent'  # JSONファイルが格納されているディレクトリ
+JSON_DIR = './res'  # JSONファイルが格納されているディレクトリ
 TSV_PATH = './sampleData/ValidationDataWithoutDupli_newest.tsv'
 MONDO_JSON = './validationCode/mondo-base.json'
-OUTPUT_CSV = 'MONDO_BASE_match_5-2_filter_absent.csv'
+OUTPUT_CSV = 'MONDO_BASE_match_5-2_new.csv'
 
 # ツールの定義と、JSON内でのキー候補（揺れに対応）
 TOOL_CONFIG = {

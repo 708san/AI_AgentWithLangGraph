@@ -136,13 +136,24 @@ def disease_normalize(disease_name: str):
 def diseaseNormalizeForDiagnosis(Diagnosis):
     """
     tentativeDiagnosis: DiagnosisOutput
-    各診断候補にOMIM idと正規化病名を付与し、類似度0.75未満は棄却
+    各診断候補にOMIM idと正規化病名を付与し、類似度0.75未満は棄却。
+    既にOMIM IDが付与されている候補は、そのIDを疾患同定の根拠として優先する。
     """
     filtered_ans = []
     if not hasattr(Diagnosis, "ans"):
         return Diagnosis
         
     for diag in Diagnosis.ans:
+        existing_omim_num = extract_omim_number(getattr(diag, "OMIM_id", None))
+        if existing_omim_num:
+            diag.OMIM_id = f"OMIM:{existing_omim_num}"
+            diag.disease_name = omim_mapping_by_number.get(
+                existing_omim_num,
+                diag.disease_name.strip().strip("*")
+            )
+            filtered_ans.append(diag)
+            continue
+
         disease_name_upper = diag.disease_name.upper()
         omim_id, omim_label, sim = disease_normalize(disease_name_upper)
 

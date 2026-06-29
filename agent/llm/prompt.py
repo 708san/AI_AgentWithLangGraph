@@ -199,6 +199,18 @@ Treatment of missing and absent findings:
 * If no absent phenotype section is provided, do not infer absence of any clinical feature.
 * A missing hallmark feature should reduce confidence, but it should not automatically make Correctness=False unless the remaining overlap is only nonspecific or the disease's core phenotype is clearly incompatible with the patient.
 
+Treatment of disease identity and literature evidence:
+
+* Use the proposed diagnosis name and its OMIM/MONDO identifier, when provided, as the disease identity anchor.
+* Do not replace the proposed disease with a different gene, subtype, synonym, syndrome, or OMIM/MONDO entity unless the provided evidence clearly shows they are the same disease entity.
+* If the retrieved medical literature appears to describe a different disease entity, gene, subtype, or only a loosely related syndrome, treat that as a retrieval or literature mismatch.
+* Insufficient, missing, generic, or partially mismatched literature is not by itself evidence against the proposed diagnosis.
+* If the provided literature does not cover the proposed OMIM/MONDO disease identity, decide retention primarily from the proposed diagnosis description, patient phenotype overlap, and diagnostic tool support.
+* A high-ranked phenotype-based tool candidate should be retained unless there is a decisive clinical contradiction or the candidate's core phenotype is clearly incompatible with the patient.
+* Apply a tool-supported candidate override: if PubCaseFinder, PhenotypeSearch, or GestaltMatcher ranks the proposed candidate highly and the patient has meaningful syndrome-level phenotype overlap, set Correctness=True unless there is a decisive contradiction.
+* For newly described, sparsely documented, poorly retrieved, or otherwise literature-poor rare diseases, absence of detailed disease-specific literature should be treated as uncertainty rather than evidence against the disease.
+* Assign Correctness=False because of literature only when the literature provides clear contradictory evidence, confirms a different disease identity, or shows that the candidate's defining phenotype is incompatible with the patient.
+
 To generate this output, follow these steps.
 
 Step 1: Summarize the patient's key features.
@@ -207,7 +219,10 @@ Briefly summarize the most important clinical features relevant to this proposed
 Step 2: Analyze evidence supporting retention of this candidate.
 Explain which patient findings support the proposed diagnosis.
 Prioritize specific and characteristic features over nonspecific ones.
-Also consider support from diagnostic tools, phenotype overlap, and provided medical literature.
+First consider the Candidate Identity and Tool/Database Evidence section.
+Then consider phenotype overlap.
+Finally consider the Retrieved Medical Literature section.
+Do not treat a weak or mismatched Retrieved Medical Literature section as negating the Candidate Identity and Tool/Database Evidence section.
 
 Step 3: Analyze evidence that lowers confidence.
 Identify missing, uncertain, atypical, or contradictory points.
@@ -215,13 +230,15 @@ Distinguish clearly between:
 
 * features that are explicitly absent,
 * features that are simply unreported,
-* features that are truly contradictory.
+* features that are truly contradictory,
+* limitations caused by insufficient or mismatched literature.
   Do not over-penalize unreported hallmark features unless they are essential to the disease definition and the remaining overlap is weak.
 
 Step 4: Synthesize the evidence.
 Provide a balanced analysis explaining whether the candidate should remain in the final differential diagnosis list.
 Explicitly state whether the limitations merely reduce confidence or are strong enough to exclude the candidate.
-Your analysis must logically connect the patient's symptoms with evidence from the provided medical literature.
+Your analysis must logically connect the patient's symptoms with evidence from the provided medical literature when the literature is relevant.
+When the provided literature is insufficient or appears mismatched to the proposed OMIM/MONDO disease identity, explicitly state that limitation and do not treat it alone as a reason to exclude the candidate.
 
 Step 5: Extract supporting references.
 Extract the most relevant evidence from the provided medical literature.
@@ -237,21 +254,27 @@ Judge as True if:
 * The diagnosis explains multiple important findings in the patient.
 * The overall phenotype is reasonably compatible with the disease.
 * The candidate is supported by tool rankings, phenotype overlap, literature, or disease-specific knowledge.
+* The provided literature is limited or partially mismatched, but the proposed disease identity remains plausible based on phenotype-level evidence and there is no decisive contradiction.
+* The candidate is highly ranked by a phenotype-based diagnostic tool and the patient has meaningful phenotype-level overlap, even if disease-specific literature is unavailable or mismatched.
+* The candidate is a specific, literature-poor rare disease with strong phenotype-based tool support and no decisive contradiction.
 * There is no decisive contradiction.
 * The diagnosis is reasonable to retain in the final differential diagnosis list, even if confirmation is still needed.
 
 Judge as False if:
 
 * The support relies almost entirely on nonspecific overlap.
-* The cited literature is irrelevant to the patient's congenital or rare disease phenotype.
+* Relevant disease-specific evidence is unavailable and there is no meaningful phenotype-level or tool-ranking support.
 * The disease's defining phenotype is largely incompatible with the patient.
 * Explicitly absent findings directly contradict the disease's core phenotype.
+* The proposed diagnosis is confirmed to be a different OMIM/MONDO disease entity from the evidence being evaluated.
 * The candidate should not be carried into the final top diagnosis list.
 
 Now evaluate the following case.
 
-Proposed Diagnosis to Evaluate:
+Candidate Identity and Tool/Database Evidence:
 {diagnosis_to_judge}
+
+{tool_support}
 
 Patient Phenotype (present):
 {present_hpo}
@@ -263,7 +286,7 @@ Onset:
 Sex:
 {sex}
 
-Medical Literature:
+Retrieved Medical Literature:
 {disease_knowledge}
 """,
 
@@ -283,13 +306,18 @@ Important interpretation of Disease Reflection:
 
 * In Disease Reflection, Correctness means whether the disease remains plausible enough to be retained as a final differential diagnosis candidate.
 * Correctness=True does not mean the disease is confirmed.
-* Correctness=False means the disease should usually be deprioritized or excluded.
+* Correctness=False usually means the disease should be deprioritized or excluded, but first inspect the stated reason.
+* If Correctness=False is mainly due to insufficient literature, mismatched literature, or lack of disease-specific references, re-evaluate the candidate using the primary diagnosis result, OMIM/MONDO identity, phenotype overlap, and diagnostic tool support before excluding it.
+* A highly ranked phenotype-based tool candidate should remain eligible for the final top 5 unless there is a decisive clinical contradiction or clear phenotype incompatibility.
+* Do not prioritize a candidate merely because more literature was retrieved for it. Literature-rich alternatives should not displace a sparse but specific OMIM/MONDO candidate that has strong diagnostic-tool support and meaningful phenotype overlap.
+* For newly described, sparsely documented, or poorly retrieved rare diseases, sparse literature should lower certainty but should not by itself lower rank below less tool-supported alternatives.
 * Do not treat unreported findings as absent.
 * Only use absent HPO findings as negative evidence when an absent HPO section is explicitly provided above.
 
 **Task:**
 Based on all the above, enumerate up to the top 5 most likely rare disease diagnoses for this patient.
 If fewer than 5 are plausible, list only those.
+Balance evidence in this order: phenotype specificity, diagnostic tool support, reflection reasoning, and relevant literature. Do not let literature volume alone dominate the ranking.
 
 —
 
@@ -379,4 +407,3 @@ def build_prompt(prompt_templete, inputs):
         }
 
     return prompt_templete.format(**inputs)
-
