@@ -11,7 +11,7 @@ This project implements an AI agent for assisting in the diagnosis of rare disea
 ## 1. Using `agent_pipeline.py` from Another Script
 
 You can use the pipeline as a Python module from your own script.  
-See the example below (`testCode/test.py`):
+See the minimal example below:
 
 ```python
 import sys
@@ -36,14 +36,15 @@ if __name__ == "__main__":
 ・enable_log=True: Enables logging of all node results and prompts
 
 ---
- ## 2. Running graph_main.py Directly
-You can also run the pipeline directly from the command line:
+## 2. Running From a PhenoPacket
+You can also run the pipeline through the helper script:
 
 ```
-python [graph_main.py](http://_vscodecontentref_/0)
+python scripts/run_from_phenopacket.py --help
 ```
 
-Edit the input_hpo_list and image_path variables in graph_main.py as needed.
+Local sample datasets and historical experiments are kept under
+`local_artifacts/` in this workspace and are intentionally ignored by git.
 
 ---
 ## Log
@@ -81,4 +82,3 @@ GESTALT_API_PASS=your_password
 ## Notes
 - Further development is needed for memory management and external knowledge integration.
 - Contributions and suggestions are welcome!
-
