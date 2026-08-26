@@ -1,5 +1,43 @@
 # HPO Analysis
 
+## Files and Reproducibility
+
+`HPO_analysis/raw__data/` contains downloaded source files used to build the HPO information-content table. This directory is intentionally excluded from Git because files such as `mondo.json` can exceed GitHub's 100 MB file limit.
+
+The raw files can be recreated with:
+
+```bash
+/Users/yoshikuwa-n/Downloads/WorkForBioHackathon/AI_AgentWithLangGraph/.venv/bin/python HPO_analysis/scripts/download_raw_data.py
+```
+
+Use `--force` to redownload files that already exist:
+
+```bash
+/Users/yoshikuwa-n/Downloads/WorkForBioHackathon/AI_AgentWithLangGraph/.venv/bin/python HPO_analysis/scripts/download_raw_data.py --force
+```
+
+The downloader writes `HPO_analysis/raw__data/raw_data_manifest.json` with source URLs, byte sizes, and SHA-256 checksums. That manifest is also ignored with the raw data directory.
+
+After the raw files are present, rebuild the IC output files with:
+
+```bash
+/Users/yoshikuwa-n/Downloads/WorkForBioHackathon/AI_AgentWithLangGraph/.venv/bin/python HPO_analysis/scripts/build_hpo_information.py
+```
+
+Generated outputs that are currently kept in Git:
+
+- `HPO_analysis/output/hpo_information.json`
+- `HPO_analysis/output/disease_normalization_report.json`
+- `HPO_analysis/output/sanity_checks.json`
+
+Raw downloaded source files:
+
+- `HPO_analysis/raw__data/hp.json`
+- `HPO_analysis/raw__data/phenotype.hpoa`
+- `HPO_analysis/raw__data/mondo.json`
+- `HPO_analysis/raw__data/mondo_exactmatch_omim.sssom.tsv`
+- `HPO_analysis/raw__data/mondo_exactmatch_orphanet.sssom.tsv`
+
 ## Method
 
 Primary analysis uses Phen2Disease-style information content plus MONDO exact disease normalization.
