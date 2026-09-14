@@ -12,7 +12,7 @@ from agent.nodes import (
     BeginningOfFlowNode, finalDiagnosisNode, GestaltMatcherNode,
     diseaseNormalizeForFinalNode, HPOwebSearchNode,
     NormalizePCFNode, NormalizeGestaltMatcherNode, NormalizeZeroShotNode, DiseaseSearchWithHPONode,
-    mergeCandidateResultsNode
+    PhenoBrainNode, mergeCandidateResultsNode
 )
 
 
@@ -20,6 +20,7 @@ NODE_DEFINITIONS = [
     ("BeginningOfFlowNode", BeginningOfFlowNode),
     ("createZeroShotNode", createZeroShotNode),
     ("PCFnode", PCFnode),
+    ("PhenoBrainNode", PhenoBrainNode),
     ("GestaltMatcherNode", GestaltMatcherNode),
     ("NormalizeZeroShotNode", NormalizeZeroShotNode),
     ("NormalizePCFNode", NormalizePCFNode),
@@ -41,6 +42,7 @@ EDGES = [
     (START, "BeginningOfFlowNode"),
     ("BeginningOfFlowNode", "PCFnode"),
     ("PCFnode", "NormalizePCFNode"),
+    ("BeginningOfFlowNode", "PhenoBrainNode"),
     ("BeginningOfFlowNode", "createHPODictNode"),
     ("BeginningOfFlowNode", "GestaltMatcherNode"),
     ("GestaltMatcherNode", "NormalizeGestaltMatcherNode"),
@@ -49,7 +51,7 @@ EDGES = [
     ("createZeroShotNode", "NormalizeZeroShotNode"),
     ("createHPODictNode", "HPOwebSearchNode"),
     ("createHPODictNode", "DiseaseSearchWithHPONode"),
-    (["NormalizeZeroShotNode", "NormalizePCFNode", "NormalizeGestaltMatcherNode", "DiseaseSearchWithHPONode"], "mergeCandidateResultsNode"),
+    (["NormalizeZeroShotNode", "NormalizePCFNode", "NormalizeGestaltMatcherNode", "DiseaseSearchWithHPONode", "PhenoBrainNode"], "mergeCandidateResultsNode"),
     (["mergeCandidateResultsNode", "HPOwebSearchNode"], "createDiagnosisNode"),
     ("createDiagnosisNode", "diseaseNormalizeNode"),
     ("diseaseNormalizeNode", "diseaseSearchNode"),
@@ -186,6 +188,7 @@ class RareDiseaseDiagnosisPipeline:
             "filter_impotance": filter_impotance,
             "imagePath": image_path,
             "pubCaseFinder": [],
+            "phenoBrain": [],
             "GestaltMatcher": [],
             "hpoDict": {},
             "absentHpoDict": {},
