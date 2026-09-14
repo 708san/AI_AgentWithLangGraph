@@ -56,6 +56,7 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     onset = state.get("onset", "Unknown")
     sex = state.get("sex", "Unknown")
     gestalt_matcher_results = state.get("GestaltMatcher", [])
+    phenobrain_results = state.get("phenoBrain", [])
     web_search_results = state.get("webresources", [])
     merged_candidates = state.get("mergedDiseaseCandidates", [])
     llm = state.get("llm")
@@ -65,6 +66,12 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
         return None, None
 
     has_gestalt = gestalt_matcher_results and len(gestalt_matcher_results) > 0
+    merged_candidate_sources = ["PubCaseFinder", "Zero-Shot Diagnosis"]
+    if has_gestalt:
+        merged_candidate_sources.append("GestaltMatcher")
+    if phenobrain_results:
+        merged_candidate_sources.append("PhenoBrain")
+    merged_candidate_sources.append("Phenotype Similarity Search")
 
     candidate_lines = []
     for index, candidate in enumerate(merged_candidates, 1):
@@ -116,6 +123,7 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
             "use_absentHPO": use_absent_hpo,
             "onset": onset,
             "sex": sex,
+            "merged_candidate_sources": ", ".join(merged_candidate_sources),
             "merged_candidate_results": merged_candidate_text,
             "web_search_results": web_text,
         },

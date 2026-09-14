@@ -8,6 +8,15 @@ class PCFres(TypedDict):
     score: Optional[float]
     omim_id: str
 
+class PhenoBrainResult(TypedDict, total=False):
+    disease_name: str
+    omim_id: Optional[str]
+    orpha_id: Optional[str]
+    source_codes: List[str]
+    rd_id: str
+    rank: int
+    score: Optional[float]
+
 class HistoryItem(TypedDict):
     role: str  # "user" or "agent" or "tool"
     content: str
@@ -35,8 +44,10 @@ class State(TypedDict):
     absentHpoList: List[str]
     absentHpoDict: dict[str, str] 
     use_absentHPO: bool
+    use_phenobrain: bool
     filter_impotance: bool
     pubCaseFinder: List[PCFres]
+    phenoBrain: List[PhenoBrainResult]
     GestaltMatcher: List['GestaltMatcherFormat']
     phenotypeSearchResult: Optional[List['PhenotypeSearchFormat']]
     mergedDiseaseCandidates: List[MergedDiseaseCandidate]

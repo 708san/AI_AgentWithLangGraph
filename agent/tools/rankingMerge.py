@@ -111,6 +111,21 @@ def merge_ranked_disease_candidates(state: State) -> list[MergedDiseaseCandidate
             },
         )
 
+    for index, result in enumerate(state.get("phenoBrain", []) or [], 1):
+        rd_id = result.get("rd_id", "")
+        orpha_id = result.get("orpha_id") or ""
+        _add_candidate(
+            merged,
+            result.get("disease_name", ""),
+            result.get("omim_id"),
+            {
+                "tool": "PhenoBrain",
+                "rank": result.get("rank") or index,
+                "score": result.get("score"),
+                "note": f"PhenoBrain RD={rd_id}, ORPHA={orpha_id}",
+            },
+        )
+
     phenotype_results = state.get("phenotypeSearchResult") or []
     for index, result in enumerate(phenotype_results, 1):
         disease_info = result.disease_info

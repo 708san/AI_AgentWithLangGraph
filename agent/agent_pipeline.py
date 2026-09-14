@@ -12,7 +12,7 @@ from agent.nodes import (
     BeginningOfFlowNode, finalDiagnosisNode, GestaltMatcherNode,
     diseaseNormalizeForFinalNode, HPOwebSearchNode,
     NormalizePCFNode, NormalizeGestaltMatcherNode, NormalizeZeroShotNode, DiseaseSearchWithHPONode,
-    mergeCandidateResultsNode
+    PhenoBrainNode, mergeCandidateResultsNode
 )
 
 
@@ -20,6 +20,7 @@ NODE_DEFINITIONS = [
     ("BeginningOfFlowNode", BeginningOfFlowNode),
     ("createZeroShotNode", createZeroShotNode),
     ("PCFnode", PCFnode),
+    ("PhenoBrainNode", PhenoBrainNode),
     ("GestaltMatcherNode", GestaltMatcherNode),
     ("NormalizeZeroShotNode", NormalizeZeroShotNode),
     ("NormalizePCFNode", NormalizePCFNode),
@@ -41,6 +42,7 @@ EDGES = [
     (START, "BeginningOfFlowNode"),
     ("BeginningOfFlowNode", "PCFnode"),
     ("PCFnode", "NormalizePCFNode"),
+    ("BeginningOfFlowNode", "PhenoBrainNode"),
     ("BeginningOfFlowNode", "createHPODictNode"),
     ("BeginningOfFlowNode", "GestaltMatcherNode"),
     ("GestaltMatcherNode", "NormalizeGestaltMatcherNode"),
@@ -49,7 +51,7 @@ EDGES = [
     ("createZeroShotNode", "NormalizeZeroShotNode"),
     ("createHPODictNode", "HPOwebSearchNode"),
     ("createHPODictNode", "DiseaseSearchWithHPONode"),
-    (["NormalizeZeroShotNode", "NormalizePCFNode", "NormalizeGestaltMatcherNode", "DiseaseSearchWithHPONode"], "mergeCandidateResultsNode"),
+    (["NormalizeZeroShotNode", "NormalizePCFNode", "NormalizeGestaltMatcherNode", "DiseaseSearchWithHPONode", "PhenoBrainNode"], "mergeCandidateResultsNode"),
     (["mergeCandidateResultsNode", "HPOwebSearchNode"], "createDiagnosisNode"),
     ("createDiagnosisNode", "diseaseNormalizeNode"),
     ("diseaseNormalizeNode", "diseaseSearchNode"),
@@ -65,11 +67,12 @@ def _has_any_correct_reflection(reflection) -> bool:
     return any(getattr(ans_item, "Correctness", False) for ans_item in reflection.ans)
 
 class RareDiseaseDiagnosisPipeline:
-    def __init__(self, model_name: str = 'gpt-4o', enable_log=False, log_filename=None):
+    def __init__(self, model_name: str = 'gpt-4o', enable_log=False, log_filename=None, log_dir=None):
         self.graph = self._build_graph()
         self.enable_log = enable_log
         self.logfile_path = None
         self.log_filename = log_filename
+        self.log_dir = log_dir
         if self.enable_log:
             self.logfile_path = self._get_logfile_path()
             self._write_graph_ascii_to_log()
@@ -77,7 +80,7 @@ class RareDiseaseDiagnosisPipeline:
         self.llm = get_llm_instance(model_name)
             
     def _get_logfile_path(self):
-        log_dir = os.path.join(os.getcwd(), "log")
+        log_dir = self.log_dir or os.path.join(os.getcwd(), "log")
         os.makedirs(log_dir, exist_ok=True)
         if self.log_filename:
             return os.path.join(log_dir, self.log_filename)
@@ -172,7 +175,7 @@ class RareDiseaseDiagnosisPipeline:
         
         return graph_builder.compile()
 
-    def _build_initial_state(self, hpo_list, image_path=None, absent_hpo_list=None, onset=None, sex=None, patient_id=None, use_absentHPO=False, filter_impotance=False):
+    def _build_initial_state(self, hpo_list, image_path=None, absent_hpo_list=None, onset=None, sex=None, patient_id=None, use_absentHPO=False, filter_impotance=False, use_phenobrain=False):
         if filter_impotance:
             hpo_list = filter_hpo_by_importance(hpo_list)
             absent_hpo_list = filter_hpo_by_importance(absent_hpo_list or [])
@@ -183,9 +186,11 @@ class RareDiseaseDiagnosisPipeline:
             "hpoList": hpo_list,
             "absentHpoList": absent_hpo_list or [],
             "use_absentHPO": use_absentHPO,
+            "use_phenobrain": use_phenobrain,
             "filter_impotance": filter_impotance,
             "imagePath": image_path,
             "pubCaseFinder": [],
+            "phenoBrain": [],
             "GestaltMatcher": [],
             "hpoDict": {},
             "absentHpoDict": {},
@@ -203,7 +208,7 @@ class RareDiseaseDiagnosisPipeline:
             "llm": self.llm,
         }
 
-    def run(self, hpo_list, image_path=None, verbose=False, absent_hpo_list=None, onset=None, sex=None, patient_id=None, use_absentHPO=False, filter_impotance=False):
+    def run(self, hpo_list, image_path=None, verbose=False, absent_hpo_list=None, onset=None, sex=None, patient_id=None, use_absentHPO=False, filter_impotance=False, use_phenobrain=False):
         initial_state = self._build_initial_state(
             hpo_list=hpo_list,
             image_path=image_path,
@@ -213,6 +218,7 @@ class RareDiseaseDiagnosisPipeline:
             patient_id=patient_id,
             use_absentHPO=use_absentHPO,
             filter_impotance=filter_impotance,
+            use_phenobrain=use_phenobrain,
         )
         result = self.graph.invoke(initial_state)
         if verbose:

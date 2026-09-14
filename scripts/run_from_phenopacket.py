@@ -63,7 +63,14 @@ def format_final_diagnosis(final_diagnosis_obj) -> dict:
     
     return {"ans": ans_list, "reference": top_level_reference}
 
-def run_pipeline_from_phenopacket(phenopacket_path: str, model_name: str, image_path_arg: str = None, output_mode: str = 'file'):
+def run_pipeline_from_phenopacket(
+    phenopacket_path: str,
+    model_name: str,
+    image_path_arg: str = None,
+    output_mode: str = 'file',
+    use_phenobrain: bool = False,
+    output_dir: str = None,
+):
     """
     指定されたPhenopacketファイルから情報を読み込み、診断パイプラインを実行する。
     output_modeに応じて、ファイル保存またはデータ返却を行う。
@@ -82,11 +89,10 @@ def run_pipeline_from_phenopacket(phenopacket_path: str, model_name: str, image_
         return None if output_mode == 'return' else 1
 
     result_file_path = None
+    run_dir = output_dir or os.path.join(project_root, "run_outputs")
     if output_mode == 'file':
-        res_dir_name = f'ans_{model_name.replace("gpt-", "")}'
-        res_dir = os.path.join(project_root, res_dir_name)
-        os.makedirs(res_dir, exist_ok=True)
-        result_file_path = os.path.join(res_dir, f"{patient_id}.json")
+        os.makedirs(run_dir, exist_ok=True)
+        result_file_path = os.path.join(run_dir, f"{patient_id}.json")
         if os.path.exists(result_file_path):
             print(f"結果ファイルが既に存在するため、処理をスキップします。")
             return 0
@@ -105,12 +111,17 @@ def run_pipeline_from_phenopacket(phenopacket_path: str, model_name: str, image_
     if output_mode in ['file', 'print']:
         print(f"診断パイプラインを実行します... (モデル: {model_name})")
     
+    log_dir = os.path.join(run_dir, "logs")
+    node_result_dir = os.path.join(run_dir, "node_results")
+    os.makedirs(node_result_dir, exist_ok=True)
+    os.environ["AGENT_RESULT_DIR"] = node_result_dir
     log_filename = f"{patient_id}_{model_name.replace('gpt-', '')}.log"
 
     pipeline = RareDiseaseDiagnosisPipeline(
         model_name=model_name,
         enable_log=(output_mode == 'file'), # ログファイル生成はfileモードの時のみとする
-        log_filename=log_filename
+        log_filename=log_filename,
+        log_dir=log_dir,
     )
     
     # verbose=Falseでパイプライン側のpretty_printを抑制
@@ -121,6 +132,7 @@ def run_pipeline_from_phenopacket(phenopacket_path: str, model_name: str, image_
         onset=patient_data["onset"],
         sex=patient_data["sex"],
         patient_id=patient_id,
+        use_phenobrain=use_phenobrain,
         verbose=False
     )
     
@@ -166,7 +178,16 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, default="gpt-4o", choices=["gpt-4o", "gpt-5-1", "gpt-5-2"], help="The name of the model to use.")
     parser.add_argument("--image", type=str, default=None, help="Optional path to the patient's image file.")
     parser.add_argument("--output_mode", type=str, default="file", choices=["file", "print", "return"], help="Output mode: 'file' to save JSON, 'print' to print to stdout.")
+    parser.add_argument("--use_phenobrain", action="store_true", help="Enable PhenoBrain explicitly (default: disabled).")
+    parser.add_argument("--output_dir", type=str, default=None, help="Directory for the final result, logs, and node responses.")
     
     args = parser.parse_args()
     
-    run_pipeline_from_phenopacket(args.phenopacket, args.model, args.image, output_mode=args.output_mode)
+    run_pipeline_from_phenopacket(
+        args.phenopacket,
+        args.model,
+        args.image,
+        output_mode=args.output_mode,
+        use_phenobrain=args.use_phenobrain,
+        output_dir=args.output_dir,
+    )

@@ -40,7 +40,7 @@ prompt_dict = {
 **ABSOLUTE RULE:** DO NOT OMIT ANY CANDIDATE. Even if a disease appears only once with a low score, it MUST be included in the final output.
 
 **Input Source:**
-- Merged Candidate Table created from PubCaseFinder, Zero-Shot Diagnosis, and Phenotype Similarity Search.
+- Merged Candidate Table created from {merged_candidate_sources}.
 
 **Note:** Facial image analysis (GestaltMatcher) is not available for this case.
 
@@ -95,7 +95,7 @@ III. Web Search
 **ABSOLUTE RULE:** DO NOT OMIT ANY CANDIDATE. Even if a disease appears only once with a low score, it MUST be included in the final output.
 
 **Input Source:**
-- Merged Candidate Table created from PubCaseFinder, Zero-Shot Diagnosis, GestaltMatcher, and Phenotype Similarity Search.
+- Merged Candidate Table created from {merged_candidate_sources}.
 
 **Task:**
 1. Use the merged candidate table as the authoritative candidate list.

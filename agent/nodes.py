@@ -13,6 +13,7 @@ from .tools.gestaltMathcher import call_gestalt_matcher_api
 from .tools.HPOwebReserch import search_hpo_terms
 from .tools.embeddingSearchWithHPO import embedding_search_with_hpo
 from .tools.rankingMerge import merge_ranked_disease_candidates
+from .tools.phenobrain_api import call_phenobrain
 
 from .utils.result_saver import save_result
 from .utils.profiler import profile_node
@@ -80,6 +81,18 @@ def PCFnode(state: State):
         return {"pubCaseFinder": []}
     result = callingPCF(hpo_list, depth)
     return {"pubCaseFinder": result}
+
+@profile_node
+@save_result("PhenoBrainNode")
+def PhenoBrainNode(state: State):
+    print("PhenoBrainNode called")
+    if not state.get("use_phenobrain", False):
+        return {"phenoBrain": []}
+    hpo_list = state.get("hpoList", [])
+    if not hpo_list:
+        return {"phenoBrain": []}
+    results = call_phenobrain(hpo_list)
+    return {"phenoBrain": results}
 
 @profile_node
 @save_result("NormalizePCFNode")
