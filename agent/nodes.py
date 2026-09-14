@@ -86,6 +86,8 @@ def PCFnode(state: State):
 @save_result("PhenoBrainNode")
 def PhenoBrainNode(state: State):
     print("PhenoBrainNode called")
+    if not state.get("use_phenobrain", False):
+        return {"phenoBrain": []}
     hpo_list = state.get("hpoList", [])
     if not hpo_list:
         return {"phenoBrain": []}

@@ -34,7 +34,7 @@ def save_result(node_name):
             # 副作用が state に影響しないようにする
             try:
                 patient_id = state.get("patient_id", "unknown")
-                res_dir = "res"
+                res_dir = os.environ.get("AGENT_RESULT_DIR", "res")
                 os.makedirs(res_dir, exist_ok=True)
                 out_path = os.path.join(res_dir, f"{patient_id}.json")
 

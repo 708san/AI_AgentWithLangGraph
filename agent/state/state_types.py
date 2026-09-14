@@ -44,6 +44,7 @@ class State(TypedDict):
     absentHpoList: List[str]
     absentHpoDict: dict[str, str] 
     use_absentHPO: bool
+    use_phenobrain: bool
     filter_impotance: bool
     pubCaseFinder: List[PCFres]
     phenoBrain: List[PhenoBrainResult]
