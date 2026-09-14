@@ -42,7 +42,3 @@ def get_llm_instance(model_name: str = 'gpt-4o'):
         deployment_name=deployment_name,
         api_version=api_version
     )
-
-# デフォルトのインスタンス（後方互換性のため、あるいは単体テスト用）
-# ただし、新しい設計では直接この変数をインポートしないことが推奨される
-azure_llm = get_llm_instance('gpt-4o')
