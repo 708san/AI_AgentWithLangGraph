@@ -13,6 +13,7 @@ def createZeroshot(state: State):
     use_absent_hpo = state.get("use_absentHPO", False)
     onset = state.get("onset")
     sex = state.get("sex")
+    num_diagnoses = state.get("num_diagnoses", 5)
     llm = state.get("llm")
 
     if not hpo_dict or not llm:
@@ -32,7 +33,8 @@ def createZeroshot(state: State):
             "absent_hpo": absent_hpo,
             "use_absentHPO": use_absent_hpo,
             "onset": onset if onset else "Unknown",
-            "sex": sex if sex else "Unknown"
+            "sex": sex if sex else "Unknown",
+            "num_diagnoses": num_diagnoses,
         }
     )
 

@@ -46,6 +46,25 @@ python scripts/run_from_phenopacket.py --help
 Local sample datasets and historical experiments are kept under
 `local_artifacts/` in this workspace and are intentionally ignored by git.
 
+## 3. Running the five image-inclusive benchmark cases
+
+The five existing validation cases are summarized in `data/five_cases.json`.
+Validate HPO lists and image paths without calling external services:
+
+```
+python scripts/run_five_cases.py --dry-run
+```
+
+Run all five cases with the diagnosis pipeline:
+
+```
+python scripts/run_five_cases.py --model gpt-5-2
+```
+
+The script stores expected diagnoses and actual `finalDiagnosis` results separately under
+`run_outputs/five_cases/`. The image paths refer to the existing local files under
+`local_artifacts/evaluation/sampleData/PhenoPacketStore_25072025/`.
+
 ---
 ## Log
 If you set enable_log=True when creating the pipeline, all node results and prompts will be saved in a human-readable log file under the log/ directory.

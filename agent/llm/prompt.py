@@ -156,7 +156,7 @@ Important:
 - Do not penalize a disease solely because a hallmark feature is not mentioned.
 - Only use absent findings as negative evidence when they are explicitly provided above.
 
-Enumerate the top 5 most likely rare disease diagnoses that explain the patient's phenotype.
+Enumerate the top {num_diagnoses} most likely rare disease diagnoses that explain the patient's phenotype.
 Be precise. Prefer recently defined conditions and specific conditions over umbrella diagnoses.
 
 Use ** to tag the disease name.
