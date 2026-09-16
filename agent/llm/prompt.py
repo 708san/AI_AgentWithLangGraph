@@ -143,25 +143,41 @@ III. Web Search
 {web_search_results}
 """,
 
-    "zero-shot-diagnosis-prompt": """You are a specialist in the field of rare diseases.
-You will be provided and asked about a complicated clinical case. Read it carefully and provide a diverse and comprehensive differential diagnosis.
+    "zero-shot-diagnosis-prompt": """## Role and task
+You are a specialist in rare disease differential diagnosis. Generate and rank five candidate diseases using your medical knowledge and the patient information below.
+This is the initial hypothesis-generation step of a diagnostic support pipeline, not a confirmed diagnosis. Your candidates will subsequently be normalized and combined with other information sources. Do not assume that those later steps will correct an unsupported disease name, subtype, or identifier.
 
+## Patient information
 Patient HPO terms (present): {present_hpo}
 {absent_hpo_section}
 Onset: {onset}
 Sex: {sex}
 
-Important:
-- If no absent HPO section is shown, treat unreported findings as unknown, not absent.
-- Do not penalize a disease solely because a hallmark feature is not mentioned.
-- Only use absent findings as negative evidence when they are explicitly provided above.
+## Interpreting the evidence
+- Use the supplied patient findings, onset, and sex together when assessing compatibility.
+- All findings listed under "Patient HPO terms (present)" are explicitly present in this patient. Never reinterpret them as absent.
+- Treat unreported findings as unknown, not absent. Do not penalize a disease solely because a hallmark feature is not mentioned.
+{absent_hpo_instructions}
+- Do not confuse age at onset with current age. Treat Unknown, missing values, and uninterpretable onset text as unavailable information; do not invent a numerical age or disease course.
+- Do not invent patient findings, family history, inheritance, laboratory results, or molecular test results. Known disease characteristics may inform compatibility, but must not be treated as observed patient facts.
+- No image findings, external search results, or genetic test results are provided here. Do not claim to have inspected an image, searched a database, or confirmed a molecular diagnosis.
 
-Enumerate the top 5 most likely rare disease diagnoses that explain the patient's phenotype.
-Be precise. Prefer recently defined conditions and specific conditions over umbrella diagnoses.
+## Selecting and ranking candidates
+- Rank by overall compatibility with the available patient information, not by a simple count of matching symptoms. Give greater weight to distinctive findings and informative combinations than to common, nonspecific findings.
+- Consider both supporting findings and explicit contradictions for each candidate. Do not ignore a major mismatch merely because several nonspecific features overlap.
+- Consider plausible alternatives across disease groups, but do not add a weakly supported diagnosis solely to increase diversity. Prefer stronger overall fit over novelty; recently described conditions receive no automatic preference.
+- Use the most specific disease or subtype supported by the available evidence. Do not select a subtype solely because it has an OMIM identifier or because a gene is commonly associated with the broader phenotype.
+- When the evidence does not reliably distinguish subtypes, avoid claiming subtype certainty. If a specific subtype is included as a hypothesis, rank it according to its support rather than treating it as established.
+- Include one disease per entry. Do not repeat the same disease under synonyms or combine alternative diagnoses in a single entry. Distinct subtypes may both be included when each is a plausible differential diagnosis; do not add subtype guesses solely to fill the list.
+- The five candidates need not all have high confidence. Rank them by relative compatibility with the supplied evidence; inclusion does not imply a confirmed diagnosis.
+- Lack of a known OMIM identifier does not by itself make an otherwise plausible disease less likely. Select candidates by clinical fit, then report identifiers only when known.
 
-Use ** to tag the disease name.
-
-Now, list the most likely rare disease diagnoses, starting with the strongest candidate diagnosis with the most overlap.""",
+## Output requirements
+- Return only the structured output required by the supplied schema, with exactly five entries in ans.
+- Order entries from most to least likely. Assign each rank from 1 through 5 exactly once, in ascending array order; rank 1 is the strongest candidate.
+- Follow the field descriptions for OMIM disease-name conventions and identifier formatting. Do not add Markdown styling, commentary, citations, or fields outside the schema.
+- Use JSON null for an unknown OMIM identifier. Do not invent an identifier or substitute a gene's OMIM identifier for the disease identifier.
+- Disease names and identifiers in schema examples illustrate formatting only; they are not suggested diagnoses for this patient.""",
 
     "reflection_prompt": """You are a meticulous and pragmatic clinical geneticist specializing in rare disease differential diagnosis.
 
@@ -369,6 +385,7 @@ def build_prompt(prompt_templete, inputs):
     - If use_absentHPO is False, absent-HPO sections are removed from the prompt.
     - If use_absentHPO is True but no absent HPO terms are available, absent-HPO sections are also removed.
     - This prevents the model from interpreting an empty absent-HPO field as meaningful negative evidence.
+    - Zero-shot absent-HPO instructions follow the rendered input section's presence.
     """
     use_absent_hpo = inputs.get("use_absentHPO", False)
 
@@ -405,5 +422,24 @@ def build_prompt(prompt_templete, inputs):
             "absent_hpo_list_section": "",
             "absent_hpo_bullet_section": "",
         }
+
+    if "{absent_hpo_instructions}" in prompt_templete:
+        # Only the Zero-shot template uses this placeholder. Base the guidance
+        # on the actual rendered section, including the empty-input case.
+        if inputs["absent_hpo_section"]:
+            instructions = (
+                '- Treat findings explicitly listed under "Patient HPO terms (absent)" as absent. '
+                'Consider them as negative evidence, but absence does not automatically exclude '
+                'a variably expressed condition.\n'
+                '- For age-dependent findings, use the age at assessment only if explicitly supplied. '
+                'If it is unknown, do not infer it from onset; treat age-dependent interpretations '
+                'of absence as uncertain.'
+            )
+        else:
+            instructions = (
+                '- No explicitly absent findings have been supplied. '
+                'Do not infer negative findings from the present HPO list or from omissions.'
+            )
+        inputs = {**inputs, "absent_hpo_instructions": instructions}
 
     return prompt_templete.format(**inputs)

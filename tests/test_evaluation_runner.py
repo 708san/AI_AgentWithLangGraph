@@ -38,6 +38,10 @@ class RunnerTests(unittest.TestCase):
                 record["zeroShotRaw"] = {"ans": [{"rank": len(calls), "OMIM_id": "123456"}]}
                 record["zeroShotResult"] = {"ans": [{"rank": len(calls), "OMIM_id": "OMIM:123456"}]}
                 record["prompts"] = {"zeroShot": "test prompt"}
+                record["api_usage"] = [{"stage": "zero_shot", "model": "gpt-5.2",
+                    "usage": {"prompt_tokens": 100, "completion_tokens": 10,
+                              "prompt_tokens_details": {"cached_tokens": 0},
+                              "completion_tokens_details": {"reasoning_tokens": 5}}}]
                 checkpoint()
             with patch.object(runner, "zero_shot_executor", return_value=execute):
                 self.assertEqual(runner.main("zero-shot", ["--benchmark", str(path), "--output-dir", str(output), "--repeats", "2"]), 0)
@@ -46,22 +50,32 @@ class RunnerTests(unittest.TestCase):
             self.assertEqual(reports[0]["summary"]["zeroShotRaw"]["top_k"]["1"]["hits"], 1)
             self.assertEqual(reports[1]["summary"]["zeroShotRaw"]["top_k"]["1"]["hits"], 0)
             self.assertEqual(reports[0]["summary"]["zeroShotResult"]["top_k"]["1"]["hits"], 1)
+            costs = json.loads((output / "cost_summary.json").read_text())
+            first_cost = json.loads((output / "repeat_001/cost_summary.json").read_text())
+            self.assertEqual(costs["records"], 2)
+            self.assertEqual(costs["stages"]["zero_shot"]["reasoning_tokens"], 10)
+            self.assertAlmostEqual(costs["estimated_cost"], first_cost["estimated_cost"] * 2)
 
     def test_zero_shot_normalization_preserves_raw_even_on_failure(self):
         for fail in (False, True):
             with self.subTest(fail=fail):
                 raw = {"ans": [{"rank": 1, "disease_name": "Original", "OMIM_id": None}]}
                 def normalize(state):
+                    # Simulate production's in-place mutation, then optional error.
                     result = state["zeroShotResult"]
                     result["ans"][0].update(disease_name="Normalized", OMIM_id="OMIM:123456")
                     if fail:
                         raise RuntimeError("normalization failed")
                     return result
                 modules = {
-                    "agent.llm.azure_llm_instance": SimpleNamespace(get_llm_instance=lambda model: object()),
+                    "agent.llm.azure_llm_instance": SimpleNamespace(get_llm_instance=lambda model: SimpleNamespace(
+                        deployment_name="test", api_version="test",
+                        llm=SimpleNamespace(extra_body={"reasoning_effort": "none"}, max_tokens=None,
+                            root_client=SimpleNamespace(_client=SimpleNamespace(event_hooks={}))))),
                     "agent.tools.ZeroShot": SimpleNamespace(createZeroshot=lambda state: (raw, "prompt")),
                     "agent.tools.make_HPOdic": SimpleNamespace(make_hpo_dic=lambda ids, _: dict.fromkeys(ids, "label")),
-                    "agent.tools.diseaseNormalize": SimpleNamespace(normalize_zeroshot_results=normalize),
+                    "agent.tools.diseaseNormalize": SimpleNamespace(normalize_zeroshot_results=normalize,
+                        client=SimpleNamespace(_client=SimpleNamespace(event_hooks={}))),
                 }
                 record, checkpoints = {}, []
                 with patch.dict("sys.modules", modules):
@@ -76,7 +90,7 @@ class RunnerTests(unittest.TestCase):
                 self.assertIsNone(record["zeroShotRaw"]["ans"][0]["OMIM_id"])
                 self.assertEqual(record["zeroShotRaw"]["ans"][0]["disease_name"], "Original")
                 self.assertNotIn("zeroShotResult", checkpoints[0])
-                self.assertEqual(len(checkpoints), 1 if fail else 2)
+                self.assertEqual(len(checkpoints), 2 if fail else 3)  # usage exit checkpoint
                 if fail:
                     self.assertNotIn("zeroShotResult", record)
                 else:

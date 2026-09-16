@@ -65,9 +65,18 @@ class State(TypedDict):
     
 # --- Pydantic Model for Zero-Shot Diagnosis Output ---
 class ZeroShotFormat(BaseModel):
-    disease_name: str = Field(..., description="The formal name of the most likely rare disease, based solely on the patient's HPO terms.")
+    disease_name: str = Field(..., description=(
+        "The disease name in OMIM entry-title format, preserving capitalization, punctuation, "
+        "and subtype numbers. Preserve a semicolon-separated abbreviation when present in the title. "
+        "Use plain text without Markdown styling or added explanations. "
+        "Example: 'ALBINISM, OCULOCUTANEOUS, TYPE VI; OCA6'."
+    ))
     rank: int = Field(..., description="The rank of the disease in the differential diagnosis list, where 1 is the most likely.")
-    OMIM_id: Optional[str] = Field(None, description="The OMIM identifier for the disease, if available.")
+    OMIM_id: Optional[str] = Field(None, description=(
+        "The disease's OMIM identifier as a six-digit string without the 'OMIM:' prefix. "
+        "Example: '113750' for 'ALBINISM, OCULOCUTANEOUS, TYPE VI; OCA6'. "
+        "Represent a missing identifier as JSON null, not a string such as 'null', 'None', or 'N/A'."
+    ))
 
 class ZeroShotOutput(BaseModel):
     ans: List[ZeroShotFormat]

@@ -14,6 +14,7 @@ from threading import Lock
 
 from scripts.evaluation.evaluate import ROOT, evaluate, load_cases
 from scripts.evaluation.trace import EvaluationTrace
+from scripts.evaluation.usage import DEFAULT_PRICING, UsageCapture, load_pricing, summarize, format_cost
 
 
 def serialize(value):
@@ -63,15 +64,20 @@ def prepare(cases, args, mode):
     return inputs
 
 
-def zero_shot_executor(model):
+def zero_shot_executor(model, reasoning_effort=None):
     # Do not import agent.nodes or agent_pipeline: they initialize other tools.
     from agent.llm.azure_llm_instance import get_llm_instance
     from agent.tools.ZeroShot import createZeroshot
     from agent.tools.make_HPOdic import make_hpo_dic
-    from agent.tools.diseaseNormalize import normalize_zeroshot_results
+    from agent.tools import diseaseNormalize
     llm = get_llm_instance(model)
+    if reasoning_effort is not None:
+        # This wrapper is newly created for this evaluation. Production defaults
+        # and the tentative executor are not modified.
+        llm.llm = llm.llm.model_copy(update={"extra_body": {
+            **(llm.llm.extra_body or {}), "reasoning_effort": reasoning_effort}})
 
-    def execute(inputs, record, checkpoint):
+    def infer(inputs, record, checkpoint):
         state = {"hpoDict": make_hpo_dic(inputs["hpo_list"], None),
                  "absentHpoDict": make_hpo_dic(inputs["absent_hpo_list"], None),
                  "onset": inputs["onset"], "sex": inputs["sex"],
@@ -79,8 +85,8 @@ def zero_shot_executor(model):
         if not any(state["hpoDict"].values()):
             raise ValueError("No present HPO labels found")
         result, prompt = createZeroshot(state)
-        # Production normalization mutates candidates in place. Freeze and save
-        # the raw output first, including when normalization later fails.
+        # Production normalization mutates candidates in place. Freeze the raw
+        # output and checkpoint it before normalization, including failure cases.
         record["zeroShotRaw"] = deepcopy(serialize(result))
         record["prompts"] = {"zeroShot": prompt}
         record["effective_input"] = serialize(state)
@@ -88,9 +94,17 @@ def zero_shot_executor(model):
         if result is None:
             raise ValueError("Zero-shot returned no output")
         state["zeroShotResult"] = result
-        normalized = normalize_zeroshot_results(state)
+        normalized = diseaseNormalize.normalize_zeroshot_results(state)
         record["zeroShotResult"] = serialize(normalized)
         checkpoint()
+
+    def execute(inputs, record, checkpoint):
+        record["llm_settings"] = {"model_alias": model, "deployment": llm.deployment_name,
+            "api_version": llm.api_version, "extra_body": llm.llm.extra_body,
+            "max_tokens": llm.llm.max_tokens}
+        with UsageCapture([("zero_shot", llm.llm.root_client),
+                           ("normalization", diseaseNormalize.client)], record, checkpoint):
+            infer(inputs, record, checkpoint)
     return execute
 
 
@@ -159,10 +173,19 @@ def main(mode, argv=None):
     parser.add_argument("--image-root", type=Path)
     parser.add_argument("--no-images", action="store_true")
     parser.add_argument("--dry-run", action="store_true", help="Validate case inputs without importing providers or calling APIs")
+    if mode == "zero-shot":
+        parser.add_argument("--reasoning-effort", choices=["none", "low", "medium", "high", "xhigh"],
+                            help="Override reasoning for this Zero-shot evaluation only")
+        parser.add_argument("--pricing-file", type=Path, default=DEFAULT_PRICING,
+                            help="Retail rates per million tokens; snapshotted in metadata")
     args = parser.parse_args(argv)
     if args.repeats < 1 or any(k < 1 for k in args.ks):
         parser.error("repeats and ks must be positive")
     try:
+        pricing = load_pricing(args.pricing_file) if mode == "zero-shot" else None
+        if mode == "zero-shot" and args.reasoning_effort is not None:
+            if args.model == "gpt-4o" or (args.model == "gpt-5-1" and args.reasoning_effort == "xhigh"):
+                raise ValueError("Selected model does not support this reasoning-effort option")
         cases = load_cases(args.benchmark)
         inputs = prepare(cases, args, mode)
     except (OSError, ValueError) as exc:
@@ -181,18 +204,29 @@ def main(mode, argv=None):
         "use_absent_hpo": args.use_absent_hpo, "no_images": args.no_images,
         "source_hashes": {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
                           for p in (ROOT / "agent").rglob("*.py")}}
+    if mode == "zero-shot":
+        metadata.update(pricing=pricing, reasoning_effort_override=args.reasoning_effort,
+            evaluation_source_hashes={p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                                     for p in Path(__file__).parent.glob("*.py")})
     save(directory / "metadata.json", metadata)
+    if mode == "zero-shot":
+        print(f"Pricing ({pricing['currency']}): {pricing.get('assumptions', 'User-supplied rates')}")
     old_result_dir = os.environ.get("AGENT_RESULT_DIR")
     stages = ["zeroShotRaw", "zeroShotResult"] if mode == "zero-shot" else ["zeroShotRaw", "zeroShotResult", "tentativeRaw", "tentativeDiagnosis"]
     failed = False
+    usage_records = []
     try:
         try:
-            execute = zero_shot_executor(args.model) if mode == "zero-shot" else tentative_executor(args.model)
+            if mode == "zero-shot":
+                execute = zero_shot_executor(args.model, args.reasoning_effort) if args.reasoning_effort is not None else zero_shot_executor(args.model)
+            else:
+                execute = tentative_executor(args.model)
         except Exception as exc:
             save(directory / "initialization_error.json", {"status": "error", "error": f"{type(exc).__name__}: {exc}"})
             print(f"Initialization failed: {type(exc).__name__}: {exc}")
             return 1
         for repeat in range(1, args.repeats + 1):
+            repeat_records = []
             run_dir = directory / f"repeat_{repeat:03d}"
             predictions = run_dir / "predictions"
             predictions.mkdir(parents=True)
@@ -212,17 +246,30 @@ def main(mode, argv=None):
                 except Exception as exc:
                     record.update(status="error", error=f"{type(exc).__name__}: {exc}")
                     failed = True
-                record["elapsed_seconds"] = time.perf_counter() - start
-                checkpoint()
+                finally:
+                    if record["status"] == "running":
+                        record["status"] = "interrupted"
+                    record["elapsed_seconds"] = time.perf_counter() - start
+                    if mode == "zero-shot":
+                        record["cost"] = summarize([record], pricing)
+                        usage_records.append(record)
+                        repeat_records.append(record)
+                        save(run_dir / "cost_summary.json", summarize(repeat_records, pricing))
+                        save(directory / "cost_summary.json", summarize(usage_records, pricing))
+                    checkpoint()
                 print(f"repeat={repeat} case={case['case_id']} status={record['status']}")
             report = evaluate(cases, predictions, stages, sorted(set(args.ks)))
             report["metadata"] = metadata
             save(run_dir / "evaluation.json", report)
             print(json.dumps(report["summary"], ensure_ascii=False))
+            if mode == "zero-shot":
+                print(format_cost(summarize(repeat_records, pricing)))
     finally:
         if old_result_dir is None:
             os.environ.pop("AGENT_RESULT_DIR", None)
         else:
             os.environ["AGENT_RESULT_DIR"] = old_result_dir
     print(f"Saved: {directory}")
+    if mode == "zero-shot":
+        print(format_cost(summarize(usage_records, pricing)))
     return 1 if failed else 0

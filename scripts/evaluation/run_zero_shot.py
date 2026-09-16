@@ -1,4 +1,4 @@
-"""Run Zero-shot and normalization, save outputs, and score the benchmark."""
+"""Run Zero-shot and normalization; save predictions, scores and usage costs."""
 from scripts.evaluation.runner import main
 
 if __name__ == "__main__":

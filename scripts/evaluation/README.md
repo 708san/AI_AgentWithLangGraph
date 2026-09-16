@@ -48,6 +48,48 @@ Zero-shot評価にも `AZURE_DBCLS_JAPANEAST` と `agent/data/DataForOmimMapping
 
 正解ラベルは採点のみで使用し、推論関数には患者情報をホワイトリストで渡します。`--repeats`は独立した繰り返し実行で、各回を別々に採点します。複数回の平均・分散の集計は現在含みません。
 
+## Zero-shot推論・正規化の使用量と概算料金
+
+Zero-shot評価は各API応答のトークン使用量を自動保存し、症例・反復・実験全体の概算料金を計算します。暫定推論評価には適用しません。
+
+```bash
+python -m scripts.evaluation.run_zero_shot \
+  --benchmark local_artifacts/five_case_benchmark/data/five_cases.json \
+  --model gpt-5-2 --repeats 3 --reasoning-effort none
+
+# 同じプロンプト・データでeffortだけ変更。出力先は毎回自動で新規作成。
+python -m scripts.evaluation.run_zero_shot \
+  --benchmark local_artifacts/five_case_benchmark/data/five_cases.json \
+  --model gpt-5-2 --repeats 3 --reasoning-effort medium
+```
+
+`--reasoning-effort`を省略すると本番ラッパーの既定設定を使います。指定した場合もこのZero-shot評価で生成したLLMインスタンスだけを変更します。実際の設定は各予測の`llm_settings`に保存します。推論・正規化ロジック、プロンプト、リトライ条件は変更しません。
+
+- `predictions/<case_id>.json`の`api_usage`：各HTTP試行の使用量、モデル、終了理由、時間。本文・認証ヘッダーは保存しません。既存の推論出力・トレースは別途保存されます。
+- 同ファイルの`cost`：症例の集計。
+- `repeat_*/cost_summary.json`：その反復の集計。
+- 実験直下の`cost_summary.json`：全反復の合計。症例終了ごとに更新します。
+- `metadata.json`の`pricing`：使用した単価・出典・確認日・適用の前提。後日の単価変更でも元の計算を再現できます。
+
+既定の`pricing.azure.json`は2026-09-16にMicrosoftの[Azure Retail Prices API](https://prices.azure.com/api/retail/prices)で確認した公開USD単価です。GPT-5.2 Global Standardは入力1.75 / キャッシュ入力0.175 / 出力14.00 USD per 1M tokens、Embedding 3 large Regional Japan Eastは0.158 USD per 1M tokensです。
+
+**デプロイSKUはエンドポイント名から判別できないため、この組み合わせを仮定した概算です。** GPT-5.2 US Data Zoneなら1.925 / 0.1925 / 15.40、Embedding Globalなら0.13です。契約割引・税金・PTU料金は含めません。別モデルや単価にはJSONをコピーして`--pricing-file PATH`で指定してください。応答モデルと価格表のモデルが異なる場合は金額不明とし、勝手に同じ単価を適用しません。
+
+料金は `(入力 − キャッシュ入力) × 入力単価 + キャッシュ入力 × キャッシュ単価 + 出力 × 出力単価` です。reasoning tokensは出力の内訳なので二重加算しません。`known_cost_without_cache_discount`にはキャッシュ割引なしの参考金額も記録し、実験間のキャッシュ状態の違いを切り分けられます。
+
+使用量は非ストリーミングHTTP応答をSDKが構造化解析する前に取得します。解析失敗時もusageが返っていれば料金に含め、HTTPリトライの応答も記録します。通信切断・usage欠落・モデル不一致があると`estimated_cost: null`、`usage_complete: false`とし、取得できた分だけを`known_cost`として示します。これは請求書との完全一致を保証する値ではありません。`kill -9`などでは最後の保存以降の記録が残らないことがあります。
+
+保存済み使用量を使った再計算（API呼び出しなし、既存結果の上書きなし）:
+
+```bash
+python -m scripts.evaluation.usage --run-dir local_artifacts/evaluation_results/<実験名>
+# 単価を変更して再計算
+python -m scripts.evaluation.usage --run-dir local_artifacts/evaluation_results/<実験名> \
+  --pricing-file local_artifacts/pricing.json
+```
+
+従来の評価でAPI使用量が保存されていない結果について、正確な料金を後から復元することはできません。
+
 ## 保存済み出力だけを採点する
 
 以下の `evaluate` は標準ライブラリのみを使い、外部APIを呼びません。
