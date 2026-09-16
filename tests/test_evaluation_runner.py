@@ -1,6 +1,8 @@
 import json
 import tempfile
 import unittest
+from copy import deepcopy
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -34,6 +36,7 @@ class RunnerTests(unittest.TestCase):
                 self.assertNotIn("expected_output", record)
                 calls.append(inputs)
                 record["zeroShotRaw"] = {"ans": [{"rank": len(calls), "OMIM_id": "123456"}]}
+                record["zeroShotResult"] = {"ans": [{"rank": len(calls), "OMIM_id": "OMIM:123456"}]}
                 record["prompts"] = {"zeroShot": "test prompt"}
                 checkpoint()
             with patch.object(runner, "zero_shot_executor", return_value=execute):
@@ -42,6 +45,42 @@ class RunnerTests(unittest.TestCase):
             reports = [json.loads((output / f"repeat_{n:03d}/evaluation.json").read_text()) for n in (1, 2)]
             self.assertEqual(reports[0]["summary"]["zeroShotRaw"]["top_k"]["1"]["hits"], 1)
             self.assertEqual(reports[1]["summary"]["zeroShotRaw"]["top_k"]["1"]["hits"], 0)
+            self.assertEqual(reports[0]["summary"]["zeroShotResult"]["top_k"]["1"]["hits"], 1)
+
+    def test_zero_shot_normalization_preserves_raw_even_on_failure(self):
+        for fail in (False, True):
+            with self.subTest(fail=fail):
+                raw = {"ans": [{"rank": 1, "disease_name": "Original", "OMIM_id": None}]}
+                def normalize(state):
+                    result = state["zeroShotResult"]
+                    result["ans"][0].update(disease_name="Normalized", OMIM_id="OMIM:123456")
+                    if fail:
+                        raise RuntimeError("normalization failed")
+                    return result
+                modules = {
+                    "agent.llm.azure_llm_instance": SimpleNamespace(get_llm_instance=lambda model: object()),
+                    "agent.tools.ZeroShot": SimpleNamespace(createZeroshot=lambda state: (raw, "prompt")),
+                    "agent.tools.make_HPOdic": SimpleNamespace(make_hpo_dic=lambda ids, _: dict.fromkeys(ids, "label")),
+                    "agent.tools.diseaseNormalize": SimpleNamespace(normalize_zeroshot_results=normalize),
+                }
+                record, checkpoints = {}, []
+                with patch.dict("sys.modules", modules):
+                    execute = runner.zero_shot_executor("gpt-5-2")
+                    inputs = dict(hpo_list=["HP:0001250"], absent_hpo_list=[], onset=None,
+                                  sex=None, use_absentHPO=False)
+                    if fail:
+                        with self.assertRaisesRegex(RuntimeError, "normalization failed"):
+                            execute(inputs, record, lambda: checkpoints.append(deepcopy(record)))
+                    else:
+                        execute(inputs, record, lambda: checkpoints.append(deepcopy(record)))
+                self.assertIsNone(record["zeroShotRaw"]["ans"][0]["OMIM_id"])
+                self.assertEqual(record["zeroShotRaw"]["ans"][0]["disease_name"], "Original")
+                self.assertNotIn("zeroShotResult", checkpoints[0])
+                self.assertEqual(len(checkpoints), 1 if fail else 2)
+                if fail:
+                    self.assertNotIn("zeroShotResult", record)
+                else:
+                    self.assertEqual(record["zeroShotResult"]["ans"][0]["OMIM_id"], "OMIM:123456")
 
     def test_partial_output_survives_case_failure(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -7,7 +7,7 @@
 プロジェクトルートで、依存をインストールしたPython環境を使って実行します。
 
 ```bash
-# Zero-shotだけを実行（他の検索ツール・Embedding・画像APIは呼ばない）
+# Zero-shotと病名正規化を実行（正規化用Embedding APIを使用）
 python -m scripts.evaluation.run_zero_shot \
   --benchmark local_artifacts/five_case_benchmark/data/five_cases.json \
   --model gpt-5-2 --repeats 3
@@ -26,7 +26,9 @@ python -m scripts.evaluation.run_tentative \
 - `--no-images`: 暫定診断を画像なし条件で実行。
 - `--image-root PATH`: ベンチマーク内の相対画像パスの基準。省略時は正解ファイルの親・その親・プロジェクトルートから一意に解決する。今回配布されたフォルダ構成は自動解決可能。
 
-Zero-shot単体では `createZeroshot()` のみを呼び、HPOラベル変換後の入力で推論します。病名正規化も行わず `zeroShotRaw` を採点するため、LLMがOMIM IDを出さなければ病名が正しくてもID一致にはなりません。
+Zero-shot評価ではHPOラベル変換後に `createZeroshot()` を呼び、続けて本番の `normalize_zeroshot_results()` を実行します。正規化前を `zeroShotRaw`、正規化後を `zeroShotResult` として保存し、両方を独立に採点します。正規化は候補を直接変更するため、実行前の出力をコピーしてディスクに保存します。正規化に失敗しても、この出力は残ります。PubCaseFinder・画像API・HPO類似検索・Web検索・暫定推論は呼びません。
+
+Zero-shot評価にも `AZURE_DBCLS_JAPANEAST` と `agent/data/DataForOmimMapping/` の `.bin`・対応JSONが必要です。正規化用Embedding APIが追加で呼ばれます。古いZero-shot評価には `zeroShotRaw` しかないため、以前の結果との直接比較は同じ段階同士で行ってください。古い正規化前結果と新しい正規化後結果を同じ指標として比較しないでください。
 
 暫定診断では本番のノードとエッジを再利用し、PubCaseFinder・任意の顔画像解析・Zero-shot・表現型検索・HPO Web検索・候補統合・暫定診断・病名正規化を実行します。PhenoBrainは本番既定どおり無効です。疾患別Wikipedia/PubMed検索、Reflection、最終診断は実行しません。上流の検索も毎回実行するので、その変動を含む評価です。
 
@@ -155,7 +157,7 @@ python -m unittest discover -s tests -p 'test_evaluation*.py' -v
 
 - **Zero-shot推論**：入力、プロンプト、構造化された戻り値。これはSDKによる構造化解析後の結果であり、解析前のAPI応答そのものではありません。SDK内部の解析失敗は関数の例外として記録します。
 - **暫定推論の正規表現解析**：`parse_diagnosis_text` の `call` に解析前の全文 `data.text` とプロンプトを保存します。`parse_block_check` にブロック本文と各フィールドのマッチ有無、`return` に抽出結果を保存します。ブロック区切り自体の不一致は全文と `case_blocks` から確認できます。`tentativeRaw` は従来どおり「正規表現解析後・正規化前」であり、この全文とは異なります。
-- **Zero-shot推論の正規化**：入力候補、加工した検索語、OMIM検索の戻り値、類似度、判定直前の候補と既出ID集合、最終候補を保存します。`normalization_decision_input` で低類似度と重複の条件を確認できます。Zero-shot単体評価は正規化を呼ばないため、これらは暫定推論までの評価で記録されます。
+- **Zero-shot推論の正規化**：入力候補、加工した検索語、OMIM検索の戻り値、類似度、判定直前の候補と既出ID集合、最終候補を保存します。`normalization_decision_input` で低類似度と重複の条件を確認できます。Zero-shot評価・暫定推論までの評価の両方で記録されます。
 - **暫定推論に渡す候補統合**：各 `_add_candidate` の元の疾患名・ID・情報源と、統合後のキー・候補、統合関数の最終出力を保存します。空の疾患名による除外や同じIDへの統合を追跡できます。
 - **暫定推論の候補照合**：`createDiagnosis` の入力候補とプロンプト、解析後の出力を保存します。入力にないIDの出現や候補の欠落を比較する材料です。候補制限や自動修正は行いません。
 - **暫定推論の正規化**：処理前後の候補、既存ID、検索を行った場合の検索語・結果・類似度を保存します。既存IDを優先する現行処理も変更しません。
