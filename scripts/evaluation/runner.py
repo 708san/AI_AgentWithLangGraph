@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 import hashlib
 import json
 import os
@@ -67,6 +68,7 @@ def zero_shot_executor(model):
     from agent.llm.azure_llm_instance import get_llm_instance
     from agent.tools.ZeroShot import createZeroshot
     from agent.tools.make_HPOdic import make_hpo_dic
+    from agent.tools.diseaseNormalize import normalize_zeroshot_results
     llm = get_llm_instance(model)
 
     def execute(inputs, record, checkpoint):
@@ -77,12 +79,18 @@ def zero_shot_executor(model):
         if not any(state["hpoDict"].values()):
             raise ValueError("No present HPO labels found")
         result, prompt = createZeroshot(state)
-        record["zeroShotRaw"] = serialize(result)
+        # Production normalization mutates candidates in place. Freeze and save
+        # the raw output first, including when normalization later fails.
+        record["zeroShotRaw"] = deepcopy(serialize(result))
         record["prompts"] = {"zeroShot": prompt}
         record["effective_input"] = serialize(state)
         checkpoint()
         if result is None:
             raise ValueError("Zero-shot returned no output")
+        state["zeroShotResult"] = result
+        normalized = normalize_zeroshot_results(state)
+        record["zeroShotResult"] = serialize(normalized)
+        checkpoint()
     return execute
 
 
@@ -175,7 +183,7 @@ def main(mode, argv=None):
                           for p in (ROOT / "agent").rglob("*.py")}}
     save(directory / "metadata.json", metadata)
     old_result_dir = os.environ.get("AGENT_RESULT_DIR")
-    stages = ["zeroShotRaw"] if mode == "zero-shot" else ["zeroShotRaw", "zeroShotResult", "tentativeRaw", "tentativeDiagnosis"]
+    stages = ["zeroShotRaw", "zeroShotResult"] if mode == "zero-shot" else ["zeroShotRaw", "zeroShotResult", "tentativeRaw", "tentativeDiagnosis"]
     failed = False
     try:
         try:
