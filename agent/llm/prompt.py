@@ -48,30 +48,16 @@ prompt_dict = {
 1. Use the merged candidate table as the authoritative candidate list.
 2. Do not split or duplicate candidates that have already been merged by OMIM ID or disease name.
 3. Rank candidates based on multi-tool consensus, individual tool ranks, score strength, and clinical fit to the patient's HPO profile.
-4. Output the result strictly following the format below.
+4. Return the result using the supplied structured output schema.
 
-**Strict Output Format Rules:**
-- Do NOT use JSON, XML, or code blocks.
-- Do NOT use markdown bolding (**), italics (*), or other styling.
-- Each diagnosis candidate must be strictly enclosed within `===CASE_START===` and `===CASE_END===` lines.
-- Each item must follow the `KEY::VALUE` format.
-- The `DESCRIPTION` value must be a SINGLE LINE of text.
-- After all diagnoses are listed, provide the references enclosed within `===REFERENCES_START===` and `===REFERENCES_END===`.
-
-**Output Format Structure:**
-
-===CASE_START===
-RANK::[Integer]
-DISEASE::[The formal name of the disease]
-OMIM::[The OMIM identifier, or "N/A"]
-DESCRIPTION::[A concise summary, max 2 sentences, stating WHY this disease is a candidate. Mention which tools supported it, such as "Supported by PCF score 0.9 and ZeroShot rank 1. Matches phenotype X, Y, Z."]
-===CASE_END===
-
-(Repeat for EVERY unique diagnosis found.)
-
-===REFERENCES_START===
-[A numbered list of all sources cited in the DESCRIPTION field.]
-===REFERENCES_END===
+**Structured Output Requirements:**
+- Include EVERY unique candidate in ans, with one entry per candidate.
+- Each entry contains candidate_id (string), rank (integer), disease_name (string), OMIM_id (string or JSON null), and description (string).
+- Copy the candidate_id from the corresponding input candidate exactly, using each input ID once. candidate_id is an identity label, not a clinical rank.
+- Use the formal disease name. Use JSON null when an OMIM identifier is unavailable.
+- The description must be a SINGLE LINE, max 2 sentences, stating WHY this disease is a candidate. Mention which tools supported it, such as "Supported by PCF score 0.9 and ZeroShot rank 1. Matches phenotype X, Y, Z."
+- Put the numbered list of sources cited in description in the reference string, or JSON null if there are none.
+- Do not use Markdown styling, code fences, KEY::VALUE fields, or case/reference delimiters.
 
 ---
 INPUT CONTEXT
@@ -101,30 +87,16 @@ III. Web Search
 1. Use the merged candidate table as the authoritative candidate list.
 2. Do not split or duplicate candidates that have already been merged by OMIM ID or disease name.
 3. Rank candidates based on multi-tool consensus, individual tool ranks, score strength, and clinical fit to the patient's HPO profile.
-4. Output the result strictly following the format below.
+4. Return the result using the supplied structured output schema.
 
-**Strict Output Format Rules:**
-- Do NOT use JSON, XML, or code blocks.
-- Do NOT use markdown bolding (**), italics (*), or other styling.
-- Each diagnosis candidate must be strictly enclosed within `===CASE_START===` and `===CASE_END===` lines.
-- Each item must follow the `KEY::VALUE` format.
-- The `DESCRIPTION` value must be a SINGLE LINE of text.
-- After all diagnoses are listed, provide the references enclosed within `===REFERENCES_START===` and `===REFERENCES_END===`.
-
-**Output Format Structure:**
-
-===CASE_START===
-RANK::[Integer]
-DISEASE::[The formal name of the disease]
-OMIM::[The OMIM identifier, or "N/A"]
-DESCRIPTION::[A concise summary, max 2 sentences, stating WHY this disease is a candidate. Mention which tools supported it, such as "Supported by PCF score 0.9 and ZeroShot rank 1. Matches phenotype X, Y, Z."]
-===CASE_END===
-
-(Repeat for EVERY unique diagnosis found.)
-
-===REFERENCES_START===
-[A numbered list of all sources cited in the DESCRIPTION field.]
-===REFERENCES_END===
+**Structured Output Requirements:**
+- Include EVERY unique candidate in ans, with one entry per candidate.
+- Each entry contains candidate_id (string), rank (integer), disease_name (string), OMIM_id (string or JSON null), and description (string).
+- Copy the candidate_id from the corresponding input candidate exactly, using each input ID once. candidate_id is an identity label, not a clinical rank.
+- Use the formal disease name. Use JSON null when an OMIM identifier is unavailable.
+- The description must be a SINGLE LINE, max 2 sentences, stating WHY this disease is a candidate. Mention which tools supported it, such as "Supported by PCF score 0.9 and ZeroShot rank 1. Matches phenotype X, Y, Z."
+- Put the numbered list of sources cited in description in the reference string, or JSON null if there are none.
+- Do not use Markdown styling, code fences, KEY::VALUE fields, or case/reference delimiters.
 
 ---
 INPUT CONTEXT

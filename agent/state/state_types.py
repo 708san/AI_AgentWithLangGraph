@@ -84,6 +84,12 @@ class DiagnosisOutput(BaseModel):
     ans: list['DiagnosisFormat']
     reference: Optional[str] = Field(None, description="A numbered list of all sources cited in the 'description' field. Each entry must include the source type, a summary of its content, and a URL if available.")
 
+class TentativeDiagnosisCandidate(DiagnosisFormat):
+    candidate_id: str = Field(..., description="Copy the candidate_id of the corresponding input candidate exactly. This identifies the candidate, not its rank.")
+
+class TentativeDiagnosisOutput(DiagnosisOutput):
+    ans: list[TentativeDiagnosisCandidate]
+
 # --- Pydantic Models for Self-Reflection Output ---
 class ReflectionFormat(BaseModel):
     disease_name: str = Field(..., description="The name of the diagnosis being evaluated.")
