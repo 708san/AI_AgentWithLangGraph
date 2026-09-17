@@ -181,6 +181,7 @@ def call_phenobrain(
     request_timeout=30,
     poll_interval=1.0,
     max_poll_seconds=60,
+    return_metadata=False,
 ):
     hpo_list = [str(hpo) for hpo in (hpo_list or []) if hpo]
     if not hpo_list:
@@ -209,7 +210,19 @@ def call_phenobrain(
         if details_by_rd_id is None:
             return []
 
-        return _format_results(predictions, details_by_rd_id)
+        formatted_results = _format_results(predictions, details_by_rd_id)
+        if return_metadata:
+            return {
+                "top5": formatted_results[:5],
+                "all": formatted_results,
+                "raw": {
+                    "task_id": task_id,
+                    "predictions": predictions,
+                    "details_by_rd_id": details_by_rd_id,
+                },
+                "request": {"hpo_list": hpo_list, "model": model, "topk": topk},
+            }
+        return formatted_results
     except requests.exceptions.RequestException as exc:
         _log_error(f"request failed: {exc}")
     except ValueError as exc:

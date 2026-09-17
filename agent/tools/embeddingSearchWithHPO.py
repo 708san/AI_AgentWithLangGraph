@@ -53,7 +53,7 @@ except Exception as e:
 
 # --- Main Search Function ---
 
-def embedding_search_with_hpo(state: State) -> Optional[List[PhenotypeSearchFormat]]:
+def embedding_search_with_hpo(state: State, return_metadata: bool = False):
     """
     Generates a search query from the patient's HPO dictionary and uses a FAISS index
     to find diseases with similar phenotypes.
@@ -88,7 +88,11 @@ def embedding_search_with_hpo(state: State) -> Optional[List[PhenotypeSearchForm
 
         # 4. Execute search with FAISS (top 5*<depth> results)
         depth = state.get("depth", 1)
-        k = 5 * depth
+        if return_metadata:
+            requested_k = int(os.getenv("TOOL_FULL_RESULT_LIMIT", "100"))
+            k = min(index.ntotal, max(5, requested_k))
+        else:
+            k = 5 * depth
         distances, indices = index.search(query_vector, k)
 
         # 5. Format the results into a list of PhenotypeSearchFormat
@@ -113,6 +117,18 @@ def embedding_search_with_hpo(state: State) -> Optional[List[PhenotypeSearchForm
             )
             search_results.append(result_format)
         
+        if return_metadata:
+            return {
+                "top5": search_results[:5],
+                "all": search_results,
+                "raw": {
+                    "query_text": query_text,
+                    "k": k,
+                    "distances": distances[0].tolist(),
+                    "indices": indices[0].tolist(),
+                },
+                "request": {"hpo_ids": list(hpo_dict.keys()), "query_text": query_text, "k": k},
+            }
         return search_results
 
     except Exception as e:

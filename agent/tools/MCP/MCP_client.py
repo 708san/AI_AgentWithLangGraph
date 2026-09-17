@@ -1,15 +1,5 @@
-import os
-from langchain_mcp import MCPClient
+"""Backward-compatible import location for the TogoMCP client."""
 
-mcp_endpoints = {
-    "pcf": "hogehoge"
-}
+from .togomcp_client import TogoMCPClient, TogoMCPError
 
-mcp_clients = {}
-
-for name, url in mcp_endpoints.items():
-    if url:
-        mcp_clients[name] = MCPClient(url=url)
-        print(f"MCP client for '{name}' initialized.")
-    else:
-        print(f"MCP server URL for '{name}' is not set.")
+__all__ = ["TogoMCPClient", "TogoMCPError"]

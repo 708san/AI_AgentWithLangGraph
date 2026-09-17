@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import json
 from langchain.schema import HumanMessage
 from openai import LengthFinishReasonError
 from ..state.state_types import ReflectionFormat, State
@@ -79,6 +80,72 @@ def format_disease_knowledge(info_list, disease_name):
     if not lines:
         return "No disease knowledge available for this rank."
     return "\n".join(lines)
+
+
+def format_togomcp_evidence(state: State, diagnosis_to_judge) -> str:
+    """Format only this candidate's TogoMCP evidence with provenance."""
+    candidate_id = _normalize_omim_id(getattr(diagnosis_to_judge, "OMIM_id", None))
+    candidate_name = _normalize_name(getattr(diagnosis_to_judge, "disease_name", ""))
+    sources = {
+        str(source.get("source_id")): source
+        for source in state.get("source_records", []) or []
+    }
+    lines = []
+    for evidence in state.get("evidence_records", []) or []:
+        links = evidence.get("candidate_links", []) or []
+        belongs = False
+        for link in links:
+            link_id = _normalize_omim_id(link.get("candidate_id"))
+            link_name = _normalize_name(link.get("candidate_label", ""))
+            if (candidate_id and link_id == candidate_id) or (
+                candidate_name and link_name == candidate_name
+            ):
+                belongs = True
+                break
+        if not belongs:
+            continue
+
+        source = sources.get(str(evidence.get("source_id")), {})
+        content = evidence.get("content", {}) or {}
+        raw_response = source.get("raw_response", {})
+        raw_text = ""
+        if isinstance(raw_response, dict):
+            blocks = raw_response.get("content", []) or []
+            raw_text = "\n".join(
+                str(block.get("text", ""))
+                for block in blocks
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+            if not raw_text and raw_response.get("structured_content"):
+                raw_text = str(raw_response["structured_content"])
+        elif raw_response:
+            raw_text = str(raw_response)
+        raw_text = raw_text.strip()
+        if len(raw_text) > 5000:
+            raw_text = raw_text[:5000] + "... [truncated]"
+
+        claim = content.get("structured", {})
+        if isinstance(claim, dict):
+            claim_text = json.dumps(claim, ensure_ascii=False, default=str)
+        else:
+            claim_text = str(claim)
+        if len(claim_text) > 1800:
+            claim_text = claim_text[:1800] + "... [truncated]"
+
+        lines.append(
+            f"[Evidence {evidence.get('evidence_id', 'N/A')}]\n"
+            f"Source: {source.get('tool', 'N/A')} / {source.get('database', 'N/A')} "
+            f"({source.get('source_type', 'N/A')})\n"
+            f"Entry: {source.get('entry_id', '')}\n"
+            f"URL: {source.get('url', '')}\n"
+            f"Polarity: {links[0].get('polarity', 'unknown')}\n"
+            f"Relation: {links[0].get('relation', '')}\n"
+            f"Reason: {links[0].get('reason', '')}\n"
+            f"Structured content: {claim_text}\n"
+            f"Summary: {content.get('summary', '')}\n"
+            f"Raw content: {raw_text or 'Not available.'}"
+        )
+    return "\n\n".join(lines) if lines else "No TogoMCP evidence available for this candidate."
 
 
 def _normalize_omim_id(value) -> str | None:
@@ -254,6 +321,7 @@ def create_reflection(state: State, diagnosis_to_judge):
     disease_name = diagnosis_to_judge.disease_name
 
     disease_knowledge_str = format_disease_knowledge(disease_knowledge_list, disease_name) if disease_knowledge_list is not None else ""
+    togomcp_evidence_str = format_togomcp_evidence(state, diagnosis_to_judge)
 
     present_hpo = ", ".join([v for k, v in hpo_dict.items()]) if hpo_dict else ""
     absent_hpo = (
@@ -270,7 +338,8 @@ def create_reflection(state: State, diagnosis_to_judge):
         "sex": sex if sex else "Unknown",
         "diagnosis_to_judge": f"{diagnosis_name} (Rank: {rank})\nOMIM/MONDO identifier: {omim_id}\nDescription: {description}",
         "tool_support": _format_tool_support(state, diagnosis_to_judge),
-        "disease_knowledge": disease_knowledge_str
+        "disease_knowledge": disease_knowledge_str,
+        "togomcp_evidence": togomcp_evidence_str,
     }
     
     prompt = build_prompt(prompt_template, inputs)

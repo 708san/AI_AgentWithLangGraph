@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 MAX_DISTANCE = 1.3
 
-def call_gestalt_matcher_api(image_path: str, depth: int, max_retries=3):
+def call_gestalt_matcher_api(image_path: str, depth: int, max_retries=3, return_full=False):
     """
     画像ファイルのパスを受け取り、GestaltMatcher APIを叩いて
     suggested_genes_listの上位(depth+2)件だけをリストで返す関数。
@@ -46,9 +46,8 @@ def call_gestalt_matcher_api(image_path: str, depth: int, max_retries=3):
             )
             response.raise_for_status()
             result = response.json()
-            syndromes = result.get("suggested_syndromes_list", [])
-            # Return only the top depth + 4 items
-            syndromes = syndromes[:depth + 4]
+            all_syndromes = result.get("suggested_syndromes_list", [])
+            syndromes = list(all_syndromes)
             # Remove distance and gestalt_score and replace with a single score value
             # New score is normalized to 0-1 range rather than 0-1.3 distance
 
@@ -61,7 +60,14 @@ def call_gestalt_matcher_api(image_path: str, depth: int, max_retries=3):
                     score = 0.0
                 syndrome["score"] = score
 
-            return syndromes
+            if return_full:
+                return {
+                    "top5": syndromes[:5],
+                    "all": syndromes,
+                    "raw": result,
+                    "request": {"image_path": image_path, "depth": depth},
+                }
+            return syndromes[:depth + 4]
             
         except Exception as e:
             print(f"[GestaltMatcher] API失敗 (試行 {attempt + 1}/{max_retries}): {e}")

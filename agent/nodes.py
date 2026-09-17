@@ -14,6 +14,11 @@ from .tools.HPOwebReserch import search_hpo_terms
 from .tools.embeddingSearchWithHPO import embedding_search_with_hpo
 from .tools.rankingMerge import merge_ranked_disease_candidates
 from .tools.phenobrain_api import call_phenobrain
+from .tools.togomcp_search import (
+    discover_diseases_with_togomcp,
+    admit_discovered_candidates,
+    research_candidates_with_togomcp,
+)
 
 from .utils.result_saver import save_result
 from .utils.profiler import profile_node
@@ -22,6 +27,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 REFLECTION_MAX_WORKERS = int(os.getenv("REFLECTION_MAX_WORKERS", "6"))
+TOOL_FULL_RESULT_LIMIT = int(os.getenv("TOOL_FULL_RESULT_LIMIT", "100"))
+
+
+def _append_tool_response_record(state: State, record: dict) -> list[dict]:
+    # Initial tool nodes run in parallel.  Return only this node's delta and
+    # let the State reducer concatenate records without write conflicts.
+    return [record]
 
 
 def _empty_reflection_output() -> ReflectionOutput:
@@ -63,13 +75,36 @@ def DiseaseSearchWithHPONode(state: State):
     # 1. Extract the hpo_list from the state.
     # 2. Execute the search.
     # 3. Return the results as a List[PhenotypeSearchFormat].
-    search_results = embedding_search_with_hpo(state)
+    response = embedding_search_with_hpo(state, return_metadata=True)
+
+    if isinstance(response, dict):
+        search_results = response.get("top5", [])
+        tool_record = {
+            "tool": "PhenotypeSearch",
+            "request": response.get("request", {}),
+            "response": response.get("raw", {}),
+            "top5": [
+                item.model_dump() if hasattr(item, "model_dump") else item
+                for item in response.get("top5", [])
+            ],
+            "all": [
+                item.model_dump() if hasattr(item, "model_dump") else item
+                for item in response.get("all", [])
+            ],
+            "rank_status": "full_response",
+        }
+    else:
+        search_results = response
+        tool_record = None
     
     if not search_results:
         print("Phenotype search returned no results.")
         return {}
         
-    return {"phenotypeSearchResult": search_results}
+    result = {"phenotypeSearchResult": search_results}
+    if tool_record is not None:
+        result["tool_response_records"] = _append_tool_response_record(state, tool_record)
+    return result
 
 
 @profile_node
@@ -79,8 +114,23 @@ def PCFnode(state: State):
     hpo_list = state["hpoList"]
     if not hpo_list:
         return {"pubCaseFinder": []}
-    result = callingPCF(hpo_list, depth)
-    return {"pubCaseFinder": result}
+    response = callingPCF(hpo_list, depth, return_full=True)
+    if isinstance(response, dict):
+        return {
+            "pubCaseFinder": response.get("top5", []),
+            "tool_response_records": _append_tool_response_record(
+                state,
+                {
+                    "tool": "PubCaseFinder",
+                    "request": response.get("request", {}),
+                    "response": response.get("raw", {}),
+                    "top5": response.get("top5", []),
+                    "all": response.get("all", []),
+                    "rank_status": "full_response",
+                },
+            ),
+        }
+    return {"pubCaseFinder": response or []}
 
 @profile_node
 @save_result("PhenoBrainNode")
@@ -91,8 +141,27 @@ def PhenoBrainNode(state: State):
     hpo_list = state.get("hpoList", [])
     if not hpo_list:
         return {"phenoBrain": []}
-    results = call_phenobrain(hpo_list)
-    return {"phenoBrain": results}
+    response = call_phenobrain(
+        hpo_list,
+        topk=TOOL_FULL_RESULT_LIMIT,
+        return_metadata=True,
+    )
+    if isinstance(response, dict):
+        return {
+            "phenoBrain": response.get("top5", []),
+            "tool_response_records": _append_tool_response_record(
+                state,
+                {
+                    "tool": "PhenoBrain",
+                    "request": response.get("request", {}),
+                    "response": response.get("raw", {}),
+                    "top5": response.get("top5", []),
+                    "all": response.get("all", []),
+                    "rank_status": "full_response",
+                },
+            ),
+        }
+    return {"phenoBrain": response or []}
 
 @profile_node
 @save_result("NormalizePCFNode")
@@ -113,7 +182,20 @@ def GestaltMatcherNode(state: State):
         print("No image path provided.")
         return {"GestaltMatcher": []}
     try:
-        gestalt_results = call_gestalt_matcher_api(image_path, depth)
+        response = call_gestalt_matcher_api(image_path, depth, return_full=True)
+        if isinstance(response, dict):
+            gestalt_results = response.get("top5", [])
+            tool_record = {
+                "tool": "GestaltMatcher",
+                "request": response.get("request", {}),
+                "response": response.get("raw", {}),
+                "top5": response.get("top5", []),
+                "all": response.get("all", []),
+                "rank_status": "full_response",
+            }
+        else:
+            gestalt_results = response or []
+            tool_record = None
         syndrome_list = []
         for res in gestalt_results:
             syndrome_list.append({
@@ -123,7 +205,10 @@ def GestaltMatcherNode(state: State):
                 "image_id": res.get("image_id", ""),
                 "score": res.get("score")
             })
-        return {"GestaltMatcher": syndrome_list}
+        result = {"GestaltMatcher": syndrome_list}
+        if tool_record is not None:
+            result["tool_response_records"] = _append_tool_response_record(state, tool_record)
+        return result
     except Exception as e:
         print(f"Error calling GestaltMatcher API: {e}")
         return {"GestaltMatcher": []}
@@ -163,7 +248,27 @@ def createZeroShotNode(state: State):
         result, prompt = createZeroshot(state)
         if result:
             # promptはstateに保存しないので、ここでは返さない
-            return {"zeroShotResult": result, "prompt": prompt}
+            return {
+                "zeroShotResult": result,
+                "prompt": prompt,
+                "tool_response_records": _append_tool_response_record(
+                    state,
+                    {
+                        "tool": "ZeroShot",
+                        "request": {"prompt": prompt},
+                        "response": result.model_dump() if hasattr(result, "model_dump") else result,
+                        "top5": [
+                            item.model_dump() if hasattr(item, "model_dump") else item
+                            for item in (getattr(result, "ans", []) or [])[:5]
+                        ],
+                        "all": [
+                            item.model_dump() if hasattr(item, "model_dump") else item
+                            for item in (getattr(result, "ans", []) or [])
+                        ],
+                        "rank_status": "llm_ranked_response",
+                    },
+                ),
+            }
     return {"zeroShotResult": None}
 
 @profile_node
@@ -185,6 +290,30 @@ def mergeCandidateResultsNode(state: State):
     print("mergeCandidateResultsNode called")
     merged_candidates = merge_ranked_disease_candidates(state)
     return {"mergedDiseaseCandidates": merged_candidates}
+
+
+@profile_node
+@save_result("TogoMCPDiscoveryNode")
+def TogoMCPDiscoveryNode(state: State):
+    """Discover additional phenotype-linked diseases through TogoMCP."""
+    print("TogoMCPDiscoveryNode called")
+    return discover_diseases_with_togomcp(state)
+
+
+@profile_node
+@save_result("TogoMCPCandidateAdmissionNode")
+def TogoMCPCandidateAdmissionNode(state: State):
+    """Promote only reviewed TogoMCP discoveries into the candidate pool."""
+    print("TogoMCPCandidateAdmissionNode called")
+    return admit_discovered_candidates(state)
+
+
+@profile_node
+@save_result("TogoMCPResearchNode")
+def TogoMCPResearchNode(state: State):
+    """Collect candidate-specific external evidence before reflection."""
+    print("TogoMCPResearchNode called")
+    return research_candidates_with_togomcp(state)
 
 @profile_node
 @save_result("createDiagnosisNode")

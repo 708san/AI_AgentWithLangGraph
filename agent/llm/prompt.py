@@ -288,6 +288,9 @@ Sex:
 
 Retrieved Medical Literature:
 {disease_knowledge}
+
+TogoMCP Evidence (source-separated and candidate-specific):
+{togomcp_evidence}
 """,
 
     "final_diagnosis_prompt": """You have access to the following information:

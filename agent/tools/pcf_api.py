@@ -1,8 +1,9 @@
 
+import os
 import requests
 import time
 
-def callingPCF(hpo_list, depth, max_retries=3):
+def callingPCF(hpo_list, depth, max_retries=3, return_full=False):
     hpo_ids = ",".join(hpo_list)
     url = f"https://pubcasefinder.dbcls.jp/api/pcf_get_ranked_list?target=omim&format=json&hpo_id={hpo_ids}"
     
@@ -11,15 +12,27 @@ def callingPCF(hpo_list, depth, max_retries=3):
             response = requests.get(url, timeout=120)
             response.raise_for_status()
             data = response.json()
-            top = []
-            for item in data[:5]:
-                top.append({
+            all_results = []
+            for rank, item in enumerate(data, 1):
+                all_results.append({
                     "omim_disease_name_en": item.get("omim_disease_name_en", ""),
                     "description": item.get("description", ""),
                     "score": item.get("score", None),
-                    "omim_id": item.get("id", "")
+                    "omim_id": item.get("id", ""),
+                    "rank": rank,
                 })
-            return top
+            if return_full:
+                return {
+                    "top5": all_results[:5],
+                    "all": all_results,
+                    "raw": data,
+                    "request": {
+                        "url": url,
+                        "hpo_ids": list(hpo_list),
+                        "depth": depth,
+                    },
+                }
+            return all_results[:5]
         except Exception as e:
             print(f"[PhenotypeAnalyzer] PubCaseFinder API失敗 (試行 {attempt + 1}/{max_retries}): {e}")
             if attempt < max_retries - 1:

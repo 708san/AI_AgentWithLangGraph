@@ -1,724 +1,670 @@
-# agent ディレクトリ仕様書
+# ZebraSeek エージェント仕様書
 
-## 1. 概要
+## 1. 文書情報
 
-`agent/` は、HPO ID、患者顔画像、発症時期、性別などを入力として希少疾患の鑑別診断を支援する LangGraph ベースのエージェントである。
+| 項目 | 内容 |
+|---|---|
+| システム | ZebraSeek |
+| 対象 | HPO・顔画像を用いた希少疾患候補の検索と検証 |
+| 本仕様の位置づけ | TogoMCP統合後の実装仕様 |
+| 入力の特徴 | `clinical_text`を持たず、`sex`と`onset`は不明時に`unknown`を使用 |
+| 遺伝子の扱い | 最終疾患表示時の既知原因候補遺伝子取得だけに使用 |
+| 最終リランキング | デフォルトはLLM。`tool_average`オプションで単純ツール平均を選択可能 |
 
-主な処理は次の外部・内部情報源を統合して診断候補を作成し、文献検索と自己評価を経て最終診断を出力する。
+本書は、[docs/togomcp_zebraseek_requirements.md](./togomcp_zebraseek_requirements.md)で定義した要件を、ノード、データ構造、呼び出し、並列化、保存形式へ落とし込む。
 
-- HPO ID から HPO ラベルへの変換
-- PubCaseFinder API による OMIM 疾患候補検索
-- GestaltMatcher API による顔画像ベース疾患候補検索
-- Azure OpenAI による zero-shot 診断、統合診断、reflection、最終診断
-- DDGS、Wikipedia、PubMed による外部知識検索
-- Azure OpenAI Embedding と FAISS による疾患名正規化、表現型類似疾患検索
-- ノード実行結果のログ・JSON 保存
+実行器はLangGraphの`StateGraph`を使用する。アクティブグラフは`ZebraSeekInputNode`、`InitialToolsNode`、`DiseaseNormalizeNode`、`CandidateResearchNode`、`ReflectionNode`、`RerankNode`、`GeneAnnotationNode`、`ZebraSeekOutputNode`で構成し、`zebraseek_context`で段階ごとの状態を受け渡す。従来のノード構成は`legacy_graph`に保持する。
 
-## 2. パイプライン外部仕様
+アクション別の検索目的、プロンプト、実行条件は[docs/zebraseek_tool_overview.md](./zebraseek_tool_overview.md)にまとめる。
 
-### 2.1 エントリポイント
+## 2. 設計原則
 
-対象ファイル: `agent/agent_pipeline.py`
+1. 検索に使用する患者情報を明示する。
+2. 初期ツールのTop5を通常候補にし、取得可能な全レスポンスを保存する。
+3. 初期候補と新規候補を同じ`CandidateRecord`で保持する。
+4. TogoMCP検索は固定アクションのルートで実行し、Reflectionに検索継続を判断させない。
+5. 検索完了後のReflectionで、候補ごとに`correct`、`incorrect`、`uncertain`を判定する。
+6. 外部情報、正規化結果、Evidence、LLM判断を別層に保存する。
+7. 全ての外部事実をDB・エントリー・URI/URL・クエリ・取得日時まで追跡可能にする。
+8. データ依存関係のない呼び出しは並列実行し、統合処理は依存データが揃った後に行う。
 
-主要クラス:
+`DiseaseNormalizeNode`は初期ツールの統合直後に実行する。旧`NormalizePCFNode`・`NormalizeGestaltMatcherNode`と同じく、OMIM IDの数値部分を基準にローカル`omim_mapping.json`の公式病名へ置換し、IDの接頭辞を正規化する。OMIM IDがない候補の名称は保持する。正規化前後と適用方法は`normalization_records`へ保存し、TogoMCPから追加された1段階候補にも同じ処理を適用する。
+
+初期候補生成で直接実行するPubCaseFinderと、TogoMCPの固定検索ルートは重複させない。TogoMCP側のアクション割り当ては明示的な許可リストで行い、`pubcasefinder_rank_by_phenotypes`は検証ルートから除外する。現在の固定実装は、TogoMCPの`ncbi_esearch`をMedGen、PubMed、Geneの各データベースへ固定的に振り分けて疾患情報を取得する。`run_sparql`はMIEと対象グラフを明示したルートを追加するまで選択せず、`expand_candidates`は固定検索結果からローカル抽出する。
+
+## 3. エントリポイント
+
+### 3.1 推奨インターフェース
 
 ```python
-RareDiseaseDiagnosisPipeline(model_name="gpt-4o", enable_log=False, log_filename=None)
-```
-
-実行メソッド:
-
-```python
-run(
-    hpo_list,
-    image_path=None,
-    verbose=False,
-    absent_hpo_list=None,
-    onset=None,
-    sex=None,
-    patient_id=None,
-    use_absentHPO=False,
-    filter_impotance=False,
+pipeline.run(
+    present_hpo_ids: list[str],
+    absent_hpo_ids: list[str] | None = None,
+    image_path: str | None = None,
+    sex: str | None = None,
+    onset: str | None = None,
+    patient_id: str | None = None,
+    ranking_mode: str = "llm",
 )
 ```
 
-### 2.2 入力
+`clinical_text`引数は定義しない。後方互換のために受け取る実装も作らない。
 
-| 引数 | 型 | 必須 | 内容 |
-|---|---:|---:|---|
-| `hpo_list` | `List[str]` | 必須 | 患者に存在する HPO ID のリスト。例: `["HP:0001263"]` |
-| `image_path` | `Optional[str]` | 任意 | 顔画像ファイルのパス。未指定時は GestaltMatcher をスキップ |
-| `verbose` | `bool` | 任意 | `True` の場合、reflection と finalDiagnosis を標準出力に整形表示 |
-| `absent_hpo_list` | `Optional[List[str]]` | 任意 | 明示的に観察されなかった HPO ID のリスト |
-| `onset` | `Optional[str]` | 任意 | 発症時期。未指定時は `"Unknown"` |
-| `sex` | `Optional[str]` | 任意 | 性別。未指定時は `"Unknown"` |
-| `patient_id` | `Optional[str]` | 任意 | 結果保存ファイル名に使用。未指定時は `"unknown"` |
-| `use_absentHPO` | `bool` | 任意 | `True` の場合のみ、明示的に観察されなかった HPO 所見を LLM プロンプトに含める。既定値は `False` |
-| `filter_impotance` | `bool` | 任意 | `True` の場合、present HPO と absent HPO を関連疾患数が少ない上位 15 件に絞ってから実行する。既定値は `False` |
+実装上のエントリポイントは`agent.tools.zebraseek_flow.run_zebraseek`であり、
+`RareDiseaseDiagnosisPipeline.run`はこの関数を呼び出す互換ラッパーである。
 
-### 2.3 出力
+### 3.2 入力正規化
 
-`run()` は LangGraph 実行後の `State` 辞書を返す。
+```python
+sex = sex or "unknown"
+onset = onset or "unknown"
+absent_hpo_ids = absent_hpo_ids or []
+patient_id = patient_id or "unknown"
+```
 
-主な出力キー:
+Present HPOが空の場合は初期候補生成を実行せず、入力エラーとして終了する。Absent HPOが空の場合は、Absent HPO検索を実行し、`unknown`または`not_applicable`を記録する。
 
-| キー | 型 | 内容 |
+## 4. 全体フロー
+
+```text
+入力正規化
+  ↓
+初期5ツールを並列実行
+  ↓
+Top5統合と全レスポンス保存
+  ↓
+初期CandidateRecord作成
+  ↓
+DiseaseNormalizeNode（OMIM ID・病名の正規化）
+  ↓
+各候補の固定検索
+  ├─ 疾患ID正規化
+  ├─ Present HPO
+  ├─ Absent HPO
+  ├─ 症例報告
+  ├─ PubMed
+  ├─ 反証検索
+  └─ 新規疾患抽出
+  ↓
+新規CandidateRecordを追加
+  ↓
+新規候補にも固定検索を1段階だけ実行
+  ↓
+全候補の検索完了
+  ↓
+Reflectionで候補ごとの正誤評価
+  ↓
+LLMまたはtool_averageでリランキング
+  ↓
+最終候補ごとの原因候補遺伝子を並列取得
+  ↓
+最終出力
+```
+
+新規候補からさらに新規候補を探索しない。新規候補にも`resolve_identity`から`search_contradiction`までの固定検索を行うが、`expand_candidates`は実行しない。
+
+## 5. State
+
+### 5.1 State構成
+
+```python
+class ZebraSeekState(TypedDict, total=False):
+    patient_input: PatientInput
+    initial_tool_responses: list[ToolResponseRecord]
+    disease_ranking_index: dict[str, DiseaseRankingIndexItem]
+    candidate_pool: list[CandidateRecord]
+    source_records: list[SourceRecord]
+    evidence_records: list[EvidenceRecord]
+    search_sessions: list[CandidateSearchSession]
+    reflection_assessments: list[ReflectionAssessment]
+    final_ranking: list[FinalCandidateResult]
+    gene_annotations: list[GeneAnnotationRecord]
+    ranking_mode: str
+    execution_metadata: ExecutionMetadata
+```
+
+### 5.2 患者入力
+
+```python
+class PatientInput(TypedDict):
+    patient_id: str
+    present_hpo_ids: list[str]
+    absent_hpo_ids: list[str]
+    sex: str
+    onset: str
+    image_path: str | None
+```
+
+`clinical_text`はこの型に含めない。
+
+### 5.3 初期ツールレスポンス
+
+```python
+class ToolResponseRecord(TypedDict, total=False):
+    run_id: str
+    tool: str
+    request: dict
+    request_context: PatientInput
+    response_status: str
+    completeness: str       # complete | truncated | unknown
+    top5: list[RankedResult]
+    all_results: list[RankedResult]
+    raw_response_ref: str
+    retrieved_at: str
+    elapsed_ms: float
+    error: str
+```
+
+`top5`は表示・LLM入力用の射影であり、`all_results`が保存可能な範囲の正式な取得結果である。
+
+### 5.4 ランキング結果
+
+```python
+class RankedResult(TypedDict, total=False):
+    disease_name: str
+    disease_ids: list[str]
+    rank: int
+    score: float | None
+    source_codes: list[str]
+    raw_item: dict
+```
+
+### 5.5 疾患ランキングインデックス
+
+```python
+class DiseaseRankingIndexItem(TypedDict, total=False):
+    disease_key: str
+    disease_name: str
+    normalized_ids: list[str]
+    tool: str
+    run_id: str
+    rank: int | None
+    score: float | None
+    status: str       # found | not_returned | truncated | error
+```
+
+### 5.6 候補疾患
+
+```python
+class CandidateRecord(TypedDict, total=False):
+    candidate_id: str
+    disease_name: str
+    normalized_ids: list[str]
+    discovery_source_ids: list[str]
+    discovery_evidence_ids: list[str]
+    tool_rankings: dict[str, ToolCandidateRanking]
+    evidence_ids: list[str]
+    search_status: str       # pending | researching | complete | error
+```
+
+初期候補と新規候補で型を分けない。`discovery_source_ids`と`discovery_evidence_ids`は出典追跡用の属性であり、候補の評価規則を分けるために使用しない。
+
+```python
+class ToolCandidateRanking(TypedDict, total=False):
+    tool: str
+    rank: int | None
+    score: float | None
+    status: str              # found | not_returned | truncated | skipped | error
+    run_id: str
+```
+
+## 6. 初期ツールノード
+
+### 6.1 共通入力
+
+各ノードは`PatientInput`を参照する。`sex`と`onset`は入力コンテキストへ含める。APIが対応しない項目はAPI引数に渡さず、`request_context`に保存する。
+
+### 6.2 並列実行
+
+以下を並列実行する。
+
+```text
+PCFNode
+GestaltMatcherNode
+VectorSearchNode
+PhenoBrainNode
+ZeroShotNode
+```
+
+画像がない場合、GestaltMatcherと画像を必要とするPhenoBrain処理は`skipped`として記録する。
+
+### 6.3 初期結果の保存
+
+各ノードは、次を返す。
+
+```text
+ToolResponseRecord
+SourceRecord（外部APIの場合）
+```
+
+ZeroShotはLLM呼び出しだが、プロンプト、モデル名、構造化出力を`ToolResponseRecord`相当の実行記録として保存する。
+
+## 7. 候補統合ノード
+
+### 7.1 入力
+
+- 各初期ツールのTop5
+- 各ツールの`all_results`
+- 疾患ID正規化器
+
+### 7.2 処理
+
+1. 疾患IDを優先して候補を識別する。
+2. 疾患IDがない場合は、名称・同義語で一時キーを作る。
+3. 同一疾患のランキングを1つの`CandidateRecord`へ統合する。
+4. 全レスポンスから`DiseaseRankingIndex`を作る。
+5. 各候補のツール別順位・スコア・状態を付与する。
+
+### 7.3 出力
+
+```text
+candidate_pool
+disease_ranking_index
+```
+
+## 8. 固定検索ノード
+
+### 8.1 アクション一覧
+
+```text
+resolve_identity
+check_present_hpo
+check_absent_hpo
+search_case_reports
+search_pubmed
+search_contradiction
+expand_candidates
+```
+
+LLMは検索継続、次の検索、アクションの追加を決定しない。検索制御側がこの順序と実行条件を保持する。
+
+### 8.2 `resolve_identity`
+
+入力:
+
+```text
+candidate.disease_name
+candidate.normalized_ids
+```
+
+出力:
+
+```text
+preferred disease ID
+preferred label
+synonyms
+cross-references
+identity conflicts
+```
+
+TogoMCPの実ツール名は、接続時の`tools/list`とMIE/ツール説明から解決する。取得した実ツール名、引数、DB、エントリーを`ToolCallRecord`に保存する。
+
+### 8.3 `check_present_hpo`
+
+疾患側の表現型アノテーションと、患者のPresent HPOを照合する。
+
+Evidenceの極性:
+
+```text
+supports
+unknown
+not_annotated
+```
+
+患者HPOと疾患HPOの単純な文字列一致だけでなく、使用したDB・エントリー・HPO関係を保存する。
+
+### 8.4 `check_absent_hpo`
+
+疾患側に明示的なExcludedまたは否定情報がある場合だけ、矛盾として記録する。
+
+```text
+contradicts
+unknown
+not_annotated
+```
+
+疾患側に該当アノテーションがない場合は`contradicts`にしない。
+
+### 8.5 `search_case_reports`
+
+候補疾患ID・名称で症例報告を検索する。患者のPresent/Absent HPO、`sex`、`onset`は検索コンテキストとして保持する。
+
+各症例報告は、PMID、文献タイトル、該当箇所、URL、取得日時を保存する。文献に記載された別の疾患名は`expand_candidates`の入力にする。
+
+### 8.6 `search_pubmed`
+
+候補疾患ID、候補疾患名、表現型に関連する固定クエリを用いてPubMedを検索する。
+
+検索結果は、検索クエリ、DB、PMID、タイトル、抄録、URL、取得日時とともに保存する。
+
+### 8.7 `search_contradiction`
+
+前段の表現型、症例、PubMed結果を入力として、候補疾患と矛盾する情報を検索する。
+
+出力は、支持根拠とは別のEvidenceとして保存する。矛盾が見つからない場合も、実行済み検索として記録する。
+
+### 8.8 `expand_candidates`
+
+前段の検索結果に明示された疾患名・疾患IDを抽出する。
+
+候補抽出時のLLM出力は、自由な鑑別疾患生成ではなく、与えられた検索結果からの構造化抽出とする。
+
+```python
+class CandidateMention(TypedDict, total=False):
+    disease_name: str
+    normalized_ids: list[str]
+    source_ids: list[str]
+    evidence_ids: list[str]
+    mention_context: str
+```
+
+新規疾患は、初期候補と同じ`CandidateRecord`に追加する。初期ツール全件結果に存在する場合は順位・スコアを付与し、存在しない場合は`not_returned`を付与する。
+
+新規疾患に対しては`resolve_identity`から`search_contradiction`までを実行する。`expand_candidates`は再実行しない。
+
+## 9. 検索セッション
+
+```python
+class CandidateSearchSession(TypedDict, total=False):
+    session_id: str
+    candidate_id: str
+    expansion_depth: int
+    planned_actions: list[str]
+    completed_actions: list[str]
+    action_records: list[str]
+    discovered_candidate_ids: list[str]
+    status: str              # complete | partial | error
+    started_at: str
+    finished_at: str
+```
+
+`planned_actions`は固定ルートから作成する。LLMの`need_more_search`や自由な検索計画は保存しない。
+
+## 10. TogoMCP呼び出し
+
+### 10.1 抽象アクションと実ツール
+
+アプリケーションは論理アクション名を使用する。実際のMCPツール名は、実行開始時に取得したツールカタログから`ActionBinding`へ解決する。
+
+```python
+class ActionBinding(TypedDict, total=False):
+    action: str
+    tool_name: str
+    database: str
+    input_mapping: dict
+    output_mapping: dict
+    availability: str
+```
+
+この方式により、TogoMCP側のツール名変更を候補検索ロジックから分離する。
+
+### 10.2 ToolCallRecord
+
+```python
+class ToolCallRecord(TypedDict, total=False):
+    call_id: str
+    action: str
+    tool_name: str
+    arguments: dict
+    database: str
+    query: str
+    result_ref: str
+    source_ids: list[str]
+    status: str              # success | empty | error | not_applicable
+    started_at: str
+    elapsed_ms: float
+    error: str
+```
+
+TogoMCPのガイド、MIE、実行クエリ、エンドポイントも、呼び出しとともに保存する。
+
+## 11. 情報源とEvidence
+
+### 11.1 SourceRecord
+
+```python
+class SourceRecord(TypedDict, total=False):
+    source_id: str
+    access_layer: str        # direct_api | TogoMCP | local_file | llm
+    tool: str
+    database: str
+    source_type: str         # ranking | phenotype | case_report | literature | ontology | gene
+    entry_id: str
+    uri: str
+    url: str
+    endpoint: str
+    query: str
+    request: dict
+    retrieved_at: str
+    raw_response_ref: str
+    content_hash: str
+    status: str
+```
+
+出典がローカルファイルの場合は`local_file`としてパス、ファイルハッシュ、該当エントリーを保存する。URLが存在しない場合も空欄にせず、`uri`または`local_path`のいずれかを記録する。
+
+### 11.2 EvidenceRecord
+
+```python
+class EvidenceRecord(TypedDict, total=False):
+    evidence_id: str
+    candidate_id: str
+    source_ids: list[str]
+    claim: dict
+    polarity: str            # supports | contradicts | unknown | not_annotated
+    relation: str
+    excerpt: str
+    structured_value: dict
+    extraction_method: str   # api_mapping | deterministic_match | llm_extraction
+    created_at: str
+```
+
+Evidenceは、必ず1つ以上の`source_ids`を持つ。LLMが作成した要約も、元のEvidence IDを失わない。
+
+## 12. Reflection
+
+### 12.1 実行タイミング
+
+全CandidateRecordの固定検索が完了した後に1回実行する。
+
+新規候補も、通常候補と同じReflection入力へ含める。
+
+### 12.2 入力
+
+- `PatientInput`
+- CandidateRecord
+- 初期ツールTop5
+- 初期ツール全件結果との照合結果
+- TogoMCP Evidence
+- 症例報告Evidence
+- PubMed Evidence
+- 反証Evidence
+- 全SourceRecordの参照情報
+
+`clinical_text`は含めない。`sex`と`onset`は値または`unknown`として含める。
+
+### 12.3 出力
+
+```python
+class ReflectionAssessment(TypedDict, total=False):
+    candidate_id: str
+    judgment: str           # correct | incorrect | uncertain
+    supporting_evidence_ids: list[str]
+    contradicting_evidence_ids: list[str]
+    unknown_evidence_ids: list[str]
+    patient_summary: str
+    analysis: str
+    source_ids: list[str]
+    model: str
+    prompt_ref: str
+    created_at: str
+```
+
+`judgment`は、収集した根拠に対する候補の妥当性評価である。根拠のない事実を追加せず、判断に使用したEvidence IDを必ず付与する。
+
+## 13. 最終リランキング
+
+### 13.1 `ranking_mode`
+
+```text
+llm            デフォルト。ReflectionとEvidenceを用いてLLMが順位を生成
+tool_average   ツール順位の単純平均
+```
+
+### 13.2 LLM方式
+
+LLMは、CandidateRecordとReflectionAssessmentを入力として、候補IDの順序を構造化出力する。
+
+```python
+class LLMRankingItem(TypedDict, total=False):
+    candidate_id: str
+    rank: int
+    rationale: str
+    supporting_evidence_ids: list[str]
+    contradicting_evidence_ids: list[str]
+```
+
+### 13.3 tool_average方式
+
+各ツールの順位を、候補が返却された順位集合に対して0から1へ正規化する。
+
+```text
+rank_score = 1 - (rank - 1) / (returned_count - 1)
+not_returned = 0
+tool_average = enabled_and_executed_toolsのrank_scoreの算術平均
+```
+
+画像がなくスキップされたツールは平均の分母から除外する。APIの結果に存在しない候補は、そのツールについて0とする。
+
+## 14. 最終原因候補遺伝子
+
+最終ランキング確定後、各疾患について既知の原因候補遺伝子を並列検索する。
+
+```python
+class GeneAnnotationRecord(TypedDict, total=False):
+    annotation_id: str
+    disease_candidate_id: str
+    disease_id: str
+    gene_id: str
+    gene_symbol: str
+    relation: str
+    source_ids: list[str]
+    evidence_ids: list[str]
+    retrieved_at: str
+```
+
+この結果は、候補順位、Reflection、検索ルート、新規疾患抽出に使用しない。
+
+## 15. 最終出力
+
+```python
+class FinalCandidateResult(TypedDict, total=False):
+    candidate_id: str
+    rank: int
+    disease_name: str
+    normalized_ids: list[str]
+    judgment: str
+    supporting_evidence_ids: list[str]
+    contradicting_evidence_ids: list[str]
+    unknown_evidence_ids: list[str]
+    known_causal_gene_annotation_ids: list[str]
+    tool_rankings: dict[str, ToolCandidateRanking]
+    rationale: str
+```
+
+```python
+class ZebraSeekOutput(TypedDict, total=False):
+    patient_id: str
+    ranked_candidates: list[FinalCandidateResult]
+    source_records: list[SourceRecord]
+    evidence_records: list[EvidenceRecord]
+    tool_response_records: list[ToolResponseRecord]
+    reflection_assessments: list[ReflectionAssessment]
+    gene_annotations: list[GeneAnnotationRecord]
+    execution_metadata: dict
+```
+
+通常表示は上位5疾患とする。監査用ファイルには、候補全体、全ツールレスポンス、全Evidence、全SourceRecord、Reflection結果を保存する。
+
+## 16. 並列実行の依存関係
+
+```text
+患者入力正規化
+  ↓
+初期5ツール ─────────────┐
+                          ↓
+                    候補統合
+                          ↓
+              候補ごとの疾患ID正規化
+                          ↓
+  Present HPO ────────────┐
+  Absent HPO ─────────────┤
+  症例報告 ───────────────┤→ 結果統合
+  PubMed ────────────────┘
+                          ↓
+                    反証検索
+                          ↓
+                  新規候補抽出
+                          ↓
+             新規候補の固定検索
+                          ↓
+                    Reflection
+                          ↓
+                    リランキング
+                          ↓
+              原因候補遺伝子検索（並列）
+```
+
+同じMCPサーバーへの並列数は設定可能な同時実行数で制限する。並列結果を統合するときは、`action`、`candidate_id`、`source_id`、取得時刻をキーにして決定的な順序を作る。
+
+## 17. エラー・不明値
+
+| 状態 | 意味 | 候補評価 |
 |---|---|---|
-| `hpoDict` | `dict[str, str]` | 入力 HPO ID から HPO ラベルへの辞書 |
-| `absentHpoDict` | `dict[str, str]` | 明示的に観察されなかった HPO ID から HPO ラベルへの辞書 |
-| `pubCaseFinder` | `List[dict]` | PubCaseFinder の候補疾患。正規化後は `disease_name` を含む |
-| `GestaltMatcher` | `List[dict]` | GestaltMatcher の候補疾患。画像なしでは空リスト |
-| `zeroShotResult` | `ZeroShotOutput` | LLM が HPO から直接推定した候補疾患 |
-| `phenotypeSearchResult` | `List[PhenotypeSearchFormat]` | HPO ラベルを embedding 検索した類似疾患 |
-| `mergedDiseaseCandidates` | `List[MergedDiseaseCandidate]` | 診断前に各ツール候補を疾患単位で統合した候補表 |
-| `webresources` | `List[webresource]` | HPO 由来の Web 検索結果要約 |
-| `tentativeDiagnosis` | `DiagnosisOutput` | 各ツール結果を統合した暫定診断 |
-| `memory` | `List[InformationItem]` | 暫定診断疾患に関する Wikipedia/PubMed 知識 |
-| `reflection` | `ReflectionOutput` | 暫定診断の妥当性評価 |
-| `finalDiagnosis` | `DiagnosisOutput` | 最終診断 |
-
-### 2.4 副作用
-
-| 条件 | 出力先 | 内容 |
-|---|---|---|
-| `enable_log=True` | `log/agent_log_YYYYMMDD_HHMMSS.log` または指定ファイル | グラフ構造、ノード結果、LLM プロンプト |
-| 一部ノード実行時 | `res/{patient_id}.json` | ノード結果を JSON で逐次マージ保存 |
-| 常時 | 標準出力 | ノード名、進捗、エラー、プロファイル時間 |
-
-## 3. State 仕様
-
-対象ファイル: `agent/state/state_types.py`
-
-### 3.1 State
-
-`State` は LangGraph の共有状態である。
-
-| キー | 型 | 内容 |
-|---|---|---|
-| `depth` | `int` | フロー反復深度。初期値 0、`BeginningOfFlowNode` で加算 |
-| `imagePath` | `Optional[str]` | 顔画像パス |
-| `clinicalText` | `Optional[str]` | 類似症例などの追加臨床テキスト。現行初期値は `None` |
-| `hpoList` | `List[str]` | 入力 HPO ID |
-| `hpoDict` | `dict[str, str]` | HPO ID とラベルの対応 |
-| `absentHpoList` | `List[str]` | 明示的に観察されなかった HPO ID |
-| `absentHpoDict` | `dict[str, str]` | 明示的に観察されなかった HPO ID とラベルの対応 |
-| `use_absentHPO` | `bool` | `absentHpoDict` を LLM プロンプトに含めるかどうか |
-| `filter_impotance` | `bool` | HPO 重要度フィルタを適用したかどうか |
-| `pubCaseFinder` | `List[PCFres]` | PubCaseFinder 結果 |
-| `GestaltMatcher` | `List[GestaltMatcherFormat]` | GestaltMatcher 結果 |
-| `phenotypeSearchResult` | `Optional[List[PhenotypeSearchFormat]]` | 表現型 embedding 検索結果 |
-| `mergedDiseaseCandidates` | `List[MergedDiseaseCandidate]` | 各ツールの疾患候補と順位情報を統合した診断入力 |
-| `webresources` | `List[webresource]` | HPO Web 検索結果 |
-| `memory` | `List[InformationItem]` | 疾患知識検索結果 |
-| `zeroShotResult` | `Optional[ZeroShotOutput]` | zero-shot 診断 |
-| `tentativeDiagnosis` | `Optional[DiagnosisOutput]` | 暫定診断 |
-| `reflection` | `Optional[ReflectionOutput]` | 診断評価 |
-| `finalDiagnosis` | `Optional[DiagnosisOutput]` | 最終診断 |
-| `onset` | `Optional[str]` | 発症時期 |
-| `sex` | `Optional[str]` | 性別 |
-| `patient_id` | `Optional[str]` | 保存用患者 ID |
-| `llm` | `Optional[AzureOpenAIWrapper]` | LLM ラッパー |
-
-### 3.2 Pydantic モデル
-
-| モデル | 内容 |
-|---|---|
-| `ZeroShotFormat` | `disease_name`, `rank`, `OMIM_id` |
-| `ZeroShotOutput` | `ans: List[ZeroShotFormat]` |
-| `DiagnosisFormat` | `disease_name`, `OMIM_id`, `description`, `rank` |
-| `DiagnosisOutput` | `ans: List[DiagnosisFormat]`, `reference` |
-| `ReflectionFormat` | `disease_name`, `Correctness`, `PatientSummary`, `DiagnosisAnalysis`, `references` |
-| `ReflectionOutput` | `ans: List[ReflectionFormat]` |
-| `GestaltMatcherFormat` | `subject_id`, `syndrome_name`, `omim_id`, `image_id`, `score` |
-| `ToolRankingItem` | `tool`, `rank`, `score`, `matched_hpo_id`, `note` |
-| `MergedDiseaseCandidate` | `disease_name`, `OMIM_id`, `consensus_count`, `best_rank`, `tool_rankings` |
-| `OMIMEntry` | `OMIM_id`, `disease_name`, `synonym`, `definition`, `phenotype` |
-| `PhenotypeSearchFormat` | `disease_info: OMIMEntry`, `similarity_score` |
-
-## 4. グラフ処理仕様
-
-対象ファイル: `agent/agent_pipeline.py`, `agent/nodes.py`
-
-### 4.1 ノード一覧
-
-| ノード | 入力 | 出力 | 処理 |
-|---|---|---|---|
-| `BeginningOfFlowNode` | `depth` | `depth`, `tentativeDiagnosis=None`, `reflection=None` | フロー開始。`depth` を 1 加算し診断・評価をリセット |
-| `PCFnode` | `hpoList`, `depth` | `pubCaseFinder` | PubCaseFinder API を呼び上位 5 件取得 |
-| `NormalizePCFNode` | `pubCaseFinder` | `pubCaseFinder` | OMIM ID に基づき疾患名を正式名へ正規化 |
-| `GestaltMatcherNode` | `imagePath`, `depth` | `GestaltMatcher` | 画像があれば GestaltMatcher API を呼び候補疾患を取得 |
-| `NormalizeGestaltMatcherNode` | `GestaltMatcher` | `GestaltMatcher` | OMIM ID に基づき `syndrome_name` を正規化 |
-| `createHPODictNode` | `hpoList` | `hpoDict` | `phenotype_mapping.json` で HPO ID をラベル化 |
-| `createAbsentHPODictNode` | `absentHpoList` | `absentHpoDict` | 明示的に観察されなかった HPO ID をラベル化 |
-| `createZeroShotNode` | `hpoDict`, `absentHpoDict`, `use_absentHPO`, `onset`, `sex`, `llm` | `zeroShotResult`, `prompt` | LLM 構造化出力で候補疾患を生成。`use_absentHPO=True` の場合のみ absent HPO を使用 |
-| `NormalizeZeroShotNode` | `zeroShotResult` | `zeroShotResult` | 疾患名を embedding 正規化し、類似度 0.70 未満と重複 OMIM を除外 |
-| `HPOwebSearchNode` | `hpoDict`, `llm` | `webresources` | HPO から DDGS 検索クエリを生成し、検索結果スニペットを要約 |
-| `DiseaseSearchWithHPONode` | `hpoDict`, `depth` | `phenotypeSearchResult` | HPO ラベルを embedding 化し、FAISS で類似 OMIM 疾患を検索 |
-| `mergeCandidateResultsNode` | `pubCaseFinder`, `zeroShotResult`, `GestaltMatcher`, `phenotypeSearchResult` | `mergedDiseaseCandidates` | 診断前に各ツールの順位付き疾患候補を疾患単位で統合し、どのツールで何位だったかを保持 |
-| `createDiagnosisNode` | `mergedDiseaseCandidates`, HPO, Web, LLM | `tentativeDiagnosis`, `prompt` | 統合済み候補表と患者情報・Web 結果を使って暫定診断を生成。`use_absentHPO=True` の場合のみ absent HPO を使用 |
-| `diseaseNormalizeNode` | `tentativeDiagnosis` | `tentativeDiagnosis` | 暫定診断疾患名を embedding 正規化し、類似度 0.75 未満を除外 |
-| `diseaseSearchNode` | `tentativeDiagnosis`, `depth`, `llm`, `memory` | `memory` | 各暫定疾患について Wikipedia/PubMed を並列検索し要約 |
-| `reflectionNode` | `tentativeDiagnosis`, `hpoDict`, `absentHpoDict`, `use_absentHPO`, `memory`, `llm` | `reflection`, `prompt` | 各暫定疾患を LLM で妥当性評価。最大 10 スレッドで並列実行。`use_absentHPO=True` の場合のみ absent HPO を使用 |
-| `finalDiagnosisNode` | `tentativeDiagnosis`, `reflection`, HPO, `llm` | `finalDiagnosis`, `prompt` | reflection までの情報を統合して最終診断を生成。`use_absentHPO=True` の場合のみ absent HPO を使用 |
-| `diseaseNormalizeForFinalNode` | `finalDiagnosis` | `finalDiagnosis` | 最終診断疾患名を embedding 正規化し、類似度 0.75 未満を除外 |
-
-### 4.2 エッジ
-
-現行グラフの主な流れ:
-
-1. `START`
-2. `BeginningOfFlowNode`
-3. 並列的に以下を開始
-   - `PCFnode` -> `NormalizePCFNode`
-   - `GestaltMatcherNode` -> `NormalizeGestaltMatcherNode`
-   - `createHPODictNode`
-   - `createAbsentHPODictNode`
-4. `createHPODictNode` と `createAbsentHPODictNode` の完了後、`createZeroShotNode` -> `NormalizeZeroShotNode`
-5. `createHPODictNode` の完了後、`HPOwebSearchNode` と `DiseaseSearchWithHPONode`
-6. `NormalizeZeroShotNode`, `NormalizePCFNode`, `NormalizeGestaltMatcherNode`, `DiseaseSearchWithHPONode` の完了後、`mergeCandidateResultsNode`
-7. `mergeCandidateResultsNode` と `HPOwebSearchNode` の完了後、`createDiagnosisNode`
-8. `diseaseNormalizeNode`
-9. `diseaseSearchNode`
-10. `reflectionNode`
-11. 条件分岐
-    - `ProceedToFinalDiagnosisNode` -> `finalDiagnosisNode`
-    - `ReturnToBeginningNode` -> `BeginningOfFlowNode`
-12. `finalDiagnosisNode`
-13. `diseaseNormalizeForFinalNode`
-14. `END`
-
-### 4.4 HPO 重要度フィルタ
-
-対象ファイル: `agent/utils/hpo_importance_filter.py`
-
-`filter_impotance=True` の場合、`RareDiseaseDiagnosisPipeline.run()` の初期 State 作成前に `hpo_list` と `absent_hpo_list` をそれぞれ重要度順に絞る。
-
-重要度は `HPO_importance/HPO_importance.json` の `related_disease_num` を用いる。関連疾患数が少ない HPO ほど、その表現型はより特異的で重要とみなす。
-
-仕様:
-
-- 上限件数は `TOP_HPO_IMPORTANCE_LIMIT = 15` として `agent/utils/hpo_importance_filter.py` の先頭付近に定義する。
-- present HPO と absent HPO は独立に処理する。
-- 各リストの件数が 15 件以上の場合、`related_disease_num` が小さい順に上位 15 件へ絞る。
-- `HPO_importance.json` に存在しない HPO ID は重要度不明として末尾側に並べる。
-- 同じ関連疾患数の場合は入力順を維持する。
-- `filter_impotance=False` の場合は従来どおり入力リストをそのまま使用する。
-
-### 4.3 reflection 後の条件分岐
-
-`after_reflection_edge()` は次の条件で遷移する。
-
-| 条件 | 遷移 |
-|---|---|
-| `depth > 0` | `finalDiagnosisNode` |
-| `reflection` が空、または `reflection.ans` が空 | `BeginningOfFlowNode` |
-| `reflection.ans[*].Correctness` に `True` が 1 件以上ある | `finalDiagnosisNode` |
-| それ以外 | `BeginningOfFlowNode` |
-
-注意: 初期 `depth=0` は `BeginningOfFlowNode` で `1` になるため、現行実装では初回 `reflectionNode` 後に `depth > 0` が成立し、原則として再ループせず最終診断へ進む。
-
-## 5. ツール別仕様
-
-### 5.1 PubCaseFinder
-
-対象ファイル: `agent/tools/pcf_api.py`
-
-入力:
-
-- `hpo_list: List[str]`
-- `depth: int`
-- `max_retries: int = 3`
-
-処理:
-
-- `hpo_list` をカンマ区切りにする。
-- `https://pubcasefinder.dbcls.jp/api/pcf_get_ranked_list` に GET リクエストする。
-- `target=omim`, `format=json`, `hpo_id=<HPO IDs>` を付与する。
-- レスポンス上位 5 件を抽出する。
-- 失敗時は指数バックオフで最大 3 回リトライする。
-
-出力:
-
-```python
-[
-    {
-        "omim_disease_name_en": str,
-        "description": str,
-        "score": Optional[float],
-        "omim_id": str,
-    }
-]
-```
-
-### 5.2 GestaltMatcher
-
-対象ファイル: `agent/tools/gestaltMathcher.py`
-
-入力:
-
-- `image_path: str`
-- `depth: int`
-- `max_retries: int = 3`
-
-環境変数:
-
-- `GESTALT_API_USER`
-- `GESTALT_API_PASS`
-
-処理:
-
-- 画像を base64 エンコードする。
-- `https://dev-pubcasefinder.dbcls.jp/gm_endpoint/predict` に Basic 認証つき POST を送る。
-- `suggested_syndromes_list` から上位 `depth + 4` 件を取得する。
-- `distance` または `gestalt_score` を `score = (1.3 - distance) / 1.3` に変換する。
-- 失敗時は指数バックオフで最大 3 回リトライする。
-
-出力:
-
-```python
-[
-    {
-        "subject_id": str,
-        "syndrome_name": str,
-        "omim_id": str,
-        "image_id": str,
-        "score": float,
-    }
-]
-```
-
-### 5.3 HPO 辞書作成
-
-対象ファイル: `agent/tools/make_HPOdic.py`
-
-入力:
-
-- `hpo_list: List[str]`
-- `mapping_path: str`
-
-処理:
-
-- `mapping_path` 引数は現行実装では使用しない。
-- `agent/data/phenotype_mapping.json` を読み込む。
-- HPO ID ごとにラベルを取得する。
-
-出力:
-
-```python
-{ "HP:0001263": "Global developmental delay" }
-```
-
-未登録 HPO ID は空文字 `""` になる。
-
-### 5.4 Zero-Shot 診断
-
-対象ファイル: `agent/tools/ZeroShot.py`
-
-入力:
-
-- `hpoDict`
-- `absentHpoDict`
-- `use_absentHPO`
-- `onset`
-- `sex`
-- `llm`
-
-処理:
-
-- present HPO ラベル、発症時期、性別を `zero-shot-diagnosis-prompt` に埋め込む。
-- `use_absentHPO=True` の場合のみ、明示的に観察されなかった HPO ラベルも absent HPO として埋め込む。
-- `AzureOpenAIWrapper.get_structured_llm(ZeroShotOutput)` により構造化出力を要求する。
-
-出力:
-
-- `ZeroShotOutput`
-- 実行プロンプト文字列
-
-### 5.5 疾患名正規化
-
-対象ファイル: `agent/tools/diseaseNormalize.py`
-
-入力:
-
-- 疾患名文字列、または `State` 内の `pubCaseFinder`, `GestaltMatcher`, `zeroShotResult`, `DiagnosisOutput`
-
-環境変数:
-
-- `AZURE_DBCLS_JAPANEAST`
-
-ローカルデータ:
-
-- `agent/data/DataForOmimMapping/DataForOmimMapping.bin`
-- `agent/data/DataForOmimMapping/DataForOmimMapping.json`
-- `agent/data/DataForOmimMapping/omim_mapping.json`
-
-処理:
-
-- Azure OpenAI `text-embedding-3-large` で疾患名を embedding 化する。
-- FAISS インデックスで最近傍 OMIM ラベルを検索する。
-- `omim_mapping.json` にある正式病名へ置換する。
-- `zeroShotResult` は類似度 0.70 以上のみ採用し、OMIM ID 重複を除去する。
-- `DiagnosisOutput` は類似度 0.75 以上のみ採用する。
-
-出力:
-
-- 正規化済み候補リスト、または正規化済み `ZeroShotOutput` / `DiagnosisOutput`
-
-### 5.6 HPO 表現型 embedding 検索
-
-対象ファイル: `agent/tools/embeddingSearchWithHPO.py`
-
-入力:
-
-- `State.hpoDict`
-- `State.depth`
-
-環境変数:
-
-- `AZURE_DBCLS_JAPANEAST`
-
-ローカルデータ:
-
-- `agent/data/DataForDiseaseSearchFromHPO/phenotype_index.bin`
-- `agent/data/DataForDiseaseSearchFromHPO/phenotype_index.json`
-
-処理:
-
-- HPO ラベルをカンマ区切りにして検索文を作る。
-- Azure OpenAI `text-embedding-3-large` で embedding 化する。
-- ベクトルを L2 正規化する。
-- FAISS で `k = 5 * depth` 件検索する。
-- 検索結果を `PhenotypeSearchFormat` に変換する。
-
-出力:
-
-```python
-List[PhenotypeSearchFormat]
-```
-
-### 5.7 HPO Web 検索
-
-対象ファイル: `agent/tools/HPOwebReserch.py`
-
-入力:
-
-- `State.hpoDict`
-- `State.llm`
-- 既存 `State.webresources`
-
-処理:
-
-- HPO ラベルを LLM に渡して DDGS 用検索クエリを 2 件生成する。
-- 各クエリで DDGS テキスト検索を最大 2 件実行する。
-- 検索結果スニペットを LLM で鑑別診断向けに要約する。
-- 医学関連でない要約は除外する。
-- URL 重複を除外する。
-
-出力:
-
-```python
-[
-    {
-        "title": str,
-        "url": str,
-        "snippet": str,
-    }
-]
-```
-
-注意: `createDiagnosis()` は Web 検索結果の本文として `content` があればそれを使用し、なければ `snippet` を使用する。
-
-### 5.8 疾患候補マージ
-
-対象ファイル: `agent/tools/rankingMerge.py`
-
-入力:
-
-- `pubCaseFinder`
-- `zeroShotResult`
-- `GestaltMatcher`
-- `phenotypeSearchResult`
-
-処理:
-
-- PubCaseFinder、ZeroShot、GestaltMatcher、PhenotypeSearch の順位付き疾患候補を読み取る。
-- OMIM ID がある場合は `OMIM:<数字>` に正規化し、同一 OMIM ID の候補を同一疾患として統合する。
-- OMIM ID がない場合は疾患名を大文字化・空白正規化したキーで統合する。
-- 各疾患候補に、どのツールで何位だったか、score、matched HPO、補足情報を `tool_rankings` として保持する。
-- `consensus_count` は候補を支持したツール数、`best_rank` は各ツール順位の最小値として算出する。
-- 出力は `consensus_count` 降順、`best_rank` 昇順、疾患名昇順で並べる。
-
-出力:
-
-```python
-[
-    {
-        "disease_name": str,
-        "OMIM_id": Optional[str],
-        "consensus_count": int,
-        "best_rank": int,
-        "tool_rankings": [
-            {
-                "tool": str,
-                "rank": int,
-                "score": Optional[float],
-                "matched_hpo_id": str,
-                "note": str,
-            }
-        ],
-    }
-]
-```
-
-### 5.9 暫定診断生成
-
-対象ファイル: `agent/tools/diagnosis.py`
-
-入力:
-
-- `hpoDict`
-- `absentHpoDict`
-- `use_absentHPO`
-- `onset`
-- `sex`
-- `mergedDiseaseCandidates`
-- `webresources`
-- `llm`
-
-処理:
-
-- `mergedDiseaseCandidates` を、疾患名、OMIM ID、支持ツール数、最良順位、各ツールの順位・score・matched HPO を含むテキスト表へ整形する。
-- `use_absentHPO=True` の場合のみ、明示的に観察されなかった HPO ラベルを診断プロンプトへ含める。
-- GestaltMatcher 結果の有無により `diagnosis_prompt` または `diagnosis_prompt_no_gestalt` を選択する。
-- プロンプトでは、個別ツールの生リストではなく統合済み候補表を authoritative candidate list として扱う。
-- LLM に通常テキスト出力を要求する。
-- `===CASE_START===` / `===CASE_END===` と `KEY::VALUE` 形式を正規表現でパースする。
-- references セクションを `DiagnosisOutput.reference` に格納する。
-
-出力:
-
-- `DiagnosisOutput`
-- 実行プロンプト文字列
-
-### 5.10 疾患知識検索
-
-対象ファイル: `agent/tools/diseaseSearch.py`
-
-入力:
-
-- `tentativeDiagnosis`
-- `depth`
-- `llm`
-- `memory`
-
-処理:
-
-- 暫定診断の各疾患名を抽出する。
-- 疾患ごとに Wikipedia と PubMed を並列検索する。
-- Wikipedia は `top_k_results = depth * 1`, `doc_content_chars_max = 2000`。
-- PubMed は `top_k_results = depth * 3`, `doc_content_chars_max = 3000`。
-- 検索本文を LLM で鑑別診断向けに要約する。
-- URL 重複を除外して `memory` に追加する。
-- PubMed の 429 エラーは最大 3 回リトライする。
-
-出力:
-
-```python
-{
-    "memory": [
-        {
-            "title": str,
-            "url": str,
-            "content": str,
-            "disease_name": str,
-        }
-    ]
-}
-```
-
-### 5.11 Reflection
-
-対象ファイル: `agent/tools/reflection.py`
-
-入力:
-
-- `State`
-- 評価対象の `DiagnosisFormat`
-
-処理:
-
-- `memory` から評価対象疾患名と一致する知識のみ抽出する。
-- 患者 present HPO、発症時期、性別、暫定診断説明、疾患知識を `reflection_prompt` に埋め込む。
-- `use_absentHPO=True` の場合のみ、明示的に観察されなかった HPO ラベルも absent HPO として埋め込む。
-- `ReflectionFormat` の構造化出力として LLM を呼ぶ。
-- `max_completion_tokens` を 25000, 35000, 50000 と増やしながら再試行する。
-- 長さ制限または例外時は `Correctness=False` の fallback 結果を返す。
-
-出力:
-
-- `ReflectionFormat`
-- 実行プロンプト文字列
-
-### 5.12 最終診断
-
-対象ファイル: `agent/tools/finalDiagnosis.py`
-
-入力:
-
-- `hpoDict`
-- `absentHpoDict`
-- `use_absentHPO`
-- `clinicalText`
-- `tentativeDiagnosis`
-- `reflection`
-- `onset`
-- `sex`
-- `llm`
-
-処理:
-
-- 暫定診断と reflection をテキストに整形する。
-- `use_absentHPO=True` の場合のみ、明示的に観察されなかった HPO ラベルを最終診断プロンプトへ含める。
-- `final_diagnosis_prompt` に埋め込む。
-- `DiagnosisOutput` の構造化出力として LLM を呼ぶ。
-
-出力:
-
-- `DiagnosisOutput`
-- 実行プロンプト文字列
-
-## 6. LLM 仕様
-
-対象ファイル: `agent/llm/azure_llm_instance.py`, `agent/llm/llm_wrapper.py`, `agent/llm/prompt.py`
-
-### 6.1 モデル設定
-
-サポートされる `model_name`:
-
-| `model_name` | 環境変数 prefix |
-|---|---|
-| `gpt-4o` | `AZURE_OPENAI_4o` |
-| `gpt-5-1` | `AZURE_OPENAI_5-1` |
-| `gpt-5-2` | `AZURE_OPENAI_5-2` |
-
-必要な環境変数:
-
-- `{PREFIX}_ENDPOINT`
-- `{PREFIX}_API_KEY`
-- `{PREFIX}_DEPLOYMENT_NAME`
-- `{PREFIX}_API_VERSION`
-
-### 6.2 AzureOpenAIWrapper
-
-| メソッド | 入力 | 出力 | 内容 |
-|---|---|---|---|
-| `_create_llm(max_completion_tokens)` | token 上限 | `AzureChatOpenAI` | Azure Chat LLM を生成 |
-| `get_temp_llm_with_max_tokens(max_completion_tokens)` | token 上限 | `AzureChatOpenAI` | 一時 LLM を生成 |
-| `get_structured_llm(output_schema)` | Pydantic schema | structured LLM | 構造化出力用 LLM |
-| `generate(prompt)` | `str` | LLM 応答 | 通常テキスト生成 |
-
-`gpt-4o` は `temperature=0.0` と `max_tokens` を設定する。`gpt-5-1`, `gpt-5-2` は `model_kwargs.extra_body` に `max_completion_tokens`, `verbosity`, `reasoning_effort` を渡す。
-
-### 6.3 プロンプト
-
-| キー | 用途 |
-|---|---|
-| `diagnosis_prompt_no_gestalt` | 顔画像なしの統合暫定診断 |
-| `diagnosis_prompt` | 顔画像ありの統合暫定診断 |
-| `zero-shot-diagnosis-prompt` | HPO のみからの zero-shot 診断 |
-| `reflection_prompt` | 暫定診断の医学的妥当性評価 |
-| `final_diagnosis_prompt` | 最終診断生成 |
-
-## 7. データファイル仕様
-
-| ファイル | 内容 | 主な利用箇所 |
-|---|---|---|
-| `agent/data/phenotype_mapping.json` | HPO ID から HPO ラベルへの辞書。約 19,726 件 | `make_HPOdic.py` |
-| `agent/data/DataForOmimMapping/DataForOmimMapping.bin` | 疾患名正規化用 FAISS インデックス。約 328 MB | `diseaseNormalize.py` |
-| `agent/data/DataForOmimMapping/DataForOmimMapping.json` | 正規化インデックスの `labels`, `omim_ids` | `diseaseNormalize.py` |
-| `agent/data/DataForOmimMapping/omim_mapping.json` | OMIM ID から正式疾患名への辞書。約 27,957 件 | `diseaseNormalize.py` |
-| `agent/data/DataForDiseaseSearchFromHPO/phenotype_index.bin` | HPO 表現型類似検索用 FAISS インデックス。約 98 MB | `embeddingSearchWithHPO.py` |
-| `agent/data/DataForDiseaseSearchFromHPO/phenotype_index.json` | OMIM 疾患情報と表現型リスト | `embeddingSearchWithHPO.py` |
-| `agent/data/DataForDiseaseSearchFromHPO/omim_database.json` | OMIM 疾患情報データ | 現行 agent コードからの直接参照はなし |
-| `HPO_importance/HPO_importance.json` | HPO ID、ラベル、関連疾患数の配列。関連疾患数が少ないほど重要 | `hpo_importance_filter.py` |
-
-## 8. ログ・保存仕様
-
-### 8.1 実行ログ
-
-対象ファイル: `agent/utils/logger.py`
-
-`enable_log=True` の場合、各ノードの結果を `log/` 配下に追記する。結果が Pydantic モデルの場合は JSON 形式で整形する。ノード結果に `prompt` が含まれる場合は、プロンプトも記録する。
-
-### 8.2 結果 JSON 保存
-
-対象ファイル: `agent/utils/result_saver.py`
-
-`@save_result(node_name)` が付与されたノードは、戻り値を `res/{patient_id}.json` に保存する。
-
-処理仕様:
-
-- ファイルがなければ `{}` で作成する。
-- `fcntl.flock` により排他ロックする。
-- 既存 JSON を読み込む。
-- ノード結果を `update()` でマージする。
-- Pydantic オブジェクトは再帰的に dict 化する。
-- 保存に失敗してもパイプライン実行は継続する。
-
-### 8.3 プロファイル
-
-対象ファイル: `agent/utils/profiler.py`
-
-`@profile_node` が付与されたノードは実行時間を計測し、標準出力に `[Profile] <node>: <秒>` を表示する。`NodeProfiler.get_summary()` により集計テキストを取得できる。
-
-## 9. 外部依存・環境変数
-
-### 9.1 外部サービス
-
-| サービス | 用途 |
-|---|---|
-| Azure OpenAI Chat | zero-shot、暫定診断、reflection、最終診断、要約 |
-| Azure OpenAI Embeddings | 疾患名正規化、HPO 表現型検索 |
-| PubCaseFinder API | HPO ベース候補疾患検索 |
-| GestaltMatcher API | 顔画像ベース候補疾患検索 |
-| DDGS | HPO Web 検索 |
-| WikipediaRetriever | 疾患知識検索 |
-| PubMedRetriever | 疾患知識検索 |
-
-### 9.2 必須または条件付き環境変数
-
-| 環境変数 | 必要条件 | 用途 |
-|---|---|---|
-| `AZURE_OPENAI_4o_ENDPOINT` | `model_name="gpt-4o"` | Chat LLM |
-| `AZURE_OPENAI_4o_API_KEY` | `model_name="gpt-4o"` | Chat LLM |
-| `AZURE_OPENAI_4o_DEPLOYMENT_NAME` | `model_name="gpt-4o"` | Chat LLM |
-| `AZURE_OPENAI_4o_API_VERSION` | `model_name="gpt-4o"` | Chat LLM |
-| `AZURE_OPENAI_5-1_*` | `model_name="gpt-5-1"` | Chat LLM |
-| `AZURE_OPENAI_5-2_*` | `model_name="gpt-5-2"` | Chat LLM |
-| `AZURE_DBCLS_JAPANEAST` | 正規化・embedding 検索使用時 | Azure OpenAI Embedding |
-| `GESTALT_API_USER` | 画像診断使用時 | GestaltMatcher Basic 認証 |
-| `GESTALT_API_PASS` | 画像診断使用時 | GestaltMatcher Basic 認証 |
-
-## 10. 例外・スキップ仕様
-
-| 箇所 | 条件 | 挙動 |
-|---|---|---|
-| `PCFnode` | `hpoList` が空 | `pubCaseFinder=[]` |
-| PubCaseFinder API | リクエスト失敗 | 最大 3 回リトライ後、空リスト |
-| `GestaltMatcherNode` | `imagePath` なし | `GestaltMatcher=[]` |
-| GestaltMatcher API | 認証情報なし | 例外をノードで捕捉し `GestaltMatcher=[]` |
-| `createZeroShotNode` | `hpoDict` なし、または LLM なし | `zeroShotResult=None` |
-| `embedding_search_with_hpo` | index、mapping、client の初期化失敗 | `None` |
-| `createDiagnosis` | LLM なし、またはパース結果なし | `None, None` |
-| `diseaseSearchForDiagnosis` | LLM または暫定診断なし | 既存 `memory` を返す |
-| `reflection` | LLM 長さ制限・例外 | `Correctness=False` の fallback |
-| `save_result` | 保存失敗 | エラー表示のみで実行継続 |
-
-## 11. 現行実装上の注意点
-
-- `agent/llm/azure_llm_instance.py` はモジュール末尾で `azure_llm = get_llm_instance("gpt-4o")` を実行するため、import 時点で `gpt-4o` 用環境変数が不足していると失敗する。
-- `agent/tools/diseaseNormalize.py` は import 時点で `AZURE_DBCLS_JAPANEAST` を確認し、FAISS インデックスも読み込む。環境変数または `.bin` ファイルが不足していると import に失敗する。
-- `HPOwebSearchNode` の出力キーは `snippet` だが、`createDiagnosis()` は Web 検索結果の本文として `content` を参照している。
-- `State` では `webresources` が必須扱いだが、初期 state には明示的に含まれていない。各処理は `state.get("webresources", [])` で補完している。
-- `after_reflection_edge()` は `depth > 0` で最終診断へ進むため、現行初期値では reflection 後の再探索ループは実質的に動作しない。
-- `agent/tools/MCP/MCP_client.py` は `mcp_endpoints = {"pcf": "hogehoge"}` の仮 URL で MCPClient を作る実験的コードであり、現行グラフからは利用されていない。
+| `success` | 結果取得済み | Evidenceを作成 |
+| `empty` | 検索結果が空 | `unknown`または`not_found`を記録 |
+| `not_applicable` | 入力・DBの制約で対象外 | SourceRecordに理由を記録 |
+| `truncated` | API返却上限で全件でない | 未返却と区別 |
+| `error` | 呼び出し失敗 | エラーSourceRecordを作成 |
+
+`empty`、`not_returned`、`not_annotated`を`contradicts`へ変換しない。
+
+## 18. 既存実装からの移行
+
+### 18.1 削除・変更する項目
+
+- `clinicalText`をStateから削除する。
+- `use_absentHPO`によるAbsent HPOの任意利用を終了し、Absent HPOを常に検索コンテキストへ含める。
+- `togomcp_search_plans.need_more_search`を検索制御に使用しない。
+- `candidate_admission_decisions`による新規疾患専用の候補型を廃止する。
+- `check_gene`を候補検索アクションから削除する。
+- Reflection後にBeginningへ戻る検索継続分岐を削除する。
+
+### 18.2 追加する項目
+
+- `all_results`と`completeness`を持つToolResponseRecord
+- DiseaseRankingIndex
+- 固定検索アクションのSearchSession
+- SourceRecordのURI、エントリー、エンドポイント、ハッシュ
+- EvidenceRecordの支持・矛盾・不明の極性
+- ReflectionAssessment
+- `ranking_mode`
+- 最終GeneAnnotationRecord
+
+## 19. 検証項目
+
+最低限、以下をテストする。
+
+1. `clinical_text`なしで入力を受け付ける。
+2. `sex`と`onset`が未指定の場合に`unknown`になる。
+3. 各初期ツールのTop5が候補集合へ統合される。
+4. Top5外を含む全レスポンスが保存される。
+5. 新規疾患が初期全レスポンスと照合される。
+6. 新規疾患が通常候補と同じ固定検索を受ける。
+7. 新規疾患からの二段階目の候補探索が実行されない。
+8. Absent HPOの未注釈が矛盾扱いされない。
+9. Reflectionが検索後に一度実行され、3値を返す。
+10. `ranking_mode=llm`と`ranking_mode=tool_average`が切り替わる。
+11. 最終疾患ごとの原因候補遺伝子取得が並列実行される。
+12. 全EvidenceがSourceRecordへ到達できる。
+13. すべての並列結果を同一入力で決定的に統合できる。

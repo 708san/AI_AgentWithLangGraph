@@ -86,7 +86,7 @@ def merge_ranked_disease_candidates(state: State) -> list[MergedDiseaseCandidate
 
     zeroshot_output = state.get("zeroShotResult")
     if zeroshot_output and getattr(zeroshot_output, "ans", None):
-        for index, result in enumerate(zeroshot_output.ans, 1):
+        for index, result in enumerate(zeroshot_output.ans[:5], 1):
             _add_candidate(
                 merged,
                 result.disease_name,
