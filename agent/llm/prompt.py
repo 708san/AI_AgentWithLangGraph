@@ -147,6 +147,7 @@ Sex: {sex}
 ## Output requirements
 - Return only the structured output required by the supplied schema, with exactly five entries in ans.
 - Order entries from most to least likely. Assign each rank from 1 through 5 exactly once, in ascending array order; rank 1 is the strongest candidate.
+- For each candidate, provide selection_reason: a concise explanation (at most two sentences) grounded in the supplied patient findings, mentioning a major explicit contradiction or uncertainty when relevant. This is a summary of the basis for selection for logging only; it will not be used by downstream diagnostic steps.
 - Follow the field descriptions for OMIM disease-name conventions and identifier formatting. Do not add Markdown styling, commentary, citations, or fields outside the schema.
 - Use JSON null for an unknown OMIM identifier. Do not invent an identifier or substitute a gene's OMIM identifier for the disease identifier.
 - Disease names and identifiers in schema examples illustrate formatting only; they are not suggested diagnoses for this patient.""",

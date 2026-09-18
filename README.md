@@ -52,6 +52,8 @@ If you set enable_log=True when creating the pipeline, all node results and prom
 The log file name will be unique and timestamped (e.g., agent_log_20250918_123456.log).
 Prompts used for LLM calls are also included in the log for traceability.
 
+Logs also include the selection reason for each Zero-shot candidate. These reasons are for logging only and are not used in subsequent diagnosis steps.
+
 ---
 ## Notes
 You must set the following in your .env file (project root):

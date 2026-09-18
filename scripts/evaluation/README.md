@@ -24,6 +24,7 @@ python -m scripts.evaluation.run_tentative \
 - `--use-absent-hpo`: 陰性所見を使用（既定は既存処理に合わせて無効）。
 - `--output-dir PATH`: 新規実験ディレクトリ。既存ディレクトリは上書きせずエラー。
 - `--no-images`: 暫定診断を画像なし条件で実行。
+- `--enable-log`: 暫定診断評価で通常ログ（Zero-shotの選定理由を含む）を `log/<実験ディレクトリ名>/repeat_NNN/<case_id>.log` に保存。評価用JSONL Traceとは別。
 - `--image-root PATH`: ベンチマーク内の相対画像パスの基準。省略時は正解ファイルの親・その親・プロジェクトルートから一意に解決する。今回配布されたフォルダ構成は自動解決可能。
 
 Zero-shot評価ではHPOラベル変換後に `createZeroshot()` を呼び、続けて本番の `normalize_zeroshot_results()` を実行します。正規化前を `zeroShotRaw`、正規化後を `zeroShotResult` として保存し、両方を独立に採点します。正規化は候補を直接変更するため、実行前の出力をコピーしてディスクに保存します。正規化に失敗しても、この出力は残ります。PubCaseFinder・画像API・HPO類似検索・Web検索・暫定推論は呼びません。

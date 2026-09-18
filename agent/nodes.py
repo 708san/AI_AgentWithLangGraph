@@ -159,11 +159,13 @@ def createZeroShotNode(state: State):
     if state.get("zeroShotResult") is not None:
         return {"zeroShotResult": state["zeroShotResult"]}
     if hpo_dict:
-        # createZeroshotが(result, prompt)を返すように修正
-        result, prompt = createZeroshot(state)
+        reasoning = {}
+        result, prompt = createZeroshot(state, reasoning_sink=reasoning.update)
         if result:
-            # promptはstateに保存しないので、ここでは返さない
-            return {"zeroShotResult": result, "prompt": prompt}
+            # The pipeline wrapper logs the envelope, then forwards only result
+            # to LangGraph. Reasons stay out of State and subsequent prompts.
+            return {"result": {"zeroShotResult": result}, "prompt": prompt,
+                    "zeroShotReasoning": reasoning}
     return {"zeroShotResult": None}
 
 @profile_node

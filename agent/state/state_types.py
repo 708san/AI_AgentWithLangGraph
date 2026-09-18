@@ -82,6 +82,20 @@ class ZeroShotOutput(BaseModel):
     ans: List[ZeroShotFormat]
 
 
+class ZeroShotReasonedCandidate(ZeroShotFormat):
+    selection_reason: str = Field(..., min_length=1, description=(
+        "A concise explanation, at most two sentences, of why this candidate was selected. "
+        "Refer to the supplied patient findings supporting the candidate; mention a major "
+        "explicit contradiction or uncertainty when relevant. Do not invent patient findings "
+        "or claim external verification. This explanation is for logging only."
+    ))
+
+
+class ZeroShotReasonedOutput(BaseModel):
+    # LLM response only; reasons must not enter State.zeroShotResult.
+    ans: List[ZeroShotReasonedCandidate]
+
+
 # --- Pydantic Models for Tentative Diagnosis Output ---
 class DiagnosisFormat(BaseModel):
     disease_name: str = Field(..., description="The formal name of the most likely rare disease, derived from synthesizing multiple data sources (HPO, PubCaseFinder, ZeroShot, GestaltMatcher).")

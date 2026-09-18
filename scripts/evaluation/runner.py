@@ -94,7 +94,7 @@ def zero_shot_executor(model):
     return execute
 
 
-def tentative_executor(model):
+def tentative_executor(model, *, log_dir=None):
     from langgraph.graph import StateGraph, END
     from agent.agent_pipeline import RareDiseaseDiagnosisPipeline, NODE_DEFINITIONS, EDGES
     from agent.state.state_types import State
@@ -109,6 +109,13 @@ def tentative_executor(model):
                     continue
                 def wrapped(state, fn=function, node=name):
                     result = fn(state)
+                    # Log the full envelope before stripping log-only reasons.
+                    with lock:
+                        self._log(node, result)
+                    # Production nodes may return a logging envelope. Evaluation
+                    # keeps its prompt but does not persist log-only reasoning.
+                    if isinstance(result, dict) and "result" in result:
+                        result = {**result["result"], "prompt": result.get("prompt")}
                     self.capture(node, result)
                     return result
                 builder.add_node(name, wrapped)
@@ -121,9 +128,16 @@ def tentative_executor(model):
             return builder.compile()
 
     pipeline = TentativePipeline(model_name=model, enable_log=False)
+    pipeline.enable_log = log_dir is not None
     lock = Lock()
 
     def execute(inputs, record, checkpoint):
+        if log_dir is not None:
+            pipeline.log_dir = str(log_dir / f"repeat_{record['repeat']:03d}")
+            pipeline.log_filename = f"{inputs['patient_id']}.log"
+            pipeline.logfile_path = pipeline._get_logfile_path()
+            pipeline._write_graph_ascii_to_log()
+
         def capture(node, result):
             with lock:
                 snapshot = serialize(result)
@@ -158,10 +172,14 @@ def main(mode, argv=None):
     parser.add_argument("--use-absent-hpo", action="store_true")
     parser.add_argument("--image-root", type=Path)
     parser.add_argument("--no-images", action="store_true")
+    parser.add_argument("--enable-log", action="store_true",
+                        help="Save normal pipeline logs, including Zero-shot reasons, under log/ (tentative mode only)")
     parser.add_argument("--dry-run", action="store_true", help="Validate case inputs without importing providers or calling APIs")
     args = parser.parse_args(argv)
     if args.repeats < 1 or any(k < 1 for k in args.ks):
         parser.error("repeats and ks must be positive")
+    if args.enable_log and mode != "tentative":
+        parser.error("--enable-log is supported by run_tentative only")
     try:
         cases = load_cases(args.benchmark)
         inputs = prepare(cases, args, mode)
@@ -175,10 +193,17 @@ def main(mode, argv=None):
         directory.mkdir(parents=True, exist_ok=False)
     except FileExistsError:
         parser.error(f"Output directory already exists: {directory}")
+    log_directory = ROOT / "log" / directory.name if args.enable_log else None
+    if log_directory is not None:
+        try:
+            log_directory.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            parser.error(f"Log directory already exists: {log_directory}")
     metadata = {"mode": mode, "model": args.model, "python": platform.python_version(),
         "benchmark_sha256": hashlib.sha256(args.benchmark.read_bytes()).hexdigest(),
         "benchmark": str(args.benchmark.resolve()), "repeats": args.repeats,
         "use_absent_hpo": args.use_absent_hpo, "no_images": args.no_images,
+        "enable_log": args.enable_log, "log_directory": str(log_directory) if log_directory else None,
         "source_hashes": {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest()
                           for p in (ROOT / "agent").rglob("*.py")}}
     save(directory / "metadata.json", metadata)
@@ -187,7 +212,12 @@ def main(mode, argv=None):
     failed = False
     try:
         try:
-            execute = zero_shot_executor(args.model) if mode == "zero-shot" else tentative_executor(args.model)
+            if mode == "zero-shot":
+                execute = zero_shot_executor(args.model)
+            elif args.enable_log:
+                execute = tentative_executor(args.model, log_dir=log_directory)
+            else:
+                execute = tentative_executor(args.model)
         except Exception as exc:
             save(directory / "initialization_error.json", {"status": "error", "error": f"{type(exc).__name__}: {exc}"})
             print(f"Initialization failed: {type(exc).__name__}: {exc}")
