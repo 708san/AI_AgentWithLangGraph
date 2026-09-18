@@ -24,6 +24,7 @@ python -m scripts.evaluation.run_tentative \
 - `--use-absent-hpo`: 陰性所見を使用（既定は既存処理に合わせて無効）。
 - `--output-dir PATH`: 新規実験ディレクトリ。既存ディレクトリは上書きせずエラー。
 - `--no-images`: 暫定診断を画像なし条件で実行。
+- `--enable-log`: 暫定診断評価で通常ログ（Zero-shotの選定理由を含む）を `log/<実験ディレクトリ名>/repeat_NNN/<case_id>.log` に保存。評価用JSONL Traceとは別。
 - `--image-root PATH`: ベンチマーク内の相対画像パスの基準。省略時は正解ファイルの親・その親・プロジェクトルートから一意に解決する。今回配布されたフォルダ構成は自動解決可能。
 
 Zero-shot評価ではHPOラベル変換後に `createZeroshot()` を呼び、続けて本番の `normalize_zeroshot_results()` を実行します。正規化前を `zeroShotRaw`、正規化後を `zeroShotResult` として保存し、両方を独立に採点します。正規化は候補を直接変更するため、実行前の出力をコピーしてディスクに保存します。正規化に失敗しても、この出力は残ります。PubCaseFinder・画像API・HPO類似検索・Web検索・暫定推論は呼びません。
@@ -44,7 +45,13 @@ Zero-shot評価にも `AZURE_DBCLS_JAPANEAST` と `agent/data/DataForOmimMapping
   repeat_002/...
 ```
 
-暫定診断用は `zeroShotRaw` / `zeroShotResult` / `tentativeRaw` / `tentativeDiagnosis` の4段階を採点します。`tentativeRaw`はテキスト解析後・病名正規化前です（解析前のLLM応答テキストではありません）。ノード出力も随時保存し、後続で失敗しても完了した段階を残します。症例のエラー後は次の症例へ進み、失敗症例を含むレポートを保存します。初期化失敗は `initialization_error.json` に記録して終了します。
+暫定診断用は `zeroShotRaw` / `zeroShotResult` / `tentativeRaw` / `tentativeDiagnosis` の4段階を採点します。`tentativeRaw`は構造化出力の解析後・病名正規化前です（解析前のLLM応答テキストではありません）。従来の実験では同じキーに正規表現で解析した結果が保存されています。ノード出力も随時保存し、後続で失敗しても完了した段階を残します。症例のエラー後は次の症例へ進み、失敗症例を含むレポートを保存します。初期化失敗は `initialization_error.json` に記録して終了します。
+
+暫定診断は専用の`TentativeDiagnosisOutput`を`method="json_schema", strict=True, include_raw=True`で指定します。GestaltMatcherあり／なしの両方で同じスキーマを使用します。共通の`DiagnosisOutput`を継承し、暫定診断の各候補だけに必須の`candidate_id`を追加しています。最終診断のスキーマは変更しません。
+
+入力候補の順番に`candidate_0001`などを割り当て、初回・再生成で同じIDを使います（異なる症例や実行間の恒久IDではありません）。出力IDの不足・候補外ID・重複を照合し、不一致なら元のプロンプト＋初回の全出力＋照合結果＋修正指示で全候補を1回だけ再生成します。順位・病名・OMIMは照合条件にせず、病名・OMIMを入力値で上書きしません。再生成後も不一致なら警告を出し、最後の構造化出力をそのまま返します。空リストも保持します。構造化解析失敗・拒否・通信例外は別のエラーであり、旧パーサーへのフォールバックはありません。既存のAPI/content-filter再試行と、候補照合による再生成は別です。
+
+評価トレースの`function=record_diagnosis_attempt, event=call`が各試行の記録です。`data.attempt`は1（初回）または2（再生成）、`input_candidates`にはID・入力病名・入力OMIM、`output`にはその回の全出力、`validation`には`matched`・`missing_ids`・`unexpected_ids`・`duplicate_ids`を保存します。`prompt`と取得できた`llm_response`も記録します。入力と出力の病名・OMIMはここから確認できますが、自動的な正誤判定は行いません。通常ログには照合結果を出し、症例の全文保存はevaluationのJSONLで行います。予測JSONの`tentativeRaw`は最後の試行の結果です。後続の病名正規化は従来どおり実行されるため、そこでの候補除外とは区別してください。
 
 正解ラベルは採点のみで使用し、推論関数には患者情報をホワイトリストで渡します。`--repeats`は独立した繰り返し実行で、各回を別々に採点します。複数回の平均・分散の集計は現在含みません。
 
@@ -156,7 +163,7 @@ python -m unittest discover -s tests -p 'test_evaluation*.py' -v
 両方の実行プログラムで、症例・反復ごとに `repeat_001/traces/<case_id>.jsonl` を追加保存します。既存の予測・採点ファイルとは別の観測記録です。実行コマンドの変更は不要です。
 
 - **Zero-shot推論**：入力、プロンプト、構造化された戻り値。これはSDKによる構造化解析後の結果であり、解析前のAPI応答そのものではありません。SDK内部の解析失敗は関数の例外として記録します。
-- **暫定推論の正規表現解析**：`parse_diagnosis_text` の `call` に解析前の全文 `data.text` とプロンプトを保存します。`parse_block_check` にブロック本文と各フィールドのマッチ有無、`return` に抽出結果を保存します。ブロック区切り自体の不一致は全文と `case_blocks` から確認できます。`tentativeRaw` は従来どおり「正規表現解析後・正規化前」であり、この全文とは異なります。
+- **暫定診断の構造化出力**：`createDiagnosis`の`return`または`exception`に、取得できた生応答を`data.llm_response`、プロンプトを`data.prompt`として保存します。LangChainが返した解析エラーは`data.parsing_error`に残します。SDK内部で応答返却前に例外となる場合は、生応答が取得できず例外のみが残ることがあります。`tentativeRaw`は構造化解析後・病名正規化前の結果です。旧`parse_diagnosis_text`は保存済みテキスト用に残していますが、新規の暫定診断は呼び出しません。旧形式のトレースでは`parse_block_check`で正規表現の取得失敗を確認できます。
 - **Zero-shot推論の正規化**：入力候補、加工した検索語、OMIM検索の戻り値、類似度、判定直前の候補と既出ID集合、最終候補を保存します。`normalization_decision_input` で低類似度と重複の条件を確認できます。Zero-shot評価・暫定推論までの評価の両方で記録されます。
 - **暫定推論に渡す候補統合**：各 `_add_candidate` の元の疾患名・ID・情報源と、統合後のキー・候補、統合関数の最終出力を保存します。空の疾患名による除外や同じIDへの統合を追跡できます。
 - **暫定推論の候補照合**：`createDiagnosis` の入力候補とプロンプト、解析後の出力を保存します。入力にないIDの出現や候補の欠落を比較する材料です。候補制限や自動修正は行いません。

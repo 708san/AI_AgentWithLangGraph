@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 TARGETS = {
     "ZeroShot.py": {"createZeroshot"},
-    "diagnosis.py": {"createDiagnosis", "parse_diagnosis_text"},
+    "diagnosis.py": {"createDiagnosis", "parse_diagnosis_text", "record_diagnosis_attempt"},
     "diseaseNormalize.py": {"normalize_zeroshot_results", "disease_normalize",
         "diseaseNormalizeForDiagnosis", "normalize_pcf_results", "normalize_gestalt_results"},
     "rankingMerge.py": {"merge_ranked_disease_candidates", "_add_candidate"},
@@ -89,6 +89,9 @@ class EvaluationTrace:
             if not capture:
                 return self.observe
             data = {k: snapshot(values[k]) for k in FIELDS if k in values}
+            if name == "record_diagnosis_attempt":
+                data.update({k: snapshot(values[k]) for k in
+                             ("attempt", "input_candidates", "output", "validation") if k in values})
             if event == "call" and isinstance(values.get("state"), dict):
                 data["input_state"] = {k: snapshot(v) for k, v in values["state"].items() if k in STATE_FIELDS}
             if event == "return":
@@ -100,6 +103,9 @@ class EvaluationTrace:
                 data["llm_response"] = {k: snapshot(getattr(response, k, None)) for k in ("content", "id", "response_metadata", "usage_metadata")}
             if event == "exception":
                 data["exception"] = {"type": arg[0].__name__, "message": str(arg[1])}
+            if name in {"createDiagnosis", "record_diagnosis_attempt"} and values.get("parsing_error") is not None:
+                error = values["parsing_error"]
+                data["parsing_error"] = {"type": type(error).__name__, "message": str(error)}
             # A parser call is recorded before any parsing: retain its caller's
             # prompt and response metadata even when parsing subsequently fails.
             if name == "parse_diagnosis_text" and event == "call":

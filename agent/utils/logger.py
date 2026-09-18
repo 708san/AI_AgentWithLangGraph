@@ -161,6 +161,12 @@ def log_node_result(logfile_path: str, node_name: str, result: Any):
                 f.write("Result:\n")
             
             _format_and_write_result(f, core_result)
+            if node_name == "createZeroShotNode" and isinstance(original_result, dict):
+                reasoning = original_result.get("zeroShotReasoning")
+                if reasoning is not None:
+                    f.write("\n----- Zero-shot Selection Reasons (before normalization) -----\n")
+                    f.write(json.dumps(reasoning, ensure_ascii=False, indent=2))
+                    f.write("\n----- End Zero-shot Selection Reasons -----\n")
 
         except Exception as e:
             f.write(f"ログ整形エラー: {e}\n")
