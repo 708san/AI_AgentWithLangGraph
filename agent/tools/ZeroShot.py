@@ -5,10 +5,18 @@ from ..llm.prompt import prompt_dict, build_prompt
 
 def createZeroshot(state: State, *, reasoning_sink=None):
     """
-    hpo_dictを使ってZero-Shot診断プロンプトを作成し、LLMに投げる。
-    use_absentHPO=True の場合のみ、明示的に観察されなかったHPOもプロンプトへ含める。
-    理由付き応答の独立したスナップショットをreasoning_sinkへ渡す。
-    戻り値は理由を含まない従来のZeroShotOutputとprompt。
+    Generate reasoned candidates, returning (ZeroShotOutput, prompt) without reasons.
+
+    Uses present HPO labels, onset and sex; explicit absent HPOs are included only
+    when use_absentHPO=True. The LLM always generates ZeroShotReasonedOutput, even
+    without a reasoning_sink. If supplied, the callback receives an independent
+    model_dump snapshot before normalization; it must not forward reasons to State.
+    Returned candidates are new three-field objects, so downstream in-place
+    normalization cannot alter the reason snapshot. This function does not normalize.
+
+    Missing HPOs/LLM return (None, None); a None LLM result returns (None, prompt).
+    Provider, parsing and callback exceptions propagate. Cache reuse is handled
+    by createZeroShotNode, not here. See scripts/evaluation/README.md for persistence.
     """
     hpo_dict = state.get("hpoDict", {})
     absent_hpo_dict = state.get("absentHpoDict", {})

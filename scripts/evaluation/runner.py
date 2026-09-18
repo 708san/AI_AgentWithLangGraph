@@ -1,4 +1,12 @@
-"""Benchmark execution; provider imports are delayed until after validation."""
+"""Run inference with external APIs, checkpoint predictions, then score each repeat.
+
+Zero-shot mode stops after its normalization; tentative mode reuses the production
+graph through tentative normalization, excluding reflection/final diagnosis.
+Providers are imported only after input validation and the --dry-run exit.
+Normal logs optionally preserve Zero-shot reasons; predictions/State do not.
+JSONL observation traces are independent of normal logging. No resume is supported.
+See README.md in this directory for stage names, scoring and failure semantics.
+"""
 from __future__ import annotations
 
 import argparse
@@ -46,6 +54,11 @@ def resolve_image(value, benchmark, image_root=None):
 
 
 def prepare(cases, args, mode):
+    """Whitelist inference inputs; never pass expected_output to a provider.
+
+    Use case_id as the runtime patient ID. Resolve images only in tentative mode
+    with images enabled; absent lists require use_absent_hpo to affect prompts.
+    """
     inputs = []
     for case in cases:
         data = case.get("input", {})
@@ -64,6 +77,11 @@ def prepare(cases, args, mode):
 
 
 def zero_shot_executor(model):
+    """Run Zero-shot then normalization, checkpointing an independent raw snapshot.
+
+    No ranking/search/image tools run. The LLM generates selection reasons, but
+    this executor supplies no reasoning sink and does not persist those reasons.
+    """
     # Do not import agent.nodes or agent_pipeline: they initialize other tools.
     from agent.llm.azure_llm_instance import get_llm_instance
     from agent.tools.ZeroShot import createZeroshot
@@ -95,6 +113,12 @@ def zero_shot_executor(model):
 
 
 def tentative_executor(model, *, log_dir=None):
+    """Execute the production graph prefix, preserving joins and stage snapshots.
+
+    Log the Zero-shot envelope before unwrapping it; never capture log-only reasons
+    in predictions or pass them to graph State. Optional normal logs are separated
+    by repeat/case. This reruns upstream tools; it is not frozen-input ranking replay.
+    """
     from langgraph.graph import StateGraph, END
     from agent.agent_pipeline import RareDiseaseDiagnosisPipeline, NODE_DEFINITIONS, EDGES
     from agent.state.state_types import State

@@ -121,6 +121,10 @@ run(
 
 ### 3.2 Pydantic モデル
 
+Zero-shotのLLM応答専用モデルは`ZeroShotReasonedCandidate`（`ZeroShotFormat`に必須の`selection_reason`を追加）と`ZeroShotReasonedOutput`です。Stateには理由を除いた`ZeroShotOutput`だけを渡します。
+
+暫定診断の実際の生成モデルは`TentativeDiagnosisCandidate`（`DiagnosisFormat`に必須の`candidate_id`を追加）と`TentativeDiagnosisOutput`です。後者は`DiagnosisOutput`を継承し、Stateの型注釈との互換性を維持します。最終診断は従来の`DiagnosisOutput`のままです。フィールドdescriptionの書式・文数指示は、すべてがPydanticの検証制約になっているわけではありません。
+
 | モデル | 内容 |
 |---|---|
 | `ZeroShotFormat` | `disease_name`, `rank`, `OMIM_id` |
@@ -150,17 +154,17 @@ run(
 | `NormalizeGestaltMatcherNode` | `GestaltMatcher` | `GestaltMatcher` | OMIM ID に基づき `syndrome_name` を正規化 |
 | `createHPODictNode` | `hpoList` | `hpoDict` | `phenotype_mapping.json` で HPO ID をラベル化 |
 | `createAbsentHPODictNode` | `absentHpoList` | `absentHpoDict` | 明示的に観察されなかった HPO ID をラベル化 |
-| `createZeroShotNode` | `hpoDict`, `absentHpoDict`, `use_absentHPO`, `onset`, `sex`, `llm` | `zeroShotResult`, `prompt` | LLM 構造化出力で候補疾患を生成。`use_absentHPO=True` の場合のみ absent HPO を使用 |
+| `createZeroShotNode` | `hpoDict`, `absentHpoDict`, `use_absentHPO`, `onset`, `sex`, `llm` | `result.zeroShotResult`, `prompt`, `zeroShotReasoning`（新規生成時のログ用ラッパー） | 理由付き構造化出力を生成し、グラフには理由を除いた`result`のみ渡す。キャッシュ時は`zeroShotResult`のみ返す |
 | `NormalizeZeroShotNode` | `zeroShotResult` | `zeroShotResult` | 疾患名を embedding 正規化し、類似度 0.70 未満と重複 OMIM を除外 |
 | `HPOwebSearchNode` | `hpoDict`, `llm` | `webresources` | HPO から DDGS 検索クエリを生成し、検索結果スニペットを要約 |
 | `DiseaseSearchWithHPONode` | `hpoDict`, `depth` | `phenotypeSearchResult` | HPO ラベルを embedding 化し、FAISS で類似 OMIM 疾患を検索 |
 | `mergeCandidateResultsNode` | `pubCaseFinder`, `zeroShotResult`, `GestaltMatcher`, `phenotypeSearchResult` | `mergedDiseaseCandidates` | 診断前に各ツールの順位付き疾患候補を疾患単位で統合し、どのツールで何位だったかを保持 |
-| `createDiagnosisNode` | `mergedDiseaseCandidates`, HPO, Web, LLM | `tentativeDiagnosis`, `prompt` | 統合済み候補表と患者情報・Web 結果を使って暫定診断を生成。`use_absentHPO=True` の場合のみ absent HPO を使用 |
-| `diseaseNormalizeNode` | `tentativeDiagnosis` | `tentativeDiagnosis` | 暫定診断疾患名を embedding 正規化し、類似度 0.75 未満を除外 |
+| `createDiagnosisNode` | `mergedDiseaseCandidates`, HPO, Web, LLM | `tentativeDiagnosis`, `prompt` | 構造化出力の候補IDを照合し、不一致時は1回再生成。最後の解析済み出力を保持。5.9節参照 |
+| `diseaseNormalizeNode` | `tentativeDiagnosis` | `tentativeDiagnosis` | 既存OMIM番号を優先し、番号を抽出できない場合のみ病名embedding検索と類似度0.75判定 |
 | `diseaseSearchNode` | `tentativeDiagnosis`, `depth`, `llm`, `memory` | `memory` | 各暫定疾患について Wikipedia/PubMed を並列検索し要約 |
 | `reflectionNode` | `tentativeDiagnosis`, `hpoDict`, `absentHpoDict`, `use_absentHPO`, `memory`, `llm` | `reflection`, `prompt` | 各暫定疾患を LLM で妥当性評価。最大 10 スレッドで並列実行。`use_absentHPO=True` の場合のみ absent HPO を使用 |
 | `finalDiagnosisNode` | `tentativeDiagnosis`, `reflection`, HPO, `llm` | `finalDiagnosis`, `prompt` | reflection までの情報を統合して最終診断を生成。`use_absentHPO=True` の場合のみ absent HPO を使用 |
-| `diseaseNormalizeForFinalNode` | `finalDiagnosis` | `finalDiagnosis` | 最終診断疾患名を embedding 正規化し、類似度 0.75 未満を除外 |
+| `diseaseNormalizeForFinalNode` | `finalDiagnosis` | `finalDiagnosis` | 暫定診断と同じ既存OMIM優先の正規化関数を使用（5.5節） |
 
 ### 4.2 エッジ
 
@@ -327,12 +331,17 @@ run(
 
 - present HPO ラベル、発症時期、性別を `zero-shot-diagnosis-prompt` に埋め込む。
 - `use_absentHPO=True` の場合のみ、明示的に観察されなかった HPO ラベルも absent HPO として埋め込む。
-- `AzureOpenAIWrapper.get_structured_llm(ZeroShotOutput)` により構造化出力を要求する。
+- `build_prompt`は陰性HPO欄を実際に表示する条件と同じ条件で、その扱いの説明を挿入する。未記載は不明として扱い、現在の年齢と発症時期を区別する。
+- 臨床的適合性から5候補を順位付けし、OMIM病名表記・接頭辞なし6桁ID・未知IDのJSON nullを指示する。病名・IDのdescriptionに例を示す。例は候補の推薦ではない。
+- `AzureOpenAIWrapper.get_structured_llm(ZeroShotReasonedOutput)` により、各候補に最大2文の`selection_reason`を含む構造化出力を要求する。
+- 理由生成はログ有効・無効によらず行う。`reasoning_sink`コールバックがあれば理由付き応答の独立スナップショットを渡し、戻り値用には病名・順位・OMIMだけの新しい`ZeroShotOutput`を作る。
+- `createZeroShotNode`は理由をログ用ラッパーに置く。グラフのラッパーはログを書いた後`result`のみStateへ渡す。理由は後続の候補統合・暫定診断入力に含めない。
+- キャッシュ済み`zeroShotResult`をノードで再利用するとき、理由を後付け生成しない。理由生成の追加はLLMプロンプト・スキーマも変更するため、出力精度が不変であるとは限らない。
 
 出力:
 
-- `ZeroShotOutput`
-- 実行プロンプト文字列
+- `(ZeroShotOutput, 実行プロンプト文字列)`。理由は戻り値ではなく上記コールバックへ渡す。
+- 理由の保存先と評価JSON/Traceとの差は[評価README](../scripts/evaluation/README.md)を参照。
 
 ### 5.5 疾患名正規化
 
@@ -357,8 +366,9 @@ run(
 - Azure OpenAI `text-embedding-3-large` で疾患名を embedding 化する。
 - FAISS インデックスで最近傍 OMIM ラベルを検索する。
 - `omim_mapping.json` にある正式病名へ置換する。
-- `zeroShotResult` は類似度 0.70 以上のみ採用し、OMIM ID 重複を除去する。
-- `DiagnosisOutput` は類似度 0.75 以上のみ採用する。
+- `zeroShotResult`はLLMの既存IDを優先せず病名で検索し、類似度0.70以上のみ採用して検索先OMIM IDの重複を除去する。病名・IDを置換するため、推論時の正しいIDが別IDへ変わることもある。
+- `DiagnosisOutput`は既存IDからOMIM番号を抽出できれば保持し、辞書にあれば正式病名へ置換する。この経路ではembedding検索を行わず、辞書未登録だけでは除外しない。番号を抽出できない候補のみ病名で検索し、類似度0.75以上を採用する。
+- 候補オブジェクトと`ans`を直接変更する。正規化前の評価・ログ用スナップショットは実行前に独立して保存する。これらの正規化規則は今回のLLMプロンプト・構造化出力・理由ログの変更対象ではない。
 
 出力:
 
@@ -491,14 +501,18 @@ List[PhenotypeSearchFormat]
 - `use_absentHPO=True` の場合のみ、明示的に観察されなかった HPO ラベルを診断プロンプトへ含める。
 - GestaltMatcher 結果の有無により `diagnosis_prompt` または `diagnosis_prompt_no_gestalt` を選択する。
 - プロンプトでは、個別ツールの生リストではなく統合済み候補表を authoritative candidate list として扱う。
-- LLM に通常テキスト出力を要求する。
-- `===CASE_START===` / `===CASE_END===` と `KEY::VALUE` 形式を正規表現でパースする。
-- references セクションを `DiagnosisOutput.reference` に格納する。
+- 入力順に`candidate_0001`等のIDを割り当て、両プロンプトとも`TentativeDiagnosisOutput`を`with_structured_output(method="json_schema", strict=True, include_raw=True)`で要求する。
+- 出力IDの不足・候補外ID・重複だけを検証する。IDは呼び出し内で有効で、順位とは別。病名・OMIM・順位の一致や医学的正しさは検証せず、入力値で上書きしない。
+- 不一致時は元プロンプト、初回全出力、照合結果、修正指示を追加して1回だけ全候補を再生成する。再生成後も不一致なら警告し、最後の解析済み出力を保持する。空リストも保持する。
+- 構造化解析失敗・拒否・通信例外は伝播する。ID不一致の再生成とは別で、旧パーサーにフォールバックしない。既存のcontent-filter/API再試行回数とも区別する。
+- `record_diagnosis_attempt`に各試行を渡し、評価Traceで初回・再生成の入力、出力、プロンプト、生応答、照合結果、取得できた解析エラーを記録する。
+- `description`の支持理由（最大2文）と`reference`は構造化出力内に保持する。反証理由を追加する変更は含まない。
+- `parse_diagnosis_text`は旧保存テキスト用に残すが、新規の暫定診断では呼ばない。
 
 出力:
 
-- `DiagnosisOutput`
-- 実行プロンプト文字列
+- `(TentativeDiagnosisOutput, 実行プロンプト文字列)`。再生成した場合は最後の試行の結果。
+- 後段の正規化は別処理であり、候補IDが一致しても正規化後の候補数維持までは保証しない。
 
 ### 5.10 疾患知識検索
 
@@ -650,11 +664,13 @@ List[PhenotypeSearchFormat]
 
 `enable_log=True` の場合、各ノードの結果を `log/` 配下に追記する。結果が Pydantic モデルの場合は JSON 形式で整形する。ノード結果に `prompt` が含まれる場合は、プロンプトも記録する。
 
+新規Zero-shot生成時の理由付きスナップショットは`Zero-shot Selection Reasons (before normalization)`節に保存する。通常ログを無効にしても理由生成自体は行うが、Stateや結果JSONには理由を渡さない。暫定診断の各生成試行の全文は通常ノードログではなく評価用JSONL Traceで確認する。
+
 ### 8.2 結果 JSON 保存
 
 対象ファイル: `agent/utils/result_saver.py`
 
-`@save_result(node_name)` が付与されたノードは、戻り値を `res/{patient_id}.json` に保存する。
+`@save_result(node_name)` が付与されたノードは、戻り値を `res/{patient_id}.json` に保存する。`AGENT_RESULT_DIR`があれば出力先をそのディレクトリへ切り替える。評価ランナーはこれを反復ごとの`node_results/`に設定する。
 
 処理仕様:
 
@@ -670,6 +686,12 @@ List[PhenotypeSearchFormat]
 対象ファイル: `agent/utils/profiler.py`
 
 `@profile_node` が付与されたノードは実行時間を計測し、標準出力に `[Profile] <node>: <秒>` を表示する。`NodeProfiler.get_summary()` により集計テキストを取得できる。
+
+### 8.4 ベンチマーク評価用の保存
+
+評価実行と保存済み出力の採点については[評価README](../scripts/evaluation/README.md)を参照。`run_zero_shot`はZero-shot正規化まで、`run_tentative`は本番グラフの暫定診断正規化までを実行し、Reflection・最終診断は実行しない。両者は外部APIを使う。保存済み出力の`evaluate`および`--dry-run`はAPIを呼ばない。
+
+反復・症例ごとに予測JSON、観測用Trace、採点結果を保存する。正規化前のスナップショットや暫定診断の各生成試行は本番の`res/`保存だけでは揃わない。通常ログの有効化は観測Traceの有効化とは別で、Zero-shot理由の保存には暫定診断ランナーの`--enable-log`が必要。
 
 ## 9. 外部依存・環境変数
 

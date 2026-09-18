@@ -11,7 +11,11 @@ logger = logging.getLogger(__name__)
 
 
 def validate_candidate_ids(input_candidates, output):
-    """Check identity coverage only; names, OMIM IDs and ranks are not compared."""
+    """Check missing, unexpected and duplicate IDs within one candidate-ranking call.
+
+    A match only proves ID coverage. Names, OMIM IDs, ranks and clinical validity
+    are not compared, and the output is never filtered or rewritten here.
+    """
     expected = [item["candidate_id"] for item in input_candidates]
     counts = Counter(item.candidate_id for item in output.ans)
     missing = [key for key in expected if key not in counts]
@@ -91,6 +95,13 @@ def createDiagnosis(state: State) -> tuple[Optional[DiagnosisOutput], Optional[s
     to generate a structured tentative diagnosis. Returns (output, prompt).
     Retry candidate-ID mismatches once; retain the last parsed result even if
     incomplete or empty. Invalid/refused responses still raise parsing errors.
+
+    Both GestaltMatcher prompt variants use TentativeDiagnosisOutput with strict
+    JSON schema. IDs are local to this call and stable across its two attempts.
+    Names and OMIM IDs are logged, not checked against or replaced by input values.
+    record_diagnosis_attempt exposes each attempt to evaluation tracing; the return
+    tuple contains only the final parsed output and its prompt. Normalization is
+    a later step. Content-filter/provider retries are separate from regeneration.
     """
     hpo_list = list(state.get("hpoDict", {}).values())
     use_absent_hpo = state.get("use_absentHPO", False)

@@ -154,6 +154,12 @@ def createAbsentHPODictNode(state: State):
 
 @profile_node
 def createZeroShotNode(state: State):
+    """Reuse cached candidates or return a logging envelope for fresh inference.
+
+    Fresh output contains result.zeroShotResult, prompt and zeroShotReasoning.
+    The graph wrapper logs the envelope and forwards only result to State.
+    Reasons are generated regardless of enable_log; cached results get no new reasons.
+    """
     print("createZeroShotNode called")
     hpo_dict = state.get("hpoDict", {})
     if state.get("zeroShotResult") is not None:
@@ -192,7 +198,10 @@ def mergeCandidateResultsNode(state: State):
 @save_result("createDiagnosisNode")
 def createDiagnosisNode(state: State):
     """
-    Gathers all preliminary reports and generates a tentative diagnosis by synthesizing them.
+    Return the last structured candidate ranking and prompt before normalization.
+
+    createDiagnosis validates candidate IDs and may regenerate once. Remaining
+    mismatches are retained; the node does not enforce clinical or OMIM correctness.
     """
     print("createDiagnosisNode called")
     
