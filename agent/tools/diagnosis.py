@@ -1,12 +1,60 @@
 from typing import Optional
+import logging
+import json
+from collections import Counter
 import re
 from langchain.schema import HumanMessage
-from ..state.state_types import State, DiagnosisOutput, DiagnosisFormat
+from ..state.state_types import State, DiagnosisOutput, DiagnosisFormat, TentativeDiagnosisOutput
 from ..llm.prompt import prompt_dict, build_prompt
+
+logger = logging.getLogger(__name__)
+
+
+def validate_candidate_ids(input_candidates, output):
+    """Check missing, unexpected and duplicate IDs within one candidate-ranking call.
+
+    A match only proves ID coverage. Names, OMIM IDs, ranks and clinical validity
+    are not compared, and the output is never filtered or rewritten here.
+    """
+    expected = [item["candidate_id"] for item in input_candidates]
+    counts = Counter(item.candidate_id for item in output.ans)
+    missing = [key for key in expected if key not in counts]
+    unexpected = [key for key in counts if key not in set(expected)]
+    duplicates = [key for key, count in counts.items() if count > 1]
+    return {"matched": not (missing or unexpected or duplicates),
+            "missing_ids": missing, "unexpected_ids": unexpected, "duplicate_ids": duplicates}
+
+
+def record_diagnosis_attempt(attempt, prompt, input_candidates, output, response, validation, parsing_error):
+    """EvaluationTrace records these locals immediately, before normalization.
+
+    Keep clinical payloads out of console logs; evaluation JSONL stores both
+    attempts, the original ID/name/OMIM mapping and the returned values.
+    """
+    if validation is not None:
+        logger.log(logging.INFO if validation["matched"] else logging.WARNING,
+                   "Tentative diagnosis attempt %s candidate validation: %s",
+                   attempt, validation)
+
+
+def regeneration_prompt(original_prompt, output, validation, input_candidates):
+    missing = [item for item in input_candidates if item["candidate_id"] in validation["missing_ids"]]
+    return original_prompt + "\n\n## Previous output\n" + output.model_dump_json() + (
+        "\n\n## Validation results\n" + json.dumps({**validation, "missing_candidates": missing}, ensure_ascii=False) +
+        "\n\n## Regeneration instructions\n"
+        "- Return a complete replacement containing every original input candidate exactly once. "
+        "Do not return only missing candidates. Copy candidate_id exactly; remove duplicate and unexpected IDs.\n"
+        "- Follow the same structured output schema, including disease_name and OMIM_id.\n"
+        "- This is a completeness check, not evidence of clinical likelihood. Do not promote a candidate because it was missing.\n"
+        "- Rank all candidates using the original patient information and evidence; reassess relative ranks where necessary.\n"
+        "- Treat the previous output as a draft, not an additional evidence source.\n"
+        "- Do not invent supporting findings to justify inclusion.\n"
+        "- Return the complete structured output only, without an explanation of the corrections."
+    )
 
 def parse_diagnosis_text(text: str) -> DiagnosisOutput:
     """
-    LLMのテキスト出力をパースしてDiagnosisOutputオブジェクトに変換する。
+    旧形式の保存済みテキストをDiagnosisOutputへ変換する。新規推論では使用しない。
     """
     cases = []
     # Extract cases
@@ -41,10 +89,19 @@ def parse_diagnosis_text(text: str) -> DiagnosisOutput:
     
     return DiagnosisOutput(ans=cases, reference=references)
 
-def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
+def createDiagnosis(state: State) -> tuple[Optional[DiagnosisOutput], Optional[str]]:
     """
     Integrates multiple information sources (PCF, ZeroShot, GestaltMatcher, PhenotypeSearch) 
-    to generate a tentative diagnosis.
+    to generate a structured tentative diagnosis. Returns (output, prompt).
+    Retry candidate-ID mismatches once; retain the last parsed result even if
+    incomplete or empty. Invalid/refused responses still raise parsing errors.
+
+    Both GestaltMatcher prompt variants use TentativeDiagnosisOutput with strict
+    JSON schema. IDs are local to this call and stable across its two attempts.
+    Names and OMIM IDs are logged, not checked against or replaced by input values.
+    record_diagnosis_attempt exposes each attempt to evaluation tracing; the return
+    tuple contains only the final parsed output and its prompt. Normalization is
+    a later step. Content-filter/provider retries are separate from regeneration.
     """
     hpo_list = list(state.get("hpoDict", {}).values())
     use_absent_hpo = state.get("use_absentHPO", False)
@@ -74,7 +131,11 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     merged_candidate_sources.append("Phenotype Similarity Search")
 
     candidate_lines = []
+    input_candidates = []
     for index, candidate in enumerate(merged_candidates, 1):
+        candidate_id = f"candidate_{index:04d}"
+        input_candidates.append({"candidate_id": candidate_id,
+            "disease_name": candidate.get("disease_name"), "OMIM_id": candidate.get("OMIM_id")})
         tool_parts = []
         for ranking in candidate.get("tool_rankings", []):
             rank_text = f"rank {ranking.get('rank')}" if ranking.get("rank") is not None else "rank N/A"
@@ -88,7 +149,7 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
                 f"{ranking.get('tool', 'UnknownTool')} ({rank_text}{score_text}{matched_text}{note_text})"
             )
         candidate_lines.append(
-            f"{index}. {candidate.get('disease_name', 'N/A')} "
+            f"{index}. [candidate_id: {candidate_id}] {candidate.get('disease_name', 'N/A')} "
             f"(OMIM: {candidate.get('OMIM_id') or 'N/A'}, "
             f"supported by {candidate.get('consensus_count', 0)} tool(s), "
             f"best tool rank: {candidate.get('best_rank', 'N/A')})\n"
@@ -130,24 +191,40 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     )
 
     # --- Query the LLM to get the diagnosis result ---
-    messages = [HumanMessage(content=prompt)]
-    
-    response = llm.invoke_with_content_filter_retry(
-        llm.llm,
-        messages,
-        context="Diagnosis",
+    original_prompt = prompt
+    structured_llm = llm.llm.with_structured_output(
+        TentativeDiagnosisOutput, method="json_schema", strict=True, include_raw=True,
     )
-    content = response.content
-    """
-    print("\n[DEBUG] createDiagnosis Raw Output:")
-    print(content)
-    print("[DEBUG] End of Raw Output\n")
-    """
-    
-    diagnosis_output = parse_diagnosis_text(content)
-
-    
-    if diagnosis_output and diagnosis_output.ans:
-        return (diagnosis_output, prompt)
-    
-    return None, None
+    try:
+        for attempt in (1, 2):
+            response = parsing_error = diagnosis_output = validation = None
+            try:
+                structured_response = llm.invoke_with_content_filter_retry(
+                    structured_llm, [HumanMessage(content=prompt)], context="Diagnosis",
+                )
+                response = structured_response["raw"]
+                parsing_error = structured_response["parsing_error"]
+                diagnosis_output = structured_response["parsed"]
+                if parsing_error is not None:
+                    raise ValueError("Tentative diagnosis structured output parsing failed") from parsing_error
+                if response is not None and response.additional_kwargs.get("refusal"):
+                    raise ValueError("Tentative diagnosis request was refused")
+                if not isinstance(diagnosis_output, TentativeDiagnosisOutput):
+                    raise ValueError("Tentative diagnosis returned no structured output")
+                validation = validate_candidate_ids(input_candidates, diagnosis_output)
+            except Exception as exc:
+                record_diagnosis_attempt(attempt, prompt, input_candidates, diagnosis_output,
+                                         response, validation, parsing_error or exc)
+                raise
+            record_diagnosis_attempt(attempt, prompt, input_candidates, diagnosis_output,
+                                     response, validation, None)
+            if validation["matched"] or attempt == 2:
+                if not validation["matched"]:
+                    logger.warning("Tentative diagnosis candidate mismatch remains; retaining final output")
+                return diagnosis_output, prompt
+            prompt = regeneration_prompt(original_prompt, diagnosis_output, validation, input_candidates)
+    except Exception as exc:
+        # Clinical response content belongs in local evaluation artifacts, not
+        # console logs. Preserve the exception and its cause for the caller.
+        logger.error("Tentative diagnosis structured output failed (%s)", type(exc).__name__)
+        raise

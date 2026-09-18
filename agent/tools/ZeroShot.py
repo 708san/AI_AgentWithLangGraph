@@ -1,12 +1,22 @@
 from langchain.schema import HumanMessage
-from ..state.state_types import ZeroShotOutput, State
+from ..state.state_types import ZeroShotFormat, ZeroShotOutput, ZeroShotReasonedOutput, State
 from ..llm.prompt import prompt_dict, build_prompt
 
 
-def createZeroshot(state: State):
+def createZeroshot(state: State, *, reasoning_sink=None):
     """
-    hpo_dictを使ってZero-Shot診断プロンプトを作成し、LLMに投げる。
-    use_absentHPO=True の場合のみ、明示的に観察されなかったHPOもプロンプトへ含める。
+    Generate reasoned candidates, returning (ZeroShotOutput, prompt) without reasons.
+
+    Uses present HPO labels, onset and sex; explicit absent HPOs are included only
+    when use_absentHPO=True. The LLM always generates ZeroShotReasonedOutput, even
+    without a reasoning_sink. If supplied, the callback receives an independent
+    model_dump snapshot before normalization; it must not forward reasons to State.
+    Returned candidates are new three-field objects, so downstream in-place
+    normalization cannot alter the reason snapshot. This function does not normalize.
+
+    Missing HPOs/LLM return (None, None); a None LLM result returns (None, prompt).
+    Provider, parsing and callback exceptions propagate. Cache reuse is handled
+    by createZeroShotNode, not here. See scripts/evaluation/README.md for persistence.
     """
     hpo_dict = state.get("hpoDict", {})
     absent_hpo_dict = state.get("absentHpoDict", {})
@@ -37,11 +47,22 @@ def createZeroshot(state: State):
     )
 
     # structured_llmを使う場合
-    structured_llm = llm.get_structured_llm(ZeroShotOutput)
+    structured_llm = llm.get_structured_llm(ZeroShotReasonedOutput)
     messages = [HumanMessage(content=prompt)]
-    result = llm.invoke_with_content_filter_retry(
+    generated = llm.invoke_with_content_filter_retry(
         structured_llm,
         messages,
         context="ZeroShot",
     )
+    if generated is None:
+        return None, prompt
+
+    # Construct new objects: normalization mutates candidates in place. Neither
+    # the pipeline output nor its later mutations may carry/change logged reasons.
+    result = ZeroShotOutput(ans=[
+        ZeroShotFormat(disease_name=item.disease_name, rank=item.rank, OMIM_id=item.OMIM_id)
+        for item in generated.ans
+    ])
+    if reasoning_sink is not None:
+        reasoning_sink(generated.model_dump())
     return result, prompt

@@ -65,12 +65,35 @@ class State(TypedDict):
     
 # --- Pydantic Model for Zero-Shot Diagnosis Output ---
 class ZeroShotFormat(BaseModel):
-    disease_name: str = Field(..., description="The formal name of the most likely rare disease, based solely on the patient's HPO terms.")
+    disease_name: str = Field(..., description=(
+        "The disease name in OMIM entry-title format, preserving capitalization, punctuation, "
+        "and subtype numbers. Preserve a semicolon-separated abbreviation when present in the title. "
+        "Use plain text without Markdown styling or added explanations. "
+        "Example: 'ALBINISM, OCULOCUTANEOUS, TYPE VI; OCA6'."
+    ))
     rank: int = Field(..., description="The rank of the disease in the differential diagnosis list, where 1 is the most likely.")
-    OMIM_id: Optional[str] = Field(None, description="The OMIM identifier for the disease, if available.")
+    OMIM_id: Optional[str] = Field(None, description=(
+        "The disease's OMIM identifier as a six-digit string without the 'OMIM:' prefix. "
+        "Example: '113750' for 'ALBINISM, OCULOCUTANEOUS, TYPE VI; OCA6'. "
+        "Represent a missing identifier as JSON null, not a string such as 'null', 'None', or 'N/A'."
+    ))
 
 class ZeroShotOutput(BaseModel):
     ans: List[ZeroShotFormat]
+
+
+class ZeroShotReasonedCandidate(ZeroShotFormat):
+    selection_reason: str = Field(..., min_length=1, description=(
+        "A concise explanation, at most two sentences, of why this candidate was selected. "
+        "Refer to the supplied patient findings supporting the candidate; mention a major "
+        "explicit contradiction or uncertainty when relevant. Do not invent patient findings "
+        "or claim external verification. This explanation is for logging only."
+    ))
+
+
+class ZeroShotReasonedOutput(BaseModel):
+    # LLM response only; reasons must not enter State.zeroShotResult.
+    ans: List[ZeroShotReasonedCandidate]
 
 
 # --- Pydantic Models for Tentative Diagnosis Output ---
@@ -83,6 +106,12 @@ class DiagnosisFormat(BaseModel):
 class DiagnosisOutput(BaseModel):
     ans: list['DiagnosisFormat']
     reference: Optional[str] = Field(None, description="A numbered list of all sources cited in the 'description' field. Each entry must include the source type, a summary of its content, and a URL if available.")
+
+class TentativeDiagnosisCandidate(DiagnosisFormat):
+    candidate_id: str = Field(..., description="Copy the candidate_id of the corresponding input candidate exactly. This identifies the candidate, not its rank.")
+
+class TentativeDiagnosisOutput(DiagnosisOutput):
+    ans: list[TentativeDiagnosisCandidate]
 
 # --- Pydantic Models for Self-Reflection Output ---
 class ReflectionFormat(BaseModel):

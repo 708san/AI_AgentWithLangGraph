@@ -127,7 +127,12 @@ def _format_and_write_result(f, result):
 
 def log_node_result(logfile_path: str, node_name: str, result: Any):
     """
-    ノードの実行結果を整形してログファイルに追記する
+    Append node results and prompts to the normal pipeline log.
+
+    For createZeroShotNode, zeroShotReasoning is a pre-normalization snapshot
+    outside the envelope's result. Write it separately; it is not pipeline State.
+    Evaluation JSONL traces (including tentative generation attempts) are managed
+    separately by scripts/evaluation/trace.py.
     """
     if not logfile_path:
         return
@@ -161,6 +166,12 @@ def log_node_result(logfile_path: str, node_name: str, result: Any):
                 f.write("Result:\n")
             
             _format_and_write_result(f, core_result)
+            if node_name == "createZeroShotNode" and isinstance(original_result, dict):
+                reasoning = original_result.get("zeroShotReasoning")
+                if reasoning is not None:
+                    f.write("\n----- Zero-shot Selection Reasons (before normalization) -----\n")
+                    f.write(json.dumps(reasoning, ensure_ascii=False, indent=2))
+                    f.write("\n----- End Zero-shot Selection Reasons -----\n")
 
         except Exception as e:
             f.write(f"ログ整形エラー: {e}\n")
