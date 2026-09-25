@@ -115,13 +115,14 @@ def GestaltMatcherNode(state: State):
     try:
         gestalt_results = call_gestalt_matcher_api(image_path, depth)
         syndrome_list = []
-        for res in gestalt_results:
+        for rank, res in enumerate(gestalt_results, 1):
             syndrome_list.append({
                 "subject_id": res.get("subject_id", ""),
                 "syndrome_name": res.get("syndrome_name", ""),
                 "omim_id": res.get("omim_id", ""),
                 "image_id": res.get("image_id", ""),
-                "score": res.get("score")
+                "score": res.get("score"),
+                "rank": res.get("rank") or rank,
             })
         return {"GestaltMatcher": syndrome_list}
     except Exception as e:

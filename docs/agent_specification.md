@@ -55,10 +55,11 @@ run(
 | `patient_id` | `Optional[str]` | 任意 | 結果保存ファイル名に使用。未指定時は `"unknown"` |
 | `use_absentHPO` | `bool` | 任意 | `True` の場合のみ、明示的に観察されなかった HPO 所見を LLM プロンプトに含める。既定値は `False` |
 | `filter_impotance` | `bool` | 任意 | `True` の場合、present HPO と absent HPO を関連疾患数が少ない上位 15 件に絞ってから実行する。既定値は `False` |
+| `public_response` | `bool` | 任意 | `True` の場合、LLMクライアントを除外し、OMIM IDを番号のみへ整形したJSON互換レスポンスを返す。既定値は `True` |
 
 ### 2.3 出力
 
-`run()` は LangGraph 実行後の `State` 辞書を返す。
+`run()` は既定で、LLMクライアントを除外し、OMIM IDを表示用の番号へ整形したJSON互換のState辞書を返す。由来を失わないよう、同じ候補に`OMIM_id_curie`/`omim_id_curie`（例: `OMIM:123456`）も併記する。内部Stateを確認する場合は `public_response=False` を指定する。
 
 主な出力キー:
 
@@ -125,7 +126,7 @@ run(
 |---|---|
 | `ZeroShotFormat` | `disease_name`, `rank`, `OMIM_id` |
 | `ZeroShotOutput` | `ans: List[ZeroShotFormat]` |
-| `DiagnosisFormat` | `disease_name`, `OMIM_id`, `description`, `rank` |
+| `DiagnosisFormat` | `disease_name`, `OMIM_id`, `description`, `rank`, `reference`（候補ごとの参照） |
 | `DiagnosisOutput` | `ans: List[DiagnosisFormat]`, `reference` |
 | `ReflectionFormat` | `disease_name`, `Correctness`, `PatientSummary`, `DiagnosisAnalysis`, `references` |
 | `ReflectionOutput` | `ans: List[ReflectionFormat]` |

@@ -2,11 +2,12 @@ from typing_extensions import List, TypedDict, Optional
 from pydantic import BaseModel, Field
 from ..llm.llm_wrapper import AzureOpenAIWrapper
 
-class PCFres(TypedDict):
+class PCFres(TypedDict, total=False):
     omim_disease_name_en: str
     description: str
     score: Optional[float]
     omim_id: str
+    rank: int
 
 class PhenoBrainResult(TypedDict, total=False):
     disease_name: str
@@ -79,6 +80,10 @@ class DiagnosisFormat(BaseModel):
     OMIM_id: Optional[str] = Field(None, description="The OMIM identifier for the disease, if available.")
     description: str = Field(..., description="The diagnostic reasoning explaining why this diagnosis is clinically plausible. Must specify which of the patient's symptoms support this diagnosis and include in-text citations [1], [2] to the evidence sources.")
     rank: int = Field(..., description="The final rank of the disease in the differential diagnosis list, where 1 is the most likely.")
+    reference: List[str] = Field(
+        default_factory=list,
+        description="References cited by this diagnosis description. Each item should include the source and URL when available.",
+    )
 
 class DiagnosisOutput(BaseModel):
     ans: list['DiagnosisFormat']
@@ -92,7 +97,7 @@ class ReflectionFormat(BaseModel):
     DiagnosisAnalysis: str = Field(..., description="A detailed analysis of why the diagnosis was judged as correct or incorrect. This must be supported by logically connecting the patient's symptoms with direct evidence from the provided medical literature, using in-text citations [1], [2].")
     references: List[str] = Field(
         ...,
-        description="A numbered list of direct quotes extracted from the provided medical literature that support the analysis. Do not list URLs; extract the specific sentences. Example: [\"1. 'Cohen syndrome is characterized by truncal obesity.'\", \"2. 'Neutropenia is a frequent finding.'\"]"
+        description="A numbered list of direct quotes extracted from the provided medical literature that support the analysis. Include the source name and URL when available. Example: [\"[PubMed] (https://pubmed.ncbi.nlm.nih.gov/12345678/): 'Neutropenia is a frequent finding.'\"]"
     )
 
 class ReflectionOutput(BaseModel):
@@ -107,6 +112,7 @@ class GestaltMatcherFormat(BaseModel):
     omim_id: str
     image_id: str
     score: float
+    rank: Optional[int] = None
     
 
 #---TypedDict ---
@@ -133,3 +139,4 @@ class OMIMEntry(BaseModel):
 class PhenotypeSearchFormat(BaseModel):
     disease_info: OMIMEntry = Field(..., description="Information about the disease from the OMIM database.")
     similarity_score: float = Field(..., description="Cosine similarity score with the patient's phenotypes.")
+    rank: Optional[int] = Field(None, description="The rank returned by the phenotype similarity search.")

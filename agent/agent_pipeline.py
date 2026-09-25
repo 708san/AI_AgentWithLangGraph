@@ -5,6 +5,7 @@ from agent.state.state_types import State
 from agent.utils.logger import log_node_result
 from agent.utils.hpo_importance_filter import filter_hpo_by_importance
 from agent.llm.azure_llm_instance import get_llm_instance
+from agent.utils.response_serializer import serialize_public_state
 
 from agent.nodes import (
     PCFnode, createDiagnosisNode, createZeroShotNode, createHPODictNode,createAbsentHPODictNode, 
@@ -208,7 +209,7 @@ class RareDiseaseDiagnosisPipeline:
             "llm": self.llm,
         }
 
-    def run(self, hpo_list, image_path=None, verbose=False, absent_hpo_list=None, onset=None, sex=None, patient_id=None, use_absentHPO=False, filter_impotance=False, use_phenobrain=False):
+    def run(self, hpo_list, image_path=None, verbose=False, absent_hpo_list=None, onset=None, sex=None, patient_id=None, use_absentHPO=False, filter_impotance=False, use_phenobrain=False, public_response=True):
         initial_state = self._build_initial_state(
             hpo_list=hpo_list,
             image_path=image_path,
@@ -223,7 +224,7 @@ class RareDiseaseDiagnosisPipeline:
         result = self.graph.invoke(initial_state)
         if verbose:
             self.pretty_print(result)
-        return result
+        return serialize_public_state(result) if public_response else result
 
     def pretty_print(self, result):
         print("=== result of reflection ===")

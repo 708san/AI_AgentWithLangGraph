@@ -5,6 +5,7 @@ from typing_extensions import Optional
 from ..state.state_types import State, DiagnosisOutput
 from ..llm.prompt import prompt_dict, build_prompt
 from ..llm.llm_wrapper import is_content_filter_error
+from .diagnosis import attach_diagnosis_references
 
 
 def _is_content_filter_error(error: Exception) -> bool:
@@ -60,7 +61,7 @@ def _format_tentative_diagnosis(tentative_result, compact: bool = False) -> str:
             lines.append(
                 f"{i+1}. {item.disease_name} (Rank: {item.rank})\n"
                 f"Description: {item.description}\n"
-                f"Reference: {getattr(item, 'reference', '')}"
+                f"References: {'; '.join(getattr(item, 'reference', []) or [])}"
             )
 
     tentative_result_str = "\n".join(lines)
@@ -221,7 +222,7 @@ def createFinalDiagnosis(state: State) -> Optional[DiagnosisOutput]:
         try:
             if attempt_name != "full":
                 print(f"[FinalDiagnosis] Retrying with {attempt_name} prompt.")
-            result = _invoke_final_with_retry(llm, prompt, attempt_name)
+            result = attach_diagnosis_references(_invoke_final_with_retry(llm, prompt, attempt_name))
             return result, prompt
         except Exception as e:
             if _is_content_filter_error(e) and attempt_name != attempts[-1][0]:

@@ -12,12 +12,13 @@ def callingPCF(hpo_list, depth, max_retries=3):
             response.raise_for_status()
             data = response.json()
             top = []
-            for item in data[:5]:
+            for rank, item in enumerate(data[:5], 1):
                 top.append({
                     "omim_disease_name_en": item.get("omim_disease_name_en", ""),
                     "description": item.get("description", ""),
                     "score": item.get("score", None),
-                    "omim_id": item.get("id", "")
+                    "omim_id": item.get("id", ""),
+                    "rank": rank,
                 })
             return top
         except Exception as e:

@@ -4,6 +4,36 @@ from langchain.schema import HumanMessage
 from ..state.state_types import State, DiagnosisOutput, DiagnosisFormat
 from ..llm.prompt import prompt_dict, build_prompt
 
+
+def _parse_reference_entries(reference_text: Optional[str]) -> dict[int, str]:
+    """Parse the existing numbered reference block without another model call."""
+    if not reference_text:
+        return {}
+
+    entry_pattern = re.compile(
+        r"(?ms)^\s*(?:[-*]\s*)?(?:\[(\d+)\]|(\d+)[.)])\s*(.*?)(?=^\s*(?:[-*]\s*)?(?:\[\d+\]|\d+[.)])\s|\Z)"
+    )
+    entries = {}
+    for match in entry_pattern.finditer(str(reference_text)):
+        reference_id = match.group(1) or match.group(2)
+        entries[int(reference_id)] = match.group(3).strip()
+    return entries
+
+
+def attach_diagnosis_references(diagnosis_output: DiagnosisOutput) -> DiagnosisOutput:
+    """Attach only the references cited by each diagnosis to that answer item."""
+    if not diagnosis_output or not getattr(diagnosis_output, "ans", None):
+        return diagnosis_output
+
+    reference_entries = _parse_reference_entries(diagnosis_output.reference)
+    for diagnosis in diagnosis_output.ans:
+        cited_ids = [int(value) for value in re.findall(r"\[(\d+)\]", diagnosis.description or "")]
+        mapped = [reference_entries[reference_id] for reference_id in cited_ids if reference_id in reference_entries]
+        existing = list(getattr(diagnosis, "reference", []) or [])
+        diagnosis.reference = list(dict.fromkeys(existing + mapped))
+    return diagnosis_output
+
+
 def parse_diagnosis_text(text: str) -> DiagnosisOutput:
     """
     LLMのテキスト出力をパースしてDiagnosisOutputオブジェクトに変換する。
@@ -39,7 +69,7 @@ def parse_diagnosis_text(text: str) -> DiagnosisOutput:
     ref_match = re.search(r"===REFERENCES_START===(.*?)===REFERENCES_END===", text, re.DOTALL)
     references = ref_match.group(1).strip() if ref_match else None
     
-    return DiagnosisOutput(ans=cases, reference=references)
+    return attach_diagnosis_references(DiagnosisOutput(ans=cases, reference=references))
 
 def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     """
@@ -104,7 +134,9 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
 
     # Web search results
     web_text = "\n".join([
-        f"- {res.get('title', 'No Title')}: {res.get('content') or res.get('snippet', 'No Content')}"
+        f"- {res.get('title', 'No Title')}\n"
+        f"  URL: {res.get('url', 'N/A')}\n"
+        f"  {res.get('content') or res.get('snippet', 'No Content')}"
         for res in web_search_results
     ]) if web_search_results else "No relevant web search results found."
 

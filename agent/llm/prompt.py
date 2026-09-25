@@ -348,6 +348,7 @@ Balance evidence in this order: phenotype specificity, diagnostic tool support, 
 * Do not use source type: "Judgement analysis" or "Disease Reflection".
 * Every in-text citation [X] in your reasoning must correspond to a numbered entry in your reference list.
 * Do not repeat references.
+* In the structured response, populate each diagnosis item's `reference` field with only the numbered references cited by that diagnosis. Keep the top-level reference list as the complete numbered list for backward compatibility.
 
 —
 

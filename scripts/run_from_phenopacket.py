@@ -8,6 +8,7 @@ import time
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from agent.agent_pipeline import RareDiseaseDiagnosisPipeline
+from agent.utils.response_serializer import omim_curie, omim_number
 
 def parse_phenopacket(file_path: str) -> dict:
     """
@@ -47,19 +48,30 @@ def format_final_diagnosis(final_diagnosis_obj) -> dict:
     """
     パイプラインから返されたfinalDiagnosisオブジェクトを整形された辞書に変換する。
     """
-    if not final_diagnosis_obj or not hasattr(final_diagnosis_obj, "ans"):
+    if not final_diagnosis_obj:
+        return {"ans": [], "reference": ""}
+
+    if isinstance(final_diagnosis_obj, dict):
+        raw_ans = final_diagnosis_obj.get("ans", [])
+        top_level_reference = final_diagnosis_obj.get("reference", "")
+    elif hasattr(final_diagnosis_obj, "ans"):
+        raw_ans = final_diagnosis_obj.ans
+        top_level_reference = getattr(final_diagnosis_obj, "reference", "")
+    else:
         return {"ans": [], "reference": ""}
     
     ans_list = []
-    for diag in final_diagnosis_obj.ans:
+    for diag in raw_ans:
+        get_value = diag.get if isinstance(diag, dict) else getattr
+        original_omim_id = get_value("OMIM_id", get_value("omim_id", "N/A"))
         ans_list.append({
-            "rank": getattr(diag, "rank", "N/A"),
-            "disease_name": getattr(diag, "disease_name", "Unknown"),
-            "omim_id": getattr(diag, "OMIM_id", "N/A"),
-            "description": getattr(diag, "description", ""),
+            "rank": get_value("rank", "N/A"),
+            "disease_name": get_value("disease_name", "Unknown"),
+            "omim_id": omim_number(original_omim_id),
+            "omim_id_curie": omim_curie(original_omim_id),
+            "description": get_value("description", ""),
+            "reference": get_value("reference", get_value("references", [])) or [],
         })
-    
-    top_level_reference = getattr(final_diagnosis_obj, "reference", "")
     
     return {"ans": ans_list, "reference": top_level_reference}
 
@@ -133,11 +145,14 @@ def run_pipeline_from_phenopacket(
         sex=patient_data["sex"],
         patient_id=patient_id,
         use_phenobrain=use_phenobrain,
-        verbose=False
+        verbose=False,
+        public_response=True,
     )
+
+    public_state = final_state
     
     # 最終診断結果を整形
-    final_diagnosis_data = format_final_diagnosis(final_state.get("finalDiagnosis"))
+    final_diagnosis_data = format_final_diagnosis(public_state.get("finalDiagnosis"))
 
     if output_mode == 'file' and result_file_path:
         # 結果をファイルに保存

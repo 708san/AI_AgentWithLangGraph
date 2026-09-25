@@ -105,7 +105,7 @@ def merge_ranked_disease_candidates(state: State) -> list[MergedDiseaseCandidate
             result.get("omim_id"),
             {
                 "tool": "GestaltMatcher",
-                "rank": index,
+                "rank": result.get("rank") or index,
                 "score": result.get("score"),
                 "note": f"image_id={result.get('image_id', '')}",
             },
@@ -129,13 +129,14 @@ def merge_ranked_disease_candidates(state: State) -> list[MergedDiseaseCandidate
     phenotype_results = state.get("phenotypeSearchResult") or []
     for index, result in enumerate(phenotype_results, 1):
         disease_info = result.disease_info
+        result_rank = result.rank if result.rank is not None else index
         _add_candidate(
             merged,
             disease_info.disease_name,
             disease_info.OMIM_id,
             {
                 "tool": "PhenotypeSearch",
-                "rank": index,
+                "rank": result_rank,
                 "score": result.similarity_score,
                 "note": disease_info.definition or "",
             },

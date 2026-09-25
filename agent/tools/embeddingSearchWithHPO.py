@@ -109,7 +109,8 @@ def embedding_search_with_hpo(state: State) -> Optional[List[PhenotypeSearchForm
             
             result_format = PhenotypeSearchFormat(
                 disease_info=omim_entry,
-                similarity_score=float(score)
+                similarity_score=float(score),
+                rank=i + 1,
             )
             search_results.append(result_format)
         
