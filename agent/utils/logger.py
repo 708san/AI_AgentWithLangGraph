@@ -1,6 +1,7 @@
 import json
 from typing import Any
 from agent.state.state_types import ZeroShotOutput, DiagnosisOutput, ReflectionOutput, PhenotypeSearchFormat
+from agent.utils.response_serializer import omim_number
 
 def _write_disease_search_prompt(f):
     """diseaseSearchNode用の固定プロンプトを書き込む"""
@@ -105,7 +106,7 @@ def _format_and_write_result(f, result):
     elif isinstance(result, list) and all(isinstance(item, PhenotypeSearchFormat) for item in result):
         f.write("Top similar diseases from phenotype search:\n")
         for item in result:
-            f.write(f"  - {item.disease_info.disease_name} (OMIM: {item.disease_info.OMIM_id}, Score: {item.similarity_score:.4f})\n")
+            f.write(f"  - {item.disease_info.disease_name} (OMIM: {omim_number(item.disease_info.OMIM_id)}, Score: {item.similarity_score:.4f})\n")
     elif hasattr(result, "dict"): # pydanticモデルだが上記でキャッチされなかった場合
         f.write(json.dumps(result.dict(), indent=2))
     elif isinstance(result, dict):

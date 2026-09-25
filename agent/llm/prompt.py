@@ -64,13 +64,13 @@ prompt_dict = {
 RANK::[Integer]
 DISEASE::[The formal name of the disease]
 OMIM::[The OMIM identifier, or "N/A"]
-DESCRIPTION::[A concise summary, max 2 sentences, stating WHY this disease is a candidate. Mention which tools supported it, such as "Supported by PCF score 0.9 and ZeroShot rank 1. Matches phenotype X, Y, Z."]
+DESCRIPTION::[A concise summary, max 2 sentences, stating WHY this disease is a candidate. Mention which tools supported it and cite each supporting reference with its number, such as "Supported by PCF score 0.9 [1] and ZeroShot rank 1 [2]. Matches phenotype X, Y, Z."]
 ===CASE_END===
 
 (Repeat for EVERY unique diagnosis found.)
 
 ===REFERENCES_START===
-[A numbered list of all sources cited in the DESCRIPTION field.]
+[A numbered list of all sources cited in the DESCRIPTION field. Every candidate DESCRIPTION must contain [n] citations for its supporting tools whenever a matching reference exists.]
 ===REFERENCES_END===
 
 ---
@@ -117,13 +117,13 @@ III. Web Search
 RANK::[Integer]
 DISEASE::[The formal name of the disease]
 OMIM::[The OMIM identifier, or "N/A"]
-DESCRIPTION::[A concise summary, max 2 sentences, stating WHY this disease is a candidate. Mention which tools supported it, such as "Supported by PCF score 0.9 and ZeroShot rank 1. Matches phenotype X, Y, Z."]
+DESCRIPTION::[A concise summary, max 2 sentences, stating WHY this disease is a candidate. Mention which tools supported it and cite each supporting reference with its number, such as "Supported by PCF score 0.9 [1] and ZeroShot rank 1 [2]. Matches phenotype X, Y, Z."]
 ===CASE_END===
 
 (Repeat for EVERY unique diagnosis found.)
 
 ===REFERENCES_START===
-[A numbered list of all sources cited in the DESCRIPTION field.]
+[A numbered list of all sources cited in the DESCRIPTION field. Every candidate DESCRIPTION must contain [n] citations for its supporting tools whenever a matching reference exists.]
 ===REFERENCES_END===
 
 ---

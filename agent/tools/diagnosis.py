@@ -3,6 +3,18 @@ import re
 from langchain.schema import HumanMessage
 from ..state.state_types import State, DiagnosisOutput, DiagnosisFormat
 from ..llm.prompt import prompt_dict, build_prompt
+from ..utils.response_serializer import omim_number
+
+
+_REFERENCE_SOURCE_ALIASES = (
+    ("pubcasefinder", ("pubcasefinder", "pcf")),
+    ("zeroshot", ("zeroshot", "zero-shot")),
+    ("phenobrain", ("phenobrain",)),
+    ("phenotypesearch", ("phenotypesearch", "phenotype search", "phenotype similarity search")),
+    ("web", ("web search", "researchgate", "syndactyly")),
+)
+_URL_PATTERN = re.compile(r"https?://[^\s)]+")
+_MISSING_URL_PATTERN = re.compile(r"\s*URL:\s*(?:Not provided|N/A)\.?", re.IGNORECASE)
 
 
 def _parse_reference_entries(reference_text: Optional[str]) -> dict[int, str]:
@@ -20,17 +32,93 @@ def _parse_reference_entries(reference_text: Optional[str]) -> dict[int, str]:
     return entries
 
 
-def attach_diagnosis_references(diagnosis_output: DiagnosisOutput) -> DiagnosisOutput:
-    """Attach only the references cited by each diagnosis to that answer item."""
+def _reference_ids_from_description(description: str, reference_entries: dict[int, str]) -> list[int]:
+    """Resolve explicit citations, with a deterministic tool-name fallback."""
+    cited_ids = [int(value) for value in re.findall(r"\[(\d+)\]", description or "")]
+    if cited_ids:
+        return cited_ids
+
+    description_lower = (description or "").lower()
+    inferred_ids = []
+    for _, aliases in _REFERENCE_SOURCE_ALIASES:
+        if not any(alias in description_lower for alias in aliases):
+            continue
+        for reference_id, reference_text in reference_entries.items():
+            reference_lower = reference_text.lower()
+            if any(alias in reference_lower for alias in aliases):
+                inferred_ids.append(reference_id)
+    return list(dict.fromkeys(inferred_ids))
+
+
+def _record_value(record, key: str) -> str:
+    if isinstance(record, dict):
+        return str(record.get(key) or "")
+    return str(getattr(record, key, "") or "")
+
+
+def _url_for_reference(reference: str, source_records) -> Optional[str]:
+    """Find the original search URL for a reference by its source title."""
+    if _URL_PATTERN.search(reference or ""):
+        return None
+
+    reference_lower = (reference or "").lower()
+    for record in source_records or []:
+        url = _record_value(record, "url")
+        title = _record_value(record, "title")
+        disease_name = _record_value(record, "disease_name")
+        if not url or not re.match(r"https?://", url):
+            continue
+        for label in (title, disease_name):
+            label_lower = re.sub(r"\s+", " ", label.lower()).strip()
+            if label_lower and len(label_lower) >= 8 and label_lower in reference_lower:
+                return url
+    return None
+
+
+def _enrich_reference(reference: str, source_records) -> str:
+    reference = _MISSING_URL_PATTERN.sub("", reference or "").strip()
+    url = _url_for_reference(reference, source_records)
+    if not url:
+        return reference
+    return f"{reference.rstrip()} URL: {url}"
+
+
+def _enrich_reference_block(reference_text: Optional[str], source_records) -> Optional[str]:
+    if not reference_text:
+        return reference_text
+    entries = _parse_reference_entries(reference_text)
+    if not entries:
+        return reference_text
+    return "\n".join(
+        f"{reference_id}. {_enrich_reference(reference, source_records)}"
+        for reference_id, reference in entries.items()
+    )
+
+
+def attach_diagnosis_references(diagnosis_output: DiagnosisOutput, source_records=None) -> DiagnosisOutput:
+    """Attach cited/tool references and source URLs to each diagnosis item."""
     if not diagnosis_output or not getattr(diagnosis_output, "ans", None):
         return diagnosis_output
 
     reference_entries = _parse_reference_entries(diagnosis_output.reference)
+    enriched_entries = {
+        reference_id: _enrich_reference(reference, source_records)
+        for reference_id, reference in reference_entries.items()
+    }
+    diagnosis_output.reference = _enrich_reference_block(diagnosis_output.reference, source_records)
     for diagnosis in diagnosis_output.ans:
-        cited_ids = [int(value) for value in re.findall(r"\[(\d+)\]", diagnosis.description or "")]
-        mapped = [reference_entries[reference_id] for reference_id in cited_ids if reference_id in reference_entries]
-        existing = list(getattr(diagnosis, "reference", []) or [])
-        diagnosis.reference = list(dict.fromkeys(existing + mapped))
+        reference_ids = _reference_ids_from_description(diagnosis.description or "", reference_entries)
+        mapped = [enriched_entries[reference_id] for reference_id in reference_ids if reference_id in enriched_entries]
+        existing = []
+        for reference in list(getattr(diagnosis, "reference", []) or []):
+            numeric_match = re.fullmatch(r"\s*\[?(\d+)\]?\.?\s*", str(reference))
+            if numeric_match and int(numeric_match.group(1)) in enriched_entries:
+                existing.append(enriched_entries[int(numeric_match.group(1))])
+            else:
+                existing.append(_enrich_reference(str(reference), source_records))
+        diagnosis.reference = list(
+            dict.fromkeys(_enrich_reference(reference, source_records) for reference in existing + mapped)
+        )
     return diagnosis_output
 
 
@@ -119,7 +207,7 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
             )
         candidate_lines.append(
             f"{index}. {candidate.get('disease_name', 'N/A')} "
-            f"(OMIM: {candidate.get('OMIM_id') or 'N/A'}, "
+            f"(OMIM: {omim_number(candidate.get('OMIM_id')) or 'N/A'}, "
             f"supported by {candidate.get('consensus_count', 0)} tool(s), "
             f"best tool rank: {candidate.get('best_rank', 'N/A')})\n"
             f"   Tool rankings: {'; '.join(tool_parts) if tool_parts else 'No tool ranking details.'}"
@@ -177,6 +265,10 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
     """
     
     diagnosis_output = parse_diagnosis_text(content)
+    diagnosis_output = attach_diagnosis_references(
+        diagnosis_output,
+        source_records=(web_search_results or []) + (state.get("memory", []) or []),
+    )
 
     
     if diagnosis_output and diagnosis_output.ans:
