@@ -1,0 +1,538 @@
+{
+  "status": "ok",
+  "mode": "tool_results",
+  "image_id": "29989",
+  "model": "gpt-5-2",
+  "pcf_k": 14,
+  "gm_k": 6,
+  "requested_pcf_k": 14,
+  "requested_gm_k": 6,
+  "reason": "PCF shows a long high-confidence plateau with minimal score decay from rank 1 (0.8326) through rank ~14 (0.7831), indicating many near-tied plausible matches; beyond ~14 the scores drift lower without a clear secondary bump. GM has a steeper early drop in gestalt_score from rank 1 (0.648) to ranks 2–4 (~0.627–0.617) and then continues tapering; keeping top 6 captures the main facial-similarity cluster (scores ~0.498 to ~0.446) while avoiding lower-yield tail ranks. Cross-tool overlap also supports stopping early in GM (e.g., Rubinstein-Taybi appears high in both: GM rank 5, PCF rank 30), while PCF contributes additional distinct neurodevelopmental/seizure candidates in its strong top band.",
+  "budget": 20,
+  "elapsed_ms": 12672.69,
+  "prompt": "You triage two disease ranking tools using the supplied PCF and GestaltMatcher rankings. Choose how many top results to retain from each tool (0 to 30) for downstream evidence review. Use rank, disease name, and score/distance as evidence. This is a constrained budget problem: maximize the probability that the true disease remains in the retained union while minimizing review cost. You MUST satisfy pcf_k + gm_k <= 20. Allocate more ranks to a tool only when its evidence supports meaningful additional coverage; do not use large symmetric cutoffs as a safety default. Do not diagnose and do not use the known answer. Prefer the smallest cutoffs that preserve plausible candidates. Return only the requested JSON.\nPATIENT:\n{\"sex\": \"male\", \"onset\": \"\", \"present_hpo\": [[\"HP:0000179\", \"Thick lower lip vermilion\"], [\"HP:0000286\", \"Epicanthus\"], [\"HP:0000316\", \"Hypertelorism\"], [\"HP:0000486\", \"Strabismus\"], [\"HP:0002650\", \"Scoliosis\"], [\"HP:0002808\", \"Kyphosis\"], [\"HP:0008936\", \"Axial hypotonia\"], [\"HP:0020152\", \"Distal joint hypermobility\"], [\"HP:0000400\", \"Macrotia\"], [\"HP:0002069\", \"Bilateral tonic-clonic seizure\"], [\"HP:0025373\", \"Interictal EEG abnormality\"], [\"HP:0000752\", \"Hyperactivity\"], [\"HP:0000750\", \"Delayed speech and language development\"], [\"HP:0000729\", \"Autistic behavior\"], [\"HP:0100023\", \"Recurrent hand flapping\"], [\"HP:0001256\", \"Mild intellectual disability\"], [\"HP:0007068\", \"Inferior cerebellar vermis hypoplasia\"], [\"HP:0012450\", \"Chronic constipation\"], [\"HP:0033981\", \"Vertebral artery tortuosity\"], [\"HP:0002616\", \"Aortic root aneurysm\"]], \"absent_hpo\": [[\"HP:0002307\", \"Drooling\"], [\"HP:0000219\", \"Thin upper lip vermilion\"], [\"HP:0000350\", \"Small forehead\"], [\"HP:0011800\", \"Midface retrusion\"], [\"HP:0000582\", \"Upslanted palpebral fissure\"], [\"HP:0045025\", \"Narrow palpebral fissure\"], [\"HP:0000414\", \"Bulbous nose\"], [\"HP:0000455\", \"Broad nasal tip\"], [\"HP:0000347\", \"Micrognathia\"], [\"HP:0000252\", \"Microcephaly\"], [\"HP:0000248\", \"Brachycephaly\"], [\"HP:0000767\", \"Pectus excavatum\"], [\"HP:0001257\", \"Spasticity\"], [\"HP:0031954\", \"Dystonic gait\"], [\"HP:0001332\", \"Dystonia\"], [\"HP:0000718\", \"Aggressive behavior\"], [\"HP:0002376\", \"Developmental regression\"], [\"HP:0031936\", \"Delayed ability to walk\"], [\"HP:0030713\", \"Vein of Galen aneurysmal malformation\"], [\"HP:0010772\", \"Anomalous pulmonary venous return\"], [\"HP:0002020\", \"Gastroesophageal reflux\"], [\"HP:0000098\", \"Tall stature\"], [\"HP:0011623\", \"Muscular ventricular septal defect\"], [\"HP:0006687\", \"Aortic tortuosity\"], [\"HP:0001642\", \"Pulmonic stenosis\"]], \"pcf_top30\": [{\"rank\": 1, \"omim_id\": \"OMIM:621285\", \"disease_name\": \"intellectual developmental disorder, autosomal dominant 76\", \"score\": 0.8325671686193112}, {\"rank\": 2, \"omim_id\": \"OMIM:621304\", \"disease_name\": \"developmental and epileptic encephalopathy 119\", \"score\": 0.8221922170346881}, {\"rank\": 3, \"omim_id\": \"OMIM:614756\", \"disease_name\": \"cerebellar dysfunction with variable cognitive and behavioral abnormalities\", \"score\": 0.8167816598117876}, {\"rank\": 4, \"omim_id\": \"OMIM:621201\", \"disease_name\": \"neurodevelopmental disorder with dysmorphic facies, brain anomalies, and seizures\", \"score\": 0.8063772352424677}, {\"rank\": 5, \"omim_id\": \"OMIM:610042\", \"disease_name\": \"cortical dysplasia-focal epilepsy syndrome\", \"score\": 0.8061508870189971}, {\"rank\": 6, \"omim_id\": \"OMIM:616364\", \"disease_name\": \"intellectual disability-microcephaly-strabismus-behavioral abnormalities syndrome\", \"score\": 0.8040112360377909}, {\"rank\": 7, \"omim_id\": \"OMIM:620985\", \"disease_name\": \"Karayol-Borroto-Haghshenas neurodevelopmental syndrome\", \"score\": 0.8038513932324027}, {\"rank\": 8, \"omim_id\": \"OMIM:618505\", \"disease_name\": \"neurodevelopmental disorder with coarse facies and mild distal skeletal abnormalities\", \"score\": 0.8036941833873247}, {\"rank\": 9, \"omim_id\": \"OMIM:301118\", \"disease_name\": \"intellectual developmental disorder, X-linked, syndromic 37\", \"score\": 0.8031661612837928}, {\"rank\": 10, \"omim_id\": \"OMIM:615829\", \"disease_name\": \"AHDC1-related intellectual disability - obstructive sleep apnea - mild dysmorphism syndrome\", \"score\": 0.798539533506861}, {\"rank\": 11, \"omim_id\": \"OMIM:301066\", \"disease_name\": \"intellectual developmental disorder, X-linked, syndromic, with pigmentary mosaicism and coarse facies\", \"score\": 0.7895812802339547}, {\"rank\": 12, \"omim_id\": \"OMIM:613406\", \"disease_name\": \"chromosome 15q24 deletion syndrome\", \"score\": 0.7842950517282862}, {\"rank\": 13, \"omim_id\": \"OMIM:617268\", \"disease_name\": \"neurodevelopmental disorder with hypotonia, seizures, and absent language\", \"score\": 0.783811672945063}, {\"rank\": 14, \"omim_id\": \"OMIM:615032\", \"disease_name\": \"intellectual developmental disorder with autism and macrocephaly\", \"score\": 0.7831327351408606}, {\"rank\": 15, \"omim_id\": \"OMIM:620851\", \"disease_name\": \"neurodevelopmental disorder with hypotonia, brain anomalies, distinctive facies, and absent language\", \"score\": 0.7801529408129371}, {\"rank\": 16, \"omim_id\": \"OMIM:619475\", \"disease_name\": \"developmental delay, impaired speech, and behavioral abnormalities\", \"score\": 0.7791734047334332}, {\"rank\": 17, \"omim_id\": \"OMIM:615485\", \"disease_name\": \"severe feeding difficulties-failure to thrive-microcephaly due to ASXL3 deficiency syndrome\", \"score\": 0.7775675334568887}, {\"rank\": 18, \"omim_id\": \"OMIM:617061\", \"disease_name\": \"micrognathia-recurrent infections-behavioral abnormalities-mild intellectual disability syndrome\", \"score\": 0.7773946683629867}, {\"rank\": 19, \"omim_id\": \"OMIM:259050\", \"disease_name\": \"Primrose syndrome\", \"score\": 0.7768611998986322}, {\"rank\": 20, \"omim_id\": \"OMIM:300912\", \"disease_name\": \"X-linked intellectual disability, Cantagrel type\", \"score\": 0.7757944117899412}, {\"rank\": 21, \"omim_id\": \"OMIM:619503\", \"disease_name\": \"neurodevelopmental disorder with hypotonia and dysmorphic facies\", \"score\": 0.7743475500411529}, {\"rank\": 22, \"omim_id\": \"OMIM:612474\", \"disease_name\": \"chromosome 1q21.1 deletion syndrome\", \"score\": 0.77414789269963}, {\"rank\": 23, \"omim_id\": \"OMIM:619950\", \"disease_name\": \"Tessadori-Van Haaften neurodevelopmental syndrome 3\", \"score\": 0.773157196075177}, {\"rank\": 24, \"omim_id\": \"OMIM:620450\", \"disease_name\": \"intellectual developmental disorder, autosomal dominant 73\", \"score\": 0.7704817138848592}, {\"rank\": 25, \"omim_id\": \"OMIM:300986\", \"disease_name\": \"intellectual disability, X-linked, syndromic, Bain type\", \"score\": 0.7673940665747953}, {\"rank\": 26, \"omim_id\": \"OMIM:607872\", \"disease_name\": \"chromosome 1p36 deletion syndrome\", \"score\": 0.7657130792171417}, {\"rank\": 27, \"omim_id\": \"OMIM:621302\", \"disease_name\": \"RNU5B-1 related neurodevelopmental disorder with seizures and joint laxity\", \"score\": 0.7642762007716611}, {\"rank\": 28, \"omim_id\": \"OMIM:618076\", \"disease_name\": \"neurodevelopmental disorder with spasticity and poor growth\", \"score\": 0.7608483689268679}, {\"rank\": 29, \"omim_id\": \"OMIM:620700\", \"disease_name\": \"intellectual developmental disorder, autosomal recessive 81\", \"score\": 0.758798110748588}, {\"rank\": 30, \"omim_id\": \"OMIM:180849\", \"disease_name\": \"Rubinstein-Taybi syndrome due to CREBBP mutations\", \"score\": 0.7531686469560656}], \"gm_top30\": [{\"rank\": 1, \"omim_id\": \"147920\", \"disease_name\": \"Kabuki syndrome\", \"distance\": 0.652, \"gestalt_score\": 0.648, \"score\": 0.49846153846153846}, {\"rank\": 2, \"omim_id\": \"304150\", \"disease_name\": \"OCCIPITAL HORN SYNDROME; OHS\", \"distance\": 0.673, \"gestalt_score\": 0.627, \"score\": 0.48230769230769227}, {\"rank\": 3, \"omim_id\": \"610954\", \"disease_name\": \"Pitt-Hopkins syndrome\", \"distance\": 0.673, \"gestalt_score\": 0.627, \"score\": 0.48230769230769227}, {\"rank\": 4, \"omim_id\": \"619090\", \"disease_name\": \"DEVELOPMENTAL DELAY, IMPAIRED GROWTH, DYSMORPHIC FACIES, AND AXONAL NEUROPATHY; DIGFAN\", \"distance\": 0.683, \"gestalt_score\": 0.617, \"score\": 0.4746153846153846}, {\"rank\": 5, \"omim_id\": \"180849\", \"disease_name\": \"Rubinstein-Taybi syndrome\", \"distance\": 0.718, \"gestalt_score\": 0.582, \"score\": 0.4476923076923077}, {\"rank\": 6, \"omim_id\": \"244450\", \"disease_name\": \"KAUFMAN OCULOCEREBROFACIAL SYNDROME; KOS\", \"distance\": 0.72, \"gestalt_score\": 0.58, \"score\": 0.4461538461538462}, {\"rank\": 7, \"omim_id\": \"608572\", \"disease_name\": \"BURN-MCKEOWN SYNDROME; BMKS\", \"distance\": 0.723, \"gestalt_score\": 0.577, \"score\": 0.4438461538461539}, {\"rank\": 8, \"omim_id\": \"304110\", \"disease_name\": \"CRANIOFRONTONASAL SYNDROME; CFNS\", \"distance\": 0.724, \"gestalt_score\": 0.576, \"score\": 0.4430769230769231}, {\"rank\": 9, \"omim_id\": \"620194\", \"disease_name\": \"NEURODEVELOPMENTAL DISORDER WITH POOR GROWTH, LARGE EARS, AND DYSMORPHIC FACIES; NEDGEF\", \"distance\": 0.728, \"gestalt_score\": 0.572, \"score\": 0.44000000000000006}, {\"rank\": 10, \"omim_id\": \"614254\", \"disease_name\": \"NEURODEVELOPMENTAL DISORDER WITH OR WITHOUT HYPERKINETIC MOVEMENTS AND SEIZURES, AUTOSOMAL DOMINANT; NDHMSD\", \"distance\": 0.73, \"gestalt_score\": 0.57, \"score\": 0.4384615384615385}, {\"rank\": 11, \"omim_id\": \"135900\", \"disease_name\": \"Coffin-Siris syndrome\", \"distance\": 0.732, \"gestalt_score\": 0.568, \"score\": 0.43692307692307697}, {\"rank\": 12, \"omim_id\": \"277590\", \"disease_name\": \"WEAVER SYNDROME; WVS\", \"distance\": 0.739, \"gestalt_score\": 0.561, \"score\": 0.4315384615384616}, {\"rank\": 13, \"omim_id\": \"220210\", \"disease_name\": \"Ritscher-Schinzel syndrome\", \"distance\": 0.744, \"gestalt_score\": 0.556, \"score\": 0.4276923076923077}, {\"rank\": 14, \"omim_id\": \"145420\", \"disease_name\": \"Teebi hypertelorism syndrome\", \"distance\": 0.751, \"gestalt_score\": 0.549, \"score\": 0.42230769230769233}, {\"rank\": 15, \"omim_id\": \"614104\", \"disease_name\": \"INTELLECTUAL DEVELOPMENTAL DISORDER, AUTOSOMAL DOMINANT 7; MRD7\", \"distance\": 0.751, \"gestalt_score\": 0.549, \"score\": 0.42230769230769233}, {\"rank\": 16, \"omim_id\": \"612313\", \"disease_name\": \"GLASS SYNDROME; GLASS\", \"distance\": 0.755, \"gestalt_score\": 0.545, \"score\": 0.41923076923076924}, {\"rank\": 17, \"omim_id\": \"118450\", \"disease_name\": \"Alagille syndrome\", \"distance\": 0.758, \"gestalt_score\": 0.542, \"score\": 0.41692307692307695}, {\"rank\": 18, \"omim_id\": \"619376\", \"disease_name\": \"FAUNDES-BANKA SYNDROME; FABAS\", \"distance\": 0.759, \"gestalt_score\": 0.541, \"score\": 0.41615384615384615}, {\"rank\": 19, \"omim_id\": \"216550\", \"disease_name\": \"COHEN SYNDROME; COH1\", \"distance\": 0.762, \"gestalt_score\": 0.538, \"score\": 0.41384615384615386}, {\"rank\": 20, \"omim_id\": \"619503\", \"disease_name\": \"NEURODEVELOPMENTAL DISORDER WITH HYPOTONIA AND DYSMORPHIC FACIES; NEDHYDF\", \"distance\": 0.763, \"gestalt_score\": 0.537, \"score\": 0.41307692307692306}, {\"rank\": 21, \"omim_id\": \"301040\", \"disease_name\": \"ALPHA-THALASSEMIA/IMPAIRED INTELLECTUAL DEVELOPMENT SYNDROME, X-LINKED; ATRX\", \"distance\": 0.764, \"gestalt_score\": 0.536, \"score\": 0.4123076923076923}, {\"rank\": 22, \"omim_id\": \"300000\", \"disease_name\": \"OPITZ GBBB SYNDROME; GBBB\", \"distance\": 0.765, \"gestalt_score\": 0.535, \"score\": 0.4115384615384616}, {\"rank\": 23, \"omim_id\": \"620851\", \"disease_name\": \"ReNU SYNDROME; RENU\", \"distance\": 0.767, \"gestalt_score\": 0.533, \"score\": 0.41000000000000003}, {\"rank\": 24, \"omim_id\": \"235730\", \"disease_name\": \"MOWAT-WILSON SYNDROME; MOWS\", \"distance\": 0.767, \"gestalt_score\": 0.533, \"score\": 0.41000000000000003}, {\"rank\": 25, \"omim_id\": \"123500\", \"disease_name\": \"CROUZON SYNDROME\", \"distance\": 0.774, \"gestalt_score\": 0.526, \"score\": 0.4046153846153846}, {\"rank\": 26, \"omim_id\": \"612621\", \"disease_name\": \"INTELLECTUAL DEVELOPMENTAL DISORDER, AUTOSOMAL DOMINANT 5; MRD5\", \"distance\": 0.774, \"gestalt_score\": 0.526, \"score\": 0.4046153846153846}, {\"rank\": 27, \"omim_id\": \"148050\", \"disease_name\": \"KBG SYNDROME; KBGS\", \"distance\": 0.775, \"gestalt_score\": 0.525, \"score\": 0.40384615384615385}, {\"rank\": 28, \"omim_id\": \"145410\", \"disease_name\": \"MOVED TO 145420\", \"distance\": 0.776, \"gestalt_score\": 0.524, \"score\": 0.40307692307692305}, {\"rank\": 29, \"omim_id\": \"300260\", \"disease_name\": \"INTELLECTUAL DEVELOPMENTAL DISORDER, X-LINKED, SYNDROMIC, LUBS TYPE; MRXSL\", \"distance\": 0.776, \"gestalt_score\": 0.524, \"score\": 0.40307692307692305}, {\"rank\": 30, \"omim_id\": \"615075\", \"disease_name\": \"NEURODEVELOPMENTAL DISORDER WITH SPASTIC DIPLEGIA AND VISUAL DEFECTS; NEDSDV\", \"distance\": 0.777, \"gestalt_score\": 0.523, \"score\": 0.4023076923076923}]}",
+  "pcf_top30": [
+    {
+      "rank": 1,
+      "omim_id": "OMIM:621285",
+      "disease_name": "intellectual developmental disorder, autosomal dominant 76",
+      "score": 0.8325671686193112
+    },
+    {
+      "rank": 2,
+      "omim_id": "OMIM:621304",
+      "disease_name": "developmental and epileptic encephalopathy 119",
+      "score": 0.8221922170346881
+    },
+    {
+      "rank": 3,
+      "omim_id": "OMIM:614756",
+      "disease_name": "cerebellar dysfunction with variable cognitive and behavioral abnormalities",
+      "score": 0.8167816598117876
+    },
+    {
+      "rank": 4,
+      "omim_id": "OMIM:621201",
+      "disease_name": "neurodevelopmental disorder with dysmorphic facies, brain anomalies, and seizures",
+      "score": 0.8063772352424677
+    },
+    {
+      "rank": 5,
+      "omim_id": "OMIM:610042",
+      "disease_name": "cortical dysplasia-focal epilepsy syndrome",
+      "score": 0.8061508870189971
+    },
+    {
+      "rank": 6,
+      "omim_id": "OMIM:616364",
+      "disease_name": "intellectual disability-microcephaly-strabismus-behavioral abnormalities syndrome",
+      "score": 0.8040112360377909
+    },
+    {
+      "rank": 7,
+      "omim_id": "OMIM:620985",
+      "disease_name": "Karayol-Borroto-Haghshenas neurodevelopmental syndrome",
+      "score": 0.8038513932324027
+    },
+    {
+      "rank": 8,
+      "omim_id": "OMIM:618505",
+      "disease_name": "neurodevelopmental disorder with coarse facies and mild distal skeletal abnormalities",
+      "score": 0.8036941833873247
+    },
+    {
+      "rank": 9,
+      "omim_id": "OMIM:301118",
+      "disease_name": "intellectual developmental disorder, X-linked, syndromic 37",
+      "score": 0.8031661612837928
+    },
+    {
+      "rank": 10,
+      "omim_id": "OMIM:615829",
+      "disease_name": "AHDC1-related intellectual disability - obstructive sleep apnea - mild dysmorphism syndrome",
+      "score": 0.798539533506861
+    },
+    {
+      "rank": 11,
+      "omim_id": "OMIM:301066",
+      "disease_name": "intellectual developmental disorder, X-linked, syndromic, with pigmentary mosaicism and coarse facies",
+      "score": 0.7895812802339547
+    },
+    {
+      "rank": 12,
+      "omim_id": "OMIM:613406",
+      "disease_name": "chromosome 15q24 deletion syndrome",
+      "score": 0.7842950517282862
+    },
+    {
+      "rank": 13,
+      "omim_id": "OMIM:617268",
+      "disease_name": "neurodevelopmental disorder with hypotonia, seizures, and absent language",
+      "score": 0.783811672945063
+    },
+    {
+      "rank": 14,
+      "omim_id": "OMIM:615032",
+      "disease_name": "intellectual developmental disorder with autism and macrocephaly",
+      "score": 0.7831327351408606
+    },
+    {
+      "rank": 15,
+      "omim_id": "OMIM:620851",
+      "disease_name": "neurodevelopmental disorder with hypotonia, brain anomalies, distinctive facies, and absent language",
+      "score": 0.7801529408129371
+    },
+    {
+      "rank": 16,
+      "omim_id": "OMIM:619475",
+      "disease_name": "developmental delay, impaired speech, and behavioral abnormalities",
+      "score": 0.7791734047334332
+    },
+    {
+      "rank": 17,
+      "omim_id": "OMIM:615485",
+      "disease_name": "severe feeding difficulties-failure to thrive-microcephaly due to ASXL3 deficiency syndrome",
+      "score": 0.7775675334568887
+    },
+    {
+      "rank": 18,
+      "omim_id": "OMIM:617061",
+      "disease_name": "micrognathia-recurrent infections-behavioral abnormalities-mild intellectual disability syndrome",
+      "score": 0.7773946683629867
+    },
+    {
+      "rank": 19,
+      "omim_id": "OMIM:259050",
+      "disease_name": "Primrose syndrome",
+      "score": 0.7768611998986322
+    },
+    {
+      "rank": 20,
+      "omim_id": "OMIM:300912",
+      "disease_name": "X-linked intellectual disability, Cantagrel type",
+      "score": 0.7757944117899412
+    },
+    {
+      "rank": 21,
+      "omim_id": "OMIM:619503",
+      "disease_name": "neurodevelopmental disorder with hypotonia and dysmorphic facies",
+      "score": 0.7743475500411529
+    },
+    {
+      "rank": 22,
+      "omim_id": "OMIM:612474",
+      "disease_name": "chromosome 1q21.1 deletion syndrome",
+      "score": 0.77414789269963
+    },
+    {
+      "rank": 23,
+      "omim_id": "OMIM:619950",
+      "disease_name": "Tessadori-Van Haaften neurodevelopmental syndrome 3",
+      "score": 0.773157196075177
+    },
+    {
+      "rank": 24,
+      "omim_id": "OMIM:620450",
+      "disease_name": "intellectual developmental disorder, autosomal dominant 73",
+      "score": 0.7704817138848592
+    },
+    {
+      "rank": 25,
+      "omim_id": "OMIM:300986",
+      "disease_name": "intellectual disability, X-linked, syndromic, Bain type",
+      "score": 0.7673940665747953
+    },
+    {
+      "rank": 26,
+      "omim_id": "OMIM:607872",
+      "disease_name": "chromosome 1p36 deletion syndrome",
+      "score": 0.7657130792171417
+    },
+    {
+      "rank": 27,
+      "omim_id": "OMIM:621302",
+      "disease_name": "RNU5B-1 related neurodevelopmental disorder with seizures and joint laxity",
+      "score": 0.7642762007716611
+    },
+    {
+      "rank": 28,
+      "omim_id": "OMIM:618076",
+      "disease_name": "neurodevelopmental disorder with spasticity and poor growth",
+      "score": 0.7608483689268679
+    },
+    {
+      "rank": 29,
+      "omim_id": "OMIM:620700",
+      "disease_name": "intellectual developmental disorder, autosomal recessive 81",
+      "score": 0.758798110748588
+    },
+    {
+      "rank": 30,
+      "omim_id": "OMIM:180849",
+      "disease_name": "Rubinstein-Taybi syndrome due to CREBBP mutations",
+      "score": 0.7531686469560656
+    }
+  ],
+  "gm_top30": [
+    {
+      "rank": 1,
+      "omim_id": "147920",
+      "disease_name": "Kabuki syndrome",
+      "distance": 0.652,
+      "gestalt_score": 0.648,
+      "score": 0.49846153846153846
+    },
+    {
+      "rank": 2,
+      "omim_id": "304150",
+      "disease_name": "OCCIPITAL HORN SYNDROME; OHS",
+      "distance": 0.673,
+      "gestalt_score": 0.627,
+      "score": 0.48230769230769227
+    },
+    {
+      "rank": 3,
+      "omim_id": "610954",
+      "disease_name": "Pitt-Hopkins syndrome",
+      "distance": 0.673,
+      "gestalt_score": 0.627,
+      "score": 0.48230769230769227
+    },
+    {
+      "rank": 4,
+      "omim_id": "619090",
+      "disease_name": "DEVELOPMENTAL DELAY, IMPAIRED GROWTH, DYSMORPHIC FACIES, AND AXONAL NEUROPATHY; DIGFAN",
+      "distance": 0.683,
+      "gestalt_score": 0.617,
+      "score": 0.4746153846153846
+    },
+    {
+      "rank": 5,
+      "omim_id": "180849",
+      "disease_name": "Rubinstein-Taybi syndrome",
+      "distance": 0.718,
+      "gestalt_score": 0.582,
+      "score": 0.4476923076923077
+    },
+    {
+      "rank": 6,
+      "omim_id": "244450",
+      "disease_name": "KAUFMAN OCULOCEREBROFACIAL SYNDROME; KOS",
+      "distance": 0.72,
+      "gestalt_score": 0.58,
+      "score": 0.4461538461538462
+    },
+    {
+      "rank": 7,
+      "omim_id": "608572",
+      "disease_name": "BURN-MCKEOWN SYNDROME; BMKS",
+      "distance": 0.723,
+      "gestalt_score": 0.577,
+      "score": 0.4438461538461539
+    },
+    {
+      "rank": 8,
+      "omim_id": "304110",
+      "disease_name": "CRANIOFRONTONASAL SYNDROME; CFNS",
+      "distance": 0.724,
+      "gestalt_score": 0.576,
+      "score": 0.4430769230769231
+    },
+    {
+      "rank": 9,
+      "omim_id": "620194",
+      "disease_name": "NEURODEVELOPMENTAL DISORDER WITH POOR GROWTH, LARGE EARS, AND DYSMORPHIC FACIES; NEDGEF",
+      "distance": 0.728,
+      "gestalt_score": 0.572,
+      "score": 0.44000000000000006
+    },
+    {
+      "rank": 10,
+      "omim_id": "614254",
+      "disease_name": "NEURODEVELOPMENTAL DISORDER WITH OR WITHOUT HYPERKINETIC MOVEMENTS AND SEIZURES, AUTOSOMAL DOMINANT; NDHMSD",
+      "distance": 0.73,
+      "gestalt_score": 0.57,
+      "score": 0.4384615384615385
+    },
+    {
+      "rank": 11,
+      "omim_id": "135900",
+      "disease_name": "Coffin-Siris syndrome",
+      "distance": 0.732,
+      "gestalt_score": 0.568,
+      "score": 0.43692307692307697
+    },
+    {
+      "rank": 12,
+      "omim_id": "277590",
+      "disease_name": "WEAVER SYNDROME; WVS",
+      "distance": 0.739,
+      "gestalt_score": 0.561,
+      "score": 0.4315384615384616
+    },
+    {
+      "rank": 13,
+      "omim_id": "220210",
+      "disease_name": "Ritscher-Schinzel syndrome",
+      "distance": 0.744,
+      "gestalt_score": 0.556,
+      "score": 0.4276923076923077
+    },
+    {
+      "rank": 14,
+      "omim_id": "145420",
+      "disease_name": "Teebi hypertelorism syndrome",
+      "distance": 0.751,
+      "gestalt_score": 0.549,
+      "score": 0.42230769230769233
+    },
+    {
+      "rank": 15,
+      "omim_id": "614104",
+      "disease_name": "INTELLECTUAL DEVELOPMENTAL DISORDER, AUTOSOMAL DOMINANT 7; MRD7",
+      "distance": 0.751,
+      "gestalt_score": 0.549,
+      "score": 0.42230769230769233
+    },
+    {
+      "rank": 16,
+      "omim_id": "612313",
+      "disease_name": "GLASS SYNDROME; GLASS",
+      "distance": 0.755,
+      "gestalt_score": 0.545,
+      "score": 0.41923076923076924
+    },
+    {
+      "rank": 17,
+      "omim_id": "118450",
+      "disease_name": "Alagille syndrome",
+      "distance": 0.758,
+      "gestalt_score": 0.542,
+      "score": 0.41692307692307695
+    },
+    {
+      "rank": 18,
+      "omim_id": "619376",
+      "disease_name": "FAUNDES-BANKA SYNDROME; FABAS",
+      "distance": 0.759,
+      "gestalt_score": 0.541,
+      "score": 0.41615384615384615
+    },
+    {
+      "rank": 19,
+      "omim_id": "216550",
+      "disease_name": "COHEN SYNDROME; COH1",
+      "distance": 0.762,
+      "gestalt_score": 0.538,
+      "score": 0.41384615384615386
+    },
+    {
+      "rank": 20,
+      "omim_id": "619503",
+      "disease_name": "NEURODEVELOPMENTAL DISORDER WITH HYPOTONIA AND DYSMORPHIC FACIES; NEDHYDF",
+      "distance": 0.763,
+      "gestalt_score": 0.537,
+      "score": 0.41307692307692306
+    },
+    {
+      "rank": 21,
+      "omim_id": "301040",
+      "disease_name": "ALPHA-THALASSEMIA/IMPAIRED INTELLECTUAL DEVELOPMENT SYNDROME, X-LINKED; ATRX",
+      "distance": 0.764,
+      "gestalt_score": 0.536,
+      "score": 0.4123076923076923
+    },
+    {
+      "rank": 22,
+      "omim_id": "300000",
+      "disease_name": "OPITZ GBBB SYNDROME; GBBB",
+      "distance": 0.765,
+      "gestalt_score": 0.535,
+      "score": 0.4115384615384616
+    },
+    {
+      "rank": 23,
+      "omim_id": "620851",
+      "disease_name": "ReNU SYNDROME; RENU",
+      "distance": 0.767,
+      "gestalt_score": 0.533,
+      "score": 0.41000000000000003
+    },
+    {
+      "rank": 24,
+      "omim_id": "235730",
+      "disease_name": "MOWAT-WILSON SYNDROME; MOWS",
+      "distance": 0.767,
+      "gestalt_score": 0.533,
+      "score": 0.41000000000000003
+    },
+    {
+      "rank": 25,
+      "omim_id": "123500",
+      "disease_name": "CROUZON SYNDROME",
+      "distance": 0.774,
+      "gestalt_score": 0.526,
+      "score": 0.4046153846153846
+    },
+    {
+      "rank": 26,
+      "omim_id": "612621",
+      "disease_name": "INTELLECTUAL DEVELOPMENTAL DISORDER, AUTOSOMAL DOMINANT 5; MRD5",
+      "distance": 0.774,
+      "gestalt_score": 0.526,
+      "score": 0.4046153846153846
+    },
+    {
+      "rank": 27,
+      "omim_id": "148050",
+      "disease_name": "KBG SYNDROME; KBGS",
+      "distance": 0.775,
+      "gestalt_score": 0.525,
+      "score": 0.40384615384615385
+    },
+    {
+      "rank": 28,
+      "omim_id": "145410",
+      "disease_name": "MOVED TO 145420",
+      "distance": 0.776,
+      "gestalt_score": 0.524,
+      "score": 0.40307692307692305
+    },
+    {
+      "rank": 29,
+      "omim_id": "300260",
+      "disease_name": "INTELLECTUAL DEVELOPMENTAL DISORDER, X-LINKED, SYNDROMIC, LUBS TYPE; MRXSL",
+      "distance": 0.776,
+      "gestalt_score": 0.524,
+      "score": 0.40307692307692305
+    },
+    {
+      "rank": 30,
+      "omim_id": "615075",
+      "disease_name": "NEURODEVELOPMENTAL DISORDER WITH SPASTIC DIPLEGIA AND VISUAL DEFECTS; NEDSDV",
+      "distance": 0.777,
+      "gestalt_score": 0.523,
+      "score": 0.4023076923076923
+    }
+  ],
+  "raw_response": {
+    "content": "{\"pcf_k\":14,\"gm_k\":6,\"reason\":\"PCF shows a long high-confidence plateau with minimal score decay from rank 1 (0.8326) through rank ~14 (0.7831), indicating many near-tied plausible matches; beyond ~14 the scores drift lower without a clear secondary bump. GM has a steeper early drop in gestalt_score from rank 1 (0.648) to ranks 2–4 (~0.627–0.617) and then continues tapering; keeping top 6 captures the main facial-similarity cluster (scores ~0.498 to ~0.446) while avoiding lower-yield tail ranks. Cross-tool overlap also supports stopping early in GM (e.g., Rubinstein-Taybi appears high in both: GM rank 5, PCF rank 30), while PCF contributes additional distinct neurodevelopmental/seizure candidates in its strong top band.\"}",
+    "additional_kwargs": {
+      "parsed": {
+        "pcf_k": 14,
+        "gm_k": 6,
+        "reason": "PCF shows a long high-confidence plateau with minimal score decay from rank 1 (0.8326) through rank ~14 (0.7831), indicating many near-tied plausible matches; beyond ~14 the scores drift lower without a clear secondary bump. GM has a steeper early drop in gestalt_score from rank 1 (0.648) to ranks 2–4 (~0.627–0.617) and then continues tapering; keeping top 6 captures the main facial-similarity cluster (scores ~0.498 to ~0.446) while avoiding lower-yield tail ranks. Cross-tool overlap also supports stopping early in GM (e.g., Rubinstein-Taybi appears high in both: GM rank 5, PCF rank 30), while PCF contributes additional distinct neurodevelopmental/seizure candidates in its strong top band."
+      },
+      "refusal": null
+    },
+    "response_metadata": {
+      "token_usage": {
+        "completion_tokens": 200,
+        "prompt_tokens": 4551,
+        "total_tokens": 4751,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": 0,
+          "audio_tokens": 0,
+          "reasoning_tokens": 0,
+          "rejected_prediction_tokens": 0
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cached_tokens": 0
+        },
+        "latency_checkpoint": {
+          "engine_tbt_ms": 19,
+          "engine_ttft_ms": 260,
+          "engine_ttlt_ms": 4051,
+          "pre_inference_ms": 294,
+          "service_tbt_ms": 19,
+          "service_ttft_ms": 822,
+          "service_ttlt_ms": 4608,
+          "user_visible_ttft_ms": 527
+        }
+      },
+      "model_name": "gpt-5.2-2025-12-11",
+      "system_fingerprint": null,
+      "id": "chatcmpl-EPM64p7Yj1v73aeCXBlPidDcgMSgY",
+      "service_tier": "default",
+      "prompt_filter_results": [
+        {
+          "prompt_index": 0,
+          "content_filter_results": {
+            "hate": {
+              "filtered": false,
+              "severity": "safe"
+            },
+            "jailbreak": {
+              "detected": false,
+              "filtered": false
+            },
+            "self_harm": {
+              "filtered": false,
+              "severity": "safe"
+            },
+            "sexual": {
+              "filtered": false,
+              "severity": "safe"
+            },
+            "violence": {
+              "filtered": false,
+              "severity": "safe"
+            }
+          }
+        }
+      ],
+      "finish_reason": "stop",
+      "logprobs": null,
+      "content_filter_results": {
+        "protected_material_code": {
+          "detected": false,
+          "filtered": false
+        },
+        "protected_material_text": {
+          "detected": false,
+          "filtered": false
+        }
+      }
+    },
+    "type": "ai",
+    "name": null,
+    "id": "run--137dde4b-37f1-4640-a062-209d1b7895b1-0",
+    "example": false,
+    "tool_calls": [],
+    "invalid_tool_calls": [],
+    "usage_metadata": {
+      "input_tokens": 4551,
+      "output_tokens": 200,
+      "total_tokens": 4751,
+      "input_token_details": {
+        "audio": 0,
+        "cache_read": 0
+      },
+      "output_token_details": {
+        "audio": 0,
+        "reasoning": 0
+      }
+    }
+  }
+}

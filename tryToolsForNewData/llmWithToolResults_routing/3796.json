@@ -1,0 +1,538 @@
+{
+  "status": "ok",
+  "mode": "tool_results",
+  "image_id": "3796",
+  "model": "gpt-5-2",
+  "pcf_k": 8,
+  "gm_k": 4,
+  "requested_pcf_k": 8,
+  "requested_gm_k": 4,
+  "reason": "PCF shows a clear high-scoring cluster tightly matching the craniofacial dysostosis phenotype: ranks 1–2 score 1.0 (Treacher Collins syndrome 1; Nager AFD), followed by closely related disorders with still-high scores (rank 3 mandibulofacial dysostosis with alopecia 0.874; ranks 4–8 multiple Treacher Collins subtypes 0.869–0.852). After rank 8 the list shifts to more heterogeneous syndromes (e.g., Fraser, chromosomal, limb/ectodermal disorders) with only modest score drop (~0.837) but reduced specificity, so stopping at 8 balances coverage vs cost. GestaltMatcher has strongest evidence at rank 1 (Treacher Collins score 0.513, distance 0.633) and then a relatively small gradient with more nonspecific matches; only rank 2 still plausible craniofacial-dysostosis spectrum signal, while ranks 3–4 are broader/non-specific (Cutis laxa, Acromicric dysplasia; scores ~0.437–0.426). Retaining GM top 4 captures its limited incremental coverage while avoiding low-yield expansion.",
+  "budget": 20,
+  "elapsed_ms": 18379.2,
+  "prompt": "You triage two disease ranking tools using the supplied PCF and GestaltMatcher rankings. Choose how many top results to retain from each tool (0 to 30) for downstream evidence review. Use rank, disease name, and score/distance as evidence. This is a constrained budget problem: maximize the probability that the true disease remains in the retained union while minimizing review cost. You MUST satisfy pcf_k + gm_k <= 20. Allocate more ranks to a tool only when its evidence supports meaningful additional coverage; do not use large symmetric cutoffs as a safety default. Do not diagnose and do not use the known answer. Prefer the smallest cutoffs that preserve plausible candidates. Return only the requested JSON.\nPATIENT:\n{\"sex\": \"female\", \"onset\": \"\", \"present_hpo\": [[\"HP:0000494\", \"Downslanted palpebral fissures\"], [\"HP:0000652\", \"Lower eyelid coloboma\"], [\"HP:0000175\", \"Cleft palate\"], [\"HP:0000561\", \"Absent eyelashes\"], [\"HP:0000272\", \"Malar flattening\"], [\"HP:0000377\", \"Abnormal pinna morphology\"], [\"HP:0000405\", \"Conductive hearing impairment\"], [\"HP:0000413\", \"Atresia of the external auditory canal\"], [\"HP:0009554\", \"Preauricular hair displacement\"]], \"absent_hpo\": [[\"HP:0000347\", \"Micrognathia\"], [\"HP:0000453\", \"Choanal atresia\"], [\"HP:0004440\", \"Coronal craniosynostosis\"], [\"HP:6000612\", \"Squamosal suture synostosis\"], [\"HP:0004443\", \"Lambdoidal craniosynostosis\"], [\"HP:0000238\", \"Hydrocephalus\"]], \"pcf_top30\": [{\"rank\": 1, \"omim_id\": \"OMIM:154500\", \"disease_name\": \"Treacher Collins syndrome 1\", \"score\": 1.0}, {\"rank\": 2, \"omim_id\": \"OMIM:154400\", \"disease_name\": \"Nager acrofacial dysostosis\", \"score\": 1.0}, {\"rank\": 3, \"omim_id\": \"OMIM:616367\", \"disease_name\": \"mandibulofacial dysostosis with alopecia\", \"score\": 0.8737509051068111}, {\"rank\": 4, \"omim_id\": \"OMIM:618939\", \"disease_name\": \"Treacher Collins syndrome 4\", \"score\": 0.8692762002123565}, {\"rank\": 5, \"omim_id\": \"OMIM:300946\", \"disease_name\": \"Diamond-Blackfan anemia 14 with mandibulofacial dysostosis\", \"score\": 0.862226553535975}, {\"rank\": 6, \"omim_id\": \"OMIM:164210\", \"disease_name\": \"craniofacial microsomia 1\", \"score\": 0.8544522873842009}, {\"rank\": 7, \"omim_id\": \"OMIM:248390\", \"disease_name\": \"Treacher Collins syndrome 3\", \"score\": 0.8516562972720824}, {\"rank\": 8, \"omim_id\": \"OMIM:613717\", \"disease_name\": \"Treacher Collins syndrome 2\", \"score\": 0.8516562972720824}, {\"rank\": 9, \"omim_id\": \"OMIM:219000\", \"disease_name\": \"Fraser syndrome 1\", \"score\": 0.837470657690169}, {\"rank\": 10, \"omim_id\": \"OMIM:263750\", \"disease_name\": \"postaxial acrofacial dysostosis\", \"score\": 0.8307388940272251}, {\"rank\": 11, \"omim_id\": \"OMIM:601808\", \"disease_name\": \"chromosome 18q deletion syndrome\", \"score\": 0.821009325239374}, {\"rank\": 12, \"omim_id\": \"OMIM:263650\", \"disease_name\": \"Bartsocas-Papas syndrome 1\", \"score\": 0.8206081655590136}, {\"rank\": 13, \"omim_id\": \"OMIM:610536\", \"disease_name\": \"mandibulofacial dysostosis-microcephaly syndrome\", \"score\": 0.8188355975135356}, {\"rank\": 14, \"omim_id\": \"OMIM:129900\", \"disease_name\": \"ectrodactyly, ectodermal dysplasia, and cleft lip-palate syndrome 1\", \"score\": 0.8144495668725998}, {\"rank\": 15, \"omim_id\": \"OMIM:301118\", \"disease_name\": \"intellectual developmental disorder, X-linked, syndromic 37\", \"score\": 0.8136232212570911}, {\"rank\": 16, \"omim_id\": \"OMIM:601353\", \"disease_name\": \"Fine-Lubinsky syndrome\", \"score\": 0.8134176402949781}, {\"rank\": 17, \"omim_id\": \"OMIM:102500\", \"disease_name\": \"acroosteolysis dominant type\", \"score\": 0.8126476813872046}, {\"rank\": 18, \"omim_id\": \"OMIM:605627\", \"disease_name\": \"cerebrooculonasal syndrome\", \"score\": 0.8119430963489588}, {\"rank\": 19, \"omim_id\": \"OMIM:602471\", \"disease_name\": \"short stature-auditory canal atresia-mandibular hypoplasia-skeletal anomalies syndrome\", \"score\": 0.8108627791862337}, {\"rank\": 20, \"omim_id\": \"OMIM:268300\", \"disease_name\": \"Roberts-SC phocomelia syndrome\", \"score\": 0.810324394639365}, {\"rank\": 21, \"omim_id\": \"OMIM:229400\", \"disease_name\": \"frontofacionasal dysplasia\", \"score\": 0.809044380403796}, {\"rank\": 22, \"omim_id\": \"OMIM:616462\", \"disease_name\": \"acrofacial dysostosis Cincinnati type\", \"score\": 0.8086564110896656}, {\"rank\": 23, \"omim_id\": \"OMIM:259050\", \"disease_name\": \"Primrose syndrome\", \"score\": 0.8080240207405659}, {\"rank\": 24, \"omim_id\": \"OMIM:608572\", \"disease_name\": \"choanal atresia-hearing loss-cardiac defects-craniofacial dysmorphism syndrome\", \"score\": 0.8058109994496861}, {\"rank\": 25, \"omim_id\": \"OMIM:601803\", \"disease_name\": \"tetrasomy 12p\", \"score\": 0.8043653341712326}, {\"rank\": 26, \"omim_id\": \"OMIM:615546\", \"disease_name\": \"van Maldergem syndrome 2\", \"score\": 0.8024056189138616}, {\"rank\": 27, \"omim_id\": \"OMIM:234100\", \"disease_name\": \"Hallermann-Streiff syndrome\", \"score\": 0.8015566255991671}, {\"rank\": 28, \"omim_id\": \"OMIM:613309\", \"disease_name\": \"Diamond-Blackfan anemia 10\", \"score\": 0.800759865075897}, {\"rank\": 29, \"omim_id\": \"OMIM:601390\", \"disease_name\": \"van Maldergem syndrome 1\", \"score\": 0.7977225196609118}, {\"rank\": 30, \"omim_id\": \"OMIM:618505\", \"disease_name\": \"neurodevelopmental disorder with coarse facies and mild distal skeletal abnormalities\", \"score\": 0.7955930925305229}], \"gm_top30\": [{\"rank\": 1, \"omim_id\": \"154500\", \"disease_name\": \"Treacher Collins syndrome\", \"distance\": 0.633, \"gestalt_score\": 0.667, \"score\": 0.5130769230769231}, {\"rank\": 2, \"omim_id\": \"614098\", \"disease_name\": \"KEPPEN-LUBINSKY SYNDROME; KPLBS\", \"distance\": 0.725, \"gestalt_score\": 0.575, \"score\": 0.44230769230769235}, {\"rank\": 3, \"omim_id\": \"123700\", \"disease_name\": \"Cutis laxa\", \"distance\": 0.732, \"gestalt_score\": 0.568, \"score\": 0.43692307692307697}, {\"rank\": 4, \"omim_id\": \"102370\", \"disease_name\": \"ACROMICRIC DYSPLASIA; ACMICD\", \"distance\": 0.746, \"gestalt_score\": 0.554, \"score\": 0.42615384615384616}, {\"rank\": 5, \"omim_id\": \"180849\", \"disease_name\": \"Rubinstein-Taybi syndrome\", \"distance\": 0.749, \"gestalt_score\": 0.551, \"score\": 0.4238461538461539}, {\"rank\": 6, \"omim_id\": \"224690\", \"disease_name\": \"Meier-Gorlin syndrome\", \"distance\": 0.753, \"gestalt_score\": 0.547, \"score\": 0.4207692307692308}, {\"rank\": 7, \"omim_id\": \"154400\", \"disease_name\": \"ACROFACIAL DYSOSTOSIS 1, NAGER TYPE; AFD1\", \"distance\": 0.753, \"gestalt_score\": 0.547, \"score\": 0.4207692307692308}, {\"rank\": 8, \"omim_id\": \"216400\", \"disease_name\": \"COCKAYNE SYNDROME A; CSA\", \"distance\": 0.754, \"gestalt_score\": 0.546, \"score\": 0.42000000000000004}, {\"rank\": 9, \"omim_id\": \"618336\", \"disease_name\": \"INTRAUTERINE GROWTH RETARDATION, METAPHYSEAL DYSPLASIA, ADRENAL HYPOPLASIA CONGENITA, GENITAL ANOMALIES, AND IMMUNODEFICIENCY; IMAGEI\", \"distance\": 0.755, \"gestalt_score\": 0.545, \"score\": 0.41923076923076924}, {\"rank\": 10, \"omim_id\": \"605130\", \"disease_name\": \"WIEDEMANN-STEINER SYNDROME; WDSTS\", \"distance\": 0.758, \"gestalt_score\": 0.542, \"score\": 0.41692307692307695}, {\"rank\": 11, \"omim_id\": \"236100\", \"disease_name\": \"Holoprosencephaly\", \"distance\": 0.764, \"gestalt_score\": 0.536, \"score\": 0.4123076923076923}, {\"rank\": 12, \"omim_id\": \"614753\", \"disease_name\": \"MALAN SYNDROME; MALNS\", \"distance\": 0.782, \"gestalt_score\": 0.518, \"score\": 0.3984615384615385}, {\"rank\": 13, \"omim_id\": \"163950\", \"disease_name\": \"Noonan syndrome\", \"distance\": 0.782, \"gestalt_score\": 0.518, \"score\": 0.3984615384615385}, {\"rank\": 14, \"omim_id\": \"251260\", \"disease_name\": \"NIJMEGEN BREAKAGE SYNDROME; NBS\", \"distance\": 0.784, \"gestalt_score\": 0.516, \"score\": 0.39692307692307693}, {\"rank\": 15, \"omim_id\": \"176670\", \"disease_name\": \"Hutchinson-Gilford progeria\", \"distance\": 0.785, \"gestalt_score\": 0.515, \"score\": 0.39615384615384613}, {\"rank\": 16, \"omim_id\": \"309580\", \"disease_name\": \"INTELLECTUAL DISABILITY-HYPOTONIC FACIES SYNDROME, X-LINKED, 1; MRXHF1\", \"distance\": 0.787, \"gestalt_score\": 0.513, \"score\": 0.3946153846153846}, {\"rank\": 17, \"omim_id\": \"101400\", \"disease_name\": \"SAETHRE-CHOTZEN SYNDROME; SCS\", \"distance\": 0.789, \"gestalt_score\": 0.511, \"score\": 0.39307692307692305}, {\"rank\": 18, \"omim_id\": \"615139\", \"disease_name\": \"FACIAL DYSMORPHISM, IMMUNODEFICIENCY, LIVEDO, AND SHORT STATURE; FILS\", \"distance\": 0.793, \"gestalt_score\": 0.507, \"score\": 0.39}, {\"rank\": 19, \"omim_id\": \"210900\", \"disease_name\": \"Microcephaly, growth restriction and increased sister chromatid exchange\", \"distance\": 0.794, \"gestalt_score\": 0.506, \"score\": 0.3892307692307692}, {\"rank\": 20, \"omim_id\": \"192430\", \"disease_name\": \"VELOCARDIOFACIAL SYNDROME; VCFS\", \"distance\": 0.795, \"gestalt_score\": 0.505, \"score\": 0.38846153846153847}, {\"rank\": 21, \"omim_id\": \"190350\", \"disease_name\": \"Trichorhinophalangeal syndrome\", \"distance\": 0.796, \"gestalt_score\": 0.504, \"score\": 0.38769230769230767}, {\"rank\": 22, \"omim_id\": \"618088\", \"disease_name\": \"NEURODEVELOPMENTAL DISORDER WITH REGRESSION, ABNORMAL MOVEMENTS, LOSS OF SPEECH, AND SEIZURES; NEDAMSS\", \"distance\": 0.796, \"gestalt_score\": 0.504, \"score\": 0.38769230769230767}, {\"rank\": 23, \"omim_id\": \"243310\", \"disease_name\": \"Baraitser-Winter syndrome\", \"distance\": 0.8, \"gestalt_score\": 0.5, \"score\": 0.3846153846153846}, {\"rank\": 24, \"omim_id\": \"105650\", \"disease_name\": \"Diamond-Blackfan anemia\", \"distance\": 0.802, \"gestalt_score\": 0.498, \"score\": 0.38307692307692304}, {\"rank\": 25, \"omim_id\": \"166760\", \"disease_name\": \"OTITIS MEDIA, SUSCEPTIBILITY TO; OMS\", \"distance\": 0.803, \"gestalt_score\": 0.497, \"score\": 0.3823076923076923}, {\"rank\": 26, \"omim_id\": \"613075\", \"disease_name\": \"MACS SYNDROME\", \"distance\": 0.803, \"gestalt_score\": 0.497, \"score\": 0.3823076923076923}, {\"rank\": 27, \"omim_id\": \"610536\", \"disease_name\": \"MANDIBULOFACIAL DYSOSTOSIS, GUION-ALMEIDA TYPE; MFDGA\", \"distance\": 0.804, \"gestalt_score\": 0.496, \"score\": 0.38153846153846155}, {\"rank\": 28, \"omim_id\": \"301118\", \"disease_name\": \"INTELLECTUAL DEVELOPMENTAL DISORDER, X-LINKED, SYNDROMIC 37; MRXS37\", \"distance\": 0.804, \"gestalt_score\": 0.496, \"score\": 0.38153846153846155}, {\"rank\": 29, \"omim_id\": \"145410\", \"disease_name\": \"MOVED TO 145420\", \"distance\": 0.805, \"gestalt_score\": 0.495, \"score\": 0.38076923076923075}, {\"rank\": 30, \"omim_id\": \"136140\", \"disease_name\": \"FLOATING-HARBOR SYNDROME; FLHS\", \"distance\": 0.806, \"gestalt_score\": 0.494, \"score\": 0.38}]}",
+  "pcf_top30": [
+    {
+      "rank": 1,
+      "omim_id": "OMIM:154500",
+      "disease_name": "Treacher Collins syndrome 1",
+      "score": 1.0
+    },
+    {
+      "rank": 2,
+      "omim_id": "OMIM:154400",
+      "disease_name": "Nager acrofacial dysostosis",
+      "score": 1.0
+    },
+    {
+      "rank": 3,
+      "omim_id": "OMIM:616367",
+      "disease_name": "mandibulofacial dysostosis with alopecia",
+      "score": 0.8737509051068111
+    },
+    {
+      "rank": 4,
+      "omim_id": "OMIM:618939",
+      "disease_name": "Treacher Collins syndrome 4",
+      "score": 0.8692762002123565
+    },
+    {
+      "rank": 5,
+      "omim_id": "OMIM:300946",
+      "disease_name": "Diamond-Blackfan anemia 14 with mandibulofacial dysostosis",
+      "score": 0.862226553535975
+    },
+    {
+      "rank": 6,
+      "omim_id": "OMIM:164210",
+      "disease_name": "craniofacial microsomia 1",
+      "score": 0.8544522873842009
+    },
+    {
+      "rank": 7,
+      "omim_id": "OMIM:248390",
+      "disease_name": "Treacher Collins syndrome 3",
+      "score": 0.8516562972720824
+    },
+    {
+      "rank": 8,
+      "omim_id": "OMIM:613717",
+      "disease_name": "Treacher Collins syndrome 2",
+      "score": 0.8516562972720824
+    },
+    {
+      "rank": 9,
+      "omim_id": "OMIM:219000",
+      "disease_name": "Fraser syndrome 1",
+      "score": 0.837470657690169
+    },
+    {
+      "rank": 10,
+      "omim_id": "OMIM:263750",
+      "disease_name": "postaxial acrofacial dysostosis",
+      "score": 0.8307388940272251
+    },
+    {
+      "rank": 11,
+      "omim_id": "OMIM:601808",
+      "disease_name": "chromosome 18q deletion syndrome",
+      "score": 0.821009325239374
+    },
+    {
+      "rank": 12,
+      "omim_id": "OMIM:263650",
+      "disease_name": "Bartsocas-Papas syndrome 1",
+      "score": 0.8206081655590136
+    },
+    {
+      "rank": 13,
+      "omim_id": "OMIM:610536",
+      "disease_name": "mandibulofacial dysostosis-microcephaly syndrome",
+      "score": 0.8188355975135356
+    },
+    {
+      "rank": 14,
+      "omim_id": "OMIM:129900",
+      "disease_name": "ectrodactyly, ectodermal dysplasia, and cleft lip-palate syndrome 1",
+      "score": 0.8144495668725998
+    },
+    {
+      "rank": 15,
+      "omim_id": "OMIM:301118",
+      "disease_name": "intellectual developmental disorder, X-linked, syndromic 37",
+      "score": 0.8136232212570911
+    },
+    {
+      "rank": 16,
+      "omim_id": "OMIM:601353",
+      "disease_name": "Fine-Lubinsky syndrome",
+      "score": 0.8134176402949781
+    },
+    {
+      "rank": 17,
+      "omim_id": "OMIM:102500",
+      "disease_name": "acroosteolysis dominant type",
+      "score": 0.8126476813872046
+    },
+    {
+      "rank": 18,
+      "omim_id": "OMIM:605627",
+      "disease_name": "cerebrooculonasal syndrome",
+      "score": 0.8119430963489588
+    },
+    {
+      "rank": 19,
+      "omim_id": "OMIM:602471",
+      "disease_name": "short stature-auditory canal atresia-mandibular hypoplasia-skeletal anomalies syndrome",
+      "score": 0.8108627791862337
+    },
+    {
+      "rank": 20,
+      "omim_id": "OMIM:268300",
+      "disease_name": "Roberts-SC phocomelia syndrome",
+      "score": 0.810324394639365
+    },
+    {
+      "rank": 21,
+      "omim_id": "OMIM:229400",
+      "disease_name": "frontofacionasal dysplasia",
+      "score": 0.809044380403796
+    },
+    {
+      "rank": 22,
+      "omim_id": "OMIM:616462",
+      "disease_name": "acrofacial dysostosis Cincinnati type",
+      "score": 0.8086564110896656
+    },
+    {
+      "rank": 23,
+      "omim_id": "OMIM:259050",
+      "disease_name": "Primrose syndrome",
+      "score": 0.8080240207405659
+    },
+    {
+      "rank": 24,
+      "omim_id": "OMIM:608572",
+      "disease_name": "choanal atresia-hearing loss-cardiac defects-craniofacial dysmorphism syndrome",
+      "score": 0.8058109994496861
+    },
+    {
+      "rank": 25,
+      "omim_id": "OMIM:601803",
+      "disease_name": "tetrasomy 12p",
+      "score": 0.8043653341712326
+    },
+    {
+      "rank": 26,
+      "omim_id": "OMIM:615546",
+      "disease_name": "van Maldergem syndrome 2",
+      "score": 0.8024056189138616
+    },
+    {
+      "rank": 27,
+      "omim_id": "OMIM:234100",
+      "disease_name": "Hallermann-Streiff syndrome",
+      "score": 0.8015566255991671
+    },
+    {
+      "rank": 28,
+      "omim_id": "OMIM:613309",
+      "disease_name": "Diamond-Blackfan anemia 10",
+      "score": 0.800759865075897
+    },
+    {
+      "rank": 29,
+      "omim_id": "OMIM:601390",
+      "disease_name": "van Maldergem syndrome 1",
+      "score": 0.7977225196609118
+    },
+    {
+      "rank": 30,
+      "omim_id": "OMIM:618505",
+      "disease_name": "neurodevelopmental disorder with coarse facies and mild distal skeletal abnormalities",
+      "score": 0.7955930925305229
+    }
+  ],
+  "gm_top30": [
+    {
+      "rank": 1,
+      "omim_id": "154500",
+      "disease_name": "Treacher Collins syndrome",
+      "distance": 0.633,
+      "gestalt_score": 0.667,
+      "score": 0.5130769230769231
+    },
+    {
+      "rank": 2,
+      "omim_id": "614098",
+      "disease_name": "KEPPEN-LUBINSKY SYNDROME; KPLBS",
+      "distance": 0.725,
+      "gestalt_score": 0.575,
+      "score": 0.44230769230769235
+    },
+    {
+      "rank": 3,
+      "omim_id": "123700",
+      "disease_name": "Cutis laxa",
+      "distance": 0.732,
+      "gestalt_score": 0.568,
+      "score": 0.43692307692307697
+    },
+    {
+      "rank": 4,
+      "omim_id": "102370",
+      "disease_name": "ACROMICRIC DYSPLASIA; ACMICD",
+      "distance": 0.746,
+      "gestalt_score": 0.554,
+      "score": 0.42615384615384616
+    },
+    {
+      "rank": 5,
+      "omim_id": "180849",
+      "disease_name": "Rubinstein-Taybi syndrome",
+      "distance": 0.749,
+      "gestalt_score": 0.551,
+      "score": 0.4238461538461539
+    },
+    {
+      "rank": 6,
+      "omim_id": "224690",
+      "disease_name": "Meier-Gorlin syndrome",
+      "distance": 0.753,
+      "gestalt_score": 0.547,
+      "score": 0.4207692307692308
+    },
+    {
+      "rank": 7,
+      "omim_id": "154400",
+      "disease_name": "ACROFACIAL DYSOSTOSIS 1, NAGER TYPE; AFD1",
+      "distance": 0.753,
+      "gestalt_score": 0.547,
+      "score": 0.4207692307692308
+    },
+    {
+      "rank": 8,
+      "omim_id": "216400",
+      "disease_name": "COCKAYNE SYNDROME A; CSA",
+      "distance": 0.754,
+      "gestalt_score": 0.546,
+      "score": 0.42000000000000004
+    },
+    {
+      "rank": 9,
+      "omim_id": "618336",
+      "disease_name": "INTRAUTERINE GROWTH RETARDATION, METAPHYSEAL DYSPLASIA, ADRENAL HYPOPLASIA CONGENITA, GENITAL ANOMALIES, AND IMMUNODEFICIENCY; IMAGEI",
+      "distance": 0.755,
+      "gestalt_score": 0.545,
+      "score": 0.41923076923076924
+    },
+    {
+      "rank": 10,
+      "omim_id": "605130",
+      "disease_name": "WIEDEMANN-STEINER SYNDROME; WDSTS",
+      "distance": 0.758,
+      "gestalt_score": 0.542,
+      "score": 0.41692307692307695
+    },
+    {
+      "rank": 11,
+      "omim_id": "236100",
+      "disease_name": "Holoprosencephaly",
+      "distance": 0.764,
+      "gestalt_score": 0.536,
+      "score": 0.4123076923076923
+    },
+    {
+      "rank": 12,
+      "omim_id": "614753",
+      "disease_name": "MALAN SYNDROME; MALNS",
+      "distance": 0.782,
+      "gestalt_score": 0.518,
+      "score": 0.3984615384615385
+    },
+    {
+      "rank": 13,
+      "omim_id": "163950",
+      "disease_name": "Noonan syndrome",
+      "distance": 0.782,
+      "gestalt_score": 0.518,
+      "score": 0.3984615384615385
+    },
+    {
+      "rank": 14,
+      "omim_id": "251260",
+      "disease_name": "NIJMEGEN BREAKAGE SYNDROME; NBS",
+      "distance": 0.784,
+      "gestalt_score": 0.516,
+      "score": 0.39692307692307693
+    },
+    {
+      "rank": 15,
+      "omim_id": "176670",
+      "disease_name": "Hutchinson-Gilford progeria",
+      "distance": 0.785,
+      "gestalt_score": 0.515,
+      "score": 0.39615384615384613
+    },
+    {
+      "rank": 16,
+      "omim_id": "309580",
+      "disease_name": "INTELLECTUAL DISABILITY-HYPOTONIC FACIES SYNDROME, X-LINKED, 1; MRXHF1",
+      "distance": 0.787,
+      "gestalt_score": 0.513,
+      "score": 0.3946153846153846
+    },
+    {
+      "rank": 17,
+      "omim_id": "101400",
+      "disease_name": "SAETHRE-CHOTZEN SYNDROME; SCS",
+      "distance": 0.789,
+      "gestalt_score": 0.511,
+      "score": 0.39307692307692305
+    },
+    {
+      "rank": 18,
+      "omim_id": "615139",
+      "disease_name": "FACIAL DYSMORPHISM, IMMUNODEFICIENCY, LIVEDO, AND SHORT STATURE; FILS",
+      "distance": 0.793,
+      "gestalt_score": 0.507,
+      "score": 0.39
+    },
+    {
+      "rank": 19,
+      "omim_id": "210900",
+      "disease_name": "Microcephaly, growth restriction and increased sister chromatid exchange",
+      "distance": 0.794,
+      "gestalt_score": 0.506,
+      "score": 0.3892307692307692
+    },
+    {
+      "rank": 20,
+      "omim_id": "192430",
+      "disease_name": "VELOCARDIOFACIAL SYNDROME; VCFS",
+      "distance": 0.795,
+      "gestalt_score": 0.505,
+      "score": 0.38846153846153847
+    },
+    {
+      "rank": 21,
+      "omim_id": "190350",
+      "disease_name": "Trichorhinophalangeal syndrome",
+      "distance": 0.796,
+      "gestalt_score": 0.504,
+      "score": 0.38769230769230767
+    },
+    {
+      "rank": 22,
+      "omim_id": "618088",
+      "disease_name": "NEURODEVELOPMENTAL DISORDER WITH REGRESSION, ABNORMAL MOVEMENTS, LOSS OF SPEECH, AND SEIZURES; NEDAMSS",
+      "distance": 0.796,
+      "gestalt_score": 0.504,
+      "score": 0.38769230769230767
+    },
+    {
+      "rank": 23,
+      "omim_id": "243310",
+      "disease_name": "Baraitser-Winter syndrome",
+      "distance": 0.8,
+      "gestalt_score": 0.5,
+      "score": 0.3846153846153846
+    },
+    {
+      "rank": 24,
+      "omim_id": "105650",
+      "disease_name": "Diamond-Blackfan anemia",
+      "distance": 0.802,
+      "gestalt_score": 0.498,
+      "score": 0.38307692307692304
+    },
+    {
+      "rank": 25,
+      "omim_id": "166760",
+      "disease_name": "OTITIS MEDIA, SUSCEPTIBILITY TO; OMS",
+      "distance": 0.803,
+      "gestalt_score": 0.497,
+      "score": 0.3823076923076923
+    },
+    {
+      "rank": 26,
+      "omim_id": "613075",
+      "disease_name": "MACS SYNDROME",
+      "distance": 0.803,
+      "gestalt_score": 0.497,
+      "score": 0.3823076923076923
+    },
+    {
+      "rank": 27,
+      "omim_id": "610536",
+      "disease_name": "MANDIBULOFACIAL DYSOSTOSIS, GUION-ALMEIDA TYPE; MFDGA",
+      "distance": 0.804,
+      "gestalt_score": 0.496,
+      "score": 0.38153846153846155
+    },
+    {
+      "rank": 28,
+      "omim_id": "301118",
+      "disease_name": "INTELLECTUAL DEVELOPMENTAL DISORDER, X-LINKED, SYNDROMIC 37; MRXS37",
+      "distance": 0.804,
+      "gestalt_score": 0.496,
+      "score": 0.38153846153846155
+    },
+    {
+      "rank": 29,
+      "omim_id": "145410",
+      "disease_name": "MOVED TO 145420",
+      "distance": 0.805,
+      "gestalt_score": 0.495,
+      "score": 0.38076923076923075
+    },
+    {
+      "rank": 30,
+      "omim_id": "136140",
+      "disease_name": "FLOATING-HARBOR SYNDROME; FLHS",
+      "distance": 0.806,
+      "gestalt_score": 0.494,
+      "score": 0.38
+    }
+  ],
+  "raw_response": {
+    "content": "{\"pcf_k\":8,\"gm_k\":4,\"reason\":\"PCF shows a clear high-scoring cluster tightly matching the craniofacial dysostosis phenotype: ranks 1–2 score 1.0 (Treacher Collins syndrome 1; Nager AFD), followed by closely related disorders with still-high scores (rank 3 mandibulofacial dysostosis with alopecia 0.874; ranks 4–8 multiple Treacher Collins subtypes 0.869–0.852). After rank 8 the list shifts to more heterogeneous syndromes (e.g., Fraser, chromosomal, limb/ectodermal disorders) with only modest score drop (~0.837) but reduced specificity, so stopping at 8 balances coverage vs cost. GestaltMatcher has strongest evidence at rank 1 (Treacher Collins score 0.513, distance 0.633) and then a relatively small gradient with more nonspecific matches; only rank 2 still plausible craniofacial-dysostosis spectrum signal, while ranks 3–4 are broader/non-specific (Cutis laxa, Acromicric dysplasia; scores ~0.437–0.426). Retaining GM top 4 captures its limited incremental coverage while avoiding low-yield expansion.\"}",
+    "additional_kwargs": {
+      "parsed": {
+        "pcf_k": 8,
+        "gm_k": 4,
+        "reason": "PCF shows a clear high-scoring cluster tightly matching the craniofacial dysostosis phenotype: ranks 1–2 score 1.0 (Treacher Collins syndrome 1; Nager AFD), followed by closely related disorders with still-high scores (rank 3 mandibulofacial dysostosis with alopecia 0.874; ranks 4–8 multiple Treacher Collins subtypes 0.869–0.852). After rank 8 the list shifts to more heterogeneous syndromes (e.g., Fraser, chromosomal, limb/ectodermal disorders) with only modest score drop (~0.837) but reduced specificity, so stopping at 8 balances coverage vs cost. GestaltMatcher has strongest evidence at rank 1 (Treacher Collins score 0.513, distance 0.633) and then a relatively small gradient with more nonspecific matches; only rank 2 still plausible craniofacial-dysostosis spectrum signal, while ranks 3–4 are broader/non-specific (Cutis laxa, Acromicric dysplasia; scores ~0.437–0.426). Retaining GM top 4 captures its limited incremental coverage while avoiding low-yield expansion."
+      },
+      "refusal": null
+    },
+    "response_metadata": {
+      "token_usage": {
+        "completion_tokens": 273,
+        "prompt_tokens": 3981,
+        "total_tokens": 4254,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": 0,
+          "audio_tokens": 0,
+          "reasoning_tokens": 0,
+          "rejected_prediction_tokens": 0
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cached_tokens": 0
+        },
+        "latency_checkpoint": {
+          "engine_tbt_ms": 22,
+          "engine_ttft_ms": 208,
+          "engine_ttlt_ms": 6273,
+          "pre_inference_ms": 266,
+          "service_tbt_ms": 22,
+          "service_ttft_ms": 648,
+          "service_ttlt_ms": 6709,
+          "user_visible_ttft_ms": 381
+        }
+      },
+      "model_name": "gpt-5.2-2025-12-11",
+      "system_fingerprint": null,
+      "id": "chatcmpl-EPMKDVi49FZmNiDts25jMujFAEzXU",
+      "service_tier": "default",
+      "prompt_filter_results": [
+        {
+          "prompt_index": 0,
+          "content_filter_results": {
+            "hate": {
+              "filtered": false,
+              "severity": "safe"
+            },
+            "jailbreak": {
+              "detected": false,
+              "filtered": false
+            },
+            "self_harm": {
+              "filtered": false,
+              "severity": "safe"
+            },
+            "sexual": {
+              "filtered": false,
+              "severity": "safe"
+            },
+            "violence": {
+              "filtered": false,
+              "severity": "safe"
+            }
+          }
+        }
+      ],
+      "finish_reason": "stop",
+      "logprobs": null,
+      "content_filter_results": {
+        "protected_material_code": {
+          "detected": false,
+          "filtered": false
+        },
+        "protected_material_text": {
+          "detected": false,
+          "filtered": false
+        }
+      }
+    },
+    "type": "ai",
+    "name": null,
+    "id": "run--8a141194-8b78-4ee3-a569-e621ce63656b-0",
+    "example": false,
+    "tool_calls": [],
+    "invalid_tool_calls": [],
+    "usage_metadata": {
+      "input_tokens": 3981,
+      "output_tokens": 273,
+      "total_tokens": 4254,
+      "input_token_details": {
+        "audio": 0,
+        "cache_read": 0
+      },
+      "output_token_details": {
+        "audio": 0,
+        "reasoning": 0
+      }
+    }
+  }
+}

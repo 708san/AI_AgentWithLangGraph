@@ -1,0 +1,107 @@
+{
+  "status": "ok",
+  "mode": "input_only",
+  "image_id": "9631",
+  "model": "gpt-5-2",
+  "pcf_k": 13,
+  "gm_k": 7,
+  "requested_pcf_k": 13,
+  "requested_gm_k": 7,
+  "reason": "Phenotype is broad and multi-system (neurodevelopmental delay with gait instability/hypotonia, distinct craniofacial features, prenatal polyhydramnios, joint hypermobility, pleural effusion, pigmentary lesion). This breadth favors deeper retention from phenotype-driven PCF to preserve heterogeneous candidates, while the facial gestalt appears present but not uniquely pathognomonic, so a smaller yet meaningful GestaltMatcher cutoff balances expected yield vs review cost. Non-symmetric allocation reflects higher expected diversity captured by PCF given the extensive HPO set, while still leveraging facial similarity signal.",
+  "budget": 20,
+  "elapsed_ms": 47914.51,
+  "prompt": "You must allocate review depth for two disease ranking tools without seeing their results. Choose how many top results to retain from PCF and GestaltMatcher (0 to 30) using only the patient phenotype and facial image. Do not assume any particular disease or tool outcome. This is a constrained budget problem: maximize expected probability that the true disease remains in the retained union while minimizing review cost. You MUST satisfy pcf_k + gm_k <= 20. Do not choose large symmetric cutoffs as a safety default. Do not diagnose and do not use the known answer. Prefer the smallest cutoffs that preserve plausible candidates. Return only the requested JSON.\nPATIENT:\n{\"sex\": \"male\", \"onset\": \"\", \"present_hpo\": [[\"HP:0002202\", \"Pleural effusion\"], [\"HP:0000483\", \"Astigmatism\"], [\"HP:0000316\", \"Hypertelorism\"], [\"HP:0000565\", \"Esotropia\"], [\"HP:0000505\", \"Visual impairment\"], [\"HP:0000540\", \"Hypermetropia\"], [\"HP:0000319\", \"Smooth philtrum\"], [\"HP:0000219\", \"Thin upper lip vermilion\"], [\"HP:0000164\", \"Abnormality of the dentition\"], [\"HP:0000337\", \"Broad forehead\"], [\"HP:0000494\", \"Downslanted palpebral fissures\"], [\"HP:0000422\", \"Abnormal nasal bridge morphology\"], [\"HP:0000358\", \"Posteriorly rotated ears\"], [\"HP:0000369\", \"Low-set ears\"], [\"HP:0008760\", \"Violent behavior\"], [\"HP:0002360\", \"Sleep disturbance\"], [\"HP:0001249\", \"Intellectual disability\"], [\"HP:0000817\", \"Reduced eye contact\"], [\"HP:0000750\", \"Delayed speech and language development\"], [\"HP:0001270\", \"Motor delay\"], [\"HP:0002317\", \"Unsteady gait\"], [\"HP:0030051\", \"Tip-toe gait\"], [\"HP:0002172\", \"Postural instability\"], [\"HP:0012704\", \"Widened subarachnoid space\"], [\"HP:0001317\", \"Abnormal cerebellum morphology\"], [\"HP:0002389\", \"Cavum septum pellucidum\"], [\"HP:0001561\", \"Polyhydramnios\"], [\"HP:0004325\", \"Decreased body weight\"], [\"HP:0100814\", \"Blue nevus\"], [\"HP:0001167\", \"Abnormal finger morphology\"], [\"HP:0001252\", \"Hypotonia\"], [\"HP:0003698\", \"Difficulty standing\"], [\"HP:0002761\", \"Generalized joint hypermobility\"], [\"HP:0001763\", \"Pes planus\"]], \"absent_hpo\": [[\"HP:0000609\", \"Optic nerve hypoplasia\"], [\"HP:0000490\", \"Deeply set eye\"], [\"HP:0000520\", \"Proptosis\"], [\"HP:0000639\", \"Nystagmus\"], [\"HP:0100704\", \"Cerebral visual impairment\"], [\"HP:0000508\", \"Ptosis\"], [\"HP:0012210\", \"Abnormal renal morphology\"], [\"HP:0000929\", \"Abnormal skull morphology\"], [\"HP:0011800\", \"Midface retrusion\"], [\"HP:0000286\", \"Epicanthus\"], [\"HP:0000582\", \"Upslanted palpebral fissure\"], [\"HP:0000637\", \"Long palpebral fissure\"], [\"HP:0000625\", \"Eyelid coloboma\"], [\"HP:0000664\", \"Synophrys\"], [\"HP:0011228\", \"Horizontal eyebrow\"], [\"HP:0005338\", \"Sparse lateral eyebrow\"], [\"HP:0000400\", \"Macrotia\"], [\"HP:0000411\", \"Protruding ear\"], [\"HP:0008551\", \"Microtia\"], [\"HP:0008589\", \"Hypoplastic helices\"], [\"HP:0000403\", \"Recurrent otitis media\"], [\"HP:0001250\", \"Seizure\"], [\"HP:0002353\", \"EEG abnormality\"], [\"HP:0002015\", \"Dysphagia\"], [\"HP:0007328\", \"Impaired pain sensation\"], [\"HP:0001269\", \"Hemiparesis\"], [\"HP:0000729\", \"Autistic behavior\"], [\"HP:0001344\", \"Absent speech\"], [\"HP:0009088\", \"Speech articulation difficulties\"], [\"HP:0001260\", \"Dysarthria\"], [\"HP:0002362\", \"Shuffling gait\"], [\"HP:0001332\", \"Dystonia\"], [\"HP:0011096\", \"Peripheral demyelination\"], [\"HP:0002282\", \"Gray matter heterotopia\"], [\"HP:0002126\", \"Polymicrogyria\"], [\"HP:0009879\", \"Simplified gyral pattern\"], [\"HP:0100702\", \"Arachnoid cyst\"], [\"HP:0012444\", \"Brain atrophy\"], [\"HP:0012510\", \"Extra-axial cerebrospinal fluid accumulation\"], [\"HP:0002118\", \"Abnormal cerebral ventricle morphology\"], [\"HP:0002539\", \"Cortical dysplasia\"], [\"HP:0002500\", \"Abnormal cerebral white matter morphology\"], [\"HP:0001297\", \"Stroke\"], [\"HP:0012448\", \"Delayed myelination\"], [\"HP:0002171\", \"Gliosis\"], [\"HP:0001271\", \"Polyneuropathy\"], [\"HP:0001623\", \"Breech presentation\"], [\"HP:0011410\", \"Caesarean section\"], [\"HP:0001562\", \"Oligohydramnios\"], [\"HP:0001622\", \"Premature birth\"], [\"HP:0011428\", \"Short fetal femur length\"], [\"HP:0004324\", \"Increased body weight\"], [\"HP:0001518\", \"Small for gestational age\"], [\"HP:0001511\", \"Intrauterine growth retardation\"], [\"HP:0001629\", \"Ventricular septal defect\"], [\"HP:0001631\", \"Atrial septal defect\"], [\"HP:0011968\", \"Feeding difficulties\"], [\"HP:0001276\", \"Hypertonia\"], [\"HP:0003457\", \"EMG abnormality\"], [\"HP:0002664\", \"Neoplasm\"]]}",
+  "pcf_top30": null,
+  "gm_top30": null,
+  "raw_response": {
+    "content": "{\"pcf_k\":13,\"gm_k\":7,\"reason\":\"Phenotype is broad and multi-system (neurodevelopmental delay with gait instability/hypotonia, distinct craniofacial features, prenatal polyhydramnios, joint hypermobility, pleural effusion, pigmentary lesion). This breadth favors deeper retention from phenotype-driven PCF to preserve heterogeneous candidates, while the facial gestalt appears present but not uniquely pathognomonic, so a smaller yet meaningful GestaltMatcher cutoff balances expected yield vs review cost. Non-symmetric allocation reflects higher expected diversity captured by PCF given the extensive HPO set, while still leveraging facial similarity signal.\"}",
+    "additional_kwargs": {
+      "parsed": {
+        "pcf_k": 13,
+        "gm_k": 7,
+        "reason": "Phenotype is broad and multi-system (neurodevelopmental delay with gait instability/hypotonia, distinct craniofacial features, prenatal polyhydramnios, joint hypermobility, pleural effusion, pigmentary lesion). This breadth favors deeper retention from phenotype-driven PCF to preserve heterogeneous candidates, while the facial gestalt appears present but not uniquely pathognomonic, so a smaller yet meaningful GestaltMatcher cutoff balances expected yield vs review cost. Non-symmetric allocation reflects higher expected diversity captured by PCF given the extensive HPO set, while still leveraging facial similarity signal."
+      },
+      "refusal": null
+    },
+    "response_metadata": {
+      "token_usage": {
+        "completion_tokens": 141,
+        "prompt_tokens": 1585,
+        "total_tokens": 1726,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": 0,
+          "audio_tokens": 0,
+          "reasoning_tokens": 0,
+          "rejected_prediction_tokens": 0
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cached_tokens": 0
+        },
+        "latency_checkpoint": {
+          "engine_tbt_ms": 31,
+          "engine_ttft_ms": 164,
+          "engine_ttlt_ms": 4551,
+          "pre_inference_ms": 145,
+          "service_tbt_ms": 31,
+          "service_ttft_ms": 487,
+          "service_ttlt_ms": 4868,
+          "user_visible_ttft_ms": 341
+        }
+      },
+      "model_name": "gpt-5.2-2025-12-11",
+      "system_fingerprint": null,
+      "id": "chatcmpl-EPLofktql6nr5sV3xcwJJMtra4tF0",
+      "service_tier": "default",
+      "prompt_filter_results": [
+        {
+          "prompt_index": 0,
+          "content_filter_results": {
+            "hate": {
+              "filtered": false,
+              "severity": "safe"
+            },
+            "jailbreak": {
+              "detected": false,
+              "filtered": false
+            },
+            "self_harm": {
+              "filtered": false,
+              "severity": "safe"
+            },
+            "sexual": {
+              "filtered": false,
+              "severity": "safe"
+            },
+            "violence": {
+              "filtered": false,
+              "severity": "safe"
+            }
+          }
+        }
+      ],
+      "finish_reason": "stop",
+      "logprobs": null,
+      "content_filter_results": {}
+    },
+    "type": "ai",
+    "name": null,
+    "id": "run--af56f8ac-eae2-4132-a76f-de1690a712fe-0",
+    "example": false,
+    "tool_calls": [],
+    "invalid_tool_calls": [],
+    "usage_metadata": {
+      "input_tokens": 1585,
+      "output_tokens": 141,
+      "total_tokens": 1726,
+      "input_token_details": {
+        "audio": 0,
+        "cache_read": 0
+      },
+      "output_token_details": {
+        "audio": 0,
+        "reasoning": 0
+      }
+    }
+  }
+}

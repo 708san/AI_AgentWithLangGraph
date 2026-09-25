@@ -1,0 +1,116 @@
+{
+  "status": "ok",
+  "mode": "input_only",
+  "image_id": "1931",
+  "model": "gpt-5-2",
+  "pcf_k": 7,
+  "gm_k": 13,
+  "requested_pcf_k": 7,
+  "requested_gm_k": 13,
+  "reason": "Phenotype is broad (ID/GDD, feeding/FTT, recurrent infections, hearing impairment) with limited specific dysmorphology captured in HPO; this favors keeping a modest PCF list. The facial image provides an additional independent signal that can disambiguate among multiple syndromic possibilities, so allocate a larger share to GestaltMatcher while still avoiding large symmetric cutoffs. Total retained set stays within budget while preserving diversity of plausible candidates.",
+  "budget": 20,
+  "elapsed_ms": 6864.6,
+  "prompt": "You must allocate review depth for two disease ranking tools without seeing their results. Choose how many top results to retain from PCF and GestaltMatcher (0 to 30) using only the patient phenotype and facial image. Do not assume any particular disease or tool outcome. This is a constrained budget problem: maximize expected probability that the true disease remains in the retained union while minimizing review cost. You MUST satisfy pcf_k + gm_k <= 20. Do not choose large symmetric cutoffs as a safety default. Do not diagnose and do not use the known answer. Prefer the smallest cutoffs that preserve plausible candidates. Return only the requested JSON.\nPATIENT:\n{\"sex\": \"female\", \"onset\": \"\", \"present_hpo\": [[\"HP:0001249\", \"Intellectual disability\"], [\"HP:0001263\", \"Global developmental delay\"], [\"HP:0011968\", \"Feeding difficulties\"], [\"HP:0001508\", \"Failure to thrive\"], [\"HP:0031936\", \"Delayed ability to walk\"], [\"HP:0000750\", \"Delayed speech and language development\"], [\"HP:0002719\", \"Recurrent infections\"], [\"HP:0000365\", \"Hearing impairment\"], [\"HP:0000426\", \"Prominent nasal bridge\"]], \"absent_hpo\": [[\"HP:0000252\", \"Microcephaly\"], [\"HP:0001252\", \"Hypotonia\"], [\"HP:0002020\", \"Gastroesophageal reflux\"], [\"HP:0012450\", \"Chronic constipation\"], [\"HP:0000729\", \"Autistic behavior\"], [\"HP:0007018\", \"Attention deficit hyperactivity disorder\"], [\"HP:0000718\", \"Aggressive behavior\"], [\"HP:0000739\", \"Anxiety\"], [\"HP:0000733\", \"Motor stereotypy\"], [\"HP:0000716\", \"Depression\"], [\"HP:0000722\", \"Compulsive behaviors\"], [\"HP:0010818\", \"Generalized tonic seizure\"], [\"HP:0025190\", \"Bilateral tonic-clonic seizure with generalized onset\"], [\"HP:0001272\", \"Cerebellar atrophy\"], [\"HP:0002059\", \"Cerebral atrophy\"], [\"HP:0002119\", \"Ventriculomegaly\"], [\"HP:0100702\", \"Arachnoid cyst\"], [\"HP:0033725\", \"Thin corpus callosum\"], [\"HP:0006970\", \"Periventricular leukomalacia\"], [\"HP:0002360\", \"Sleep disturbance\"], [\"HP:0001332\", \"Dystonia\"], [\"HP:0001251\", \"Ataxia\"], [\"HP:0001761\", \"Pes cavus\"], [\"HP:0001276\", \"Hypertonia\"], [\"HP:0000248\", \"Brachycephaly\"], [\"HP:0000336\", \"Prominent supraorbital ridges\"], [\"HP:0000280\", \"Coarse facial features\"], [\"HP:0000322\", \"Short philtrum\"], [\"HP:0011800\", \"Midface retrusion\"], [\"HP:0000307\", \"Pointed chin\"], [\"HP:0002162\", \"Low posterior hairline\"], [\"HP:0000396\", \"Overfolded helix\"], [\"HP:0000656\", \"Ectropion\"], [\"HP:0000574\", \"Thick eyebrow\"], [\"HP:0000275\", \"Narrow face\"], [\"HP:0000431\", \"Wide nasal bridge\"], [\"HP:0001212\", \"Prominent fingertip pads\"], [\"HP:0000160\", \"Narrow mouth\"], [\"HP:0000276\", \"Long face\"], [\"HP:0000303\", \"Mandibular prognathia\"], [\"HP:0005326\", \"Hypoplastic philtrum\"], [\"HP:0000494\", \"Downslanted palpebral fissures\"], [\"HP:0000348\", \"High forehead\"], [\"HP:0000455\", \"Broad nasal tip\"], [\"HP:0005280\", \"Depressed nasal bridge\"], [\"HP:0000601\", \"Hypotelorism\"], [\"HP:0002553\", \"Highly arched eyebrow\"], [\"HP:0000331\", \"Short chin\"], [\"HP:0045025\", \"Narrow palpebral fissure\"], [\"HP:0000341\", \"Narrow forehead\"], [\"HP:0000378\", \"Cupped ear\"], [\"HP:0000592\", \"Blue sclerae\"], [\"HP:0011822\", \"Broad chin\"], [\"HP:0011220\", \"Prominent forehead\"], [\"HP:0000316\", \"Hypertelorism\"], [\"HP:0000463\", \"Anteverted nares\"], [\"HP:0000358\", \"Posteriorly rotated ears\"], [\"HP:0045075\", \"Sparse eyebrow\"], [\"HP:0000400\", \"Macrotia\"], [\"HP:0000325\", \"Triangular face\"], [\"HP:0000194\", \"Open mouth\"], [\"HP:0008551\", \"Microtia\"], [\"HP:0000343\", \"Long philtrum\"], [\"HP:0000527\", \"Long eyelashes\"], [\"HP:0000369\", \"Low-set ears\"], [\"HP:0000233\", \"Thin vermilion border\"], [\"HP:0009765\", \"Low hanging columella\"], [\"HP:0012810\", \"Wide nasal base\"], [\"HP:0000637\", \"Long palpebral fissure\"], [\"HP:0000954\", \"Single transverse palmar crease\"], [\"HP:0000347\", \"Micrognathia\"], [\"HP:0000508\", \"Ptosis\"], [\"HP:0000582\", \"Upslanted palpebral fissure\"], [\"HP:0000286\", \"Epicanthus\"], [\"HP:0000581\", \"Blepharophimosis\"], [\"HP:0000411\", \"Protruding ear\"], [\"HP:0006101\", \"Finger syndactyly\"], [\"HP:0200055\", \"Small hand\"], [\"HP:0000939\", \"Osteoporosis\"], [\"HP:0030043\", \"Hip subluxation\"], [\"HP:0002857\", \"Genu valgum\"], [\"HP:0001382\", \"Joint hypermobility\"], [\"HP:0001385\", \"Hip dysplasia\"], [\"HP:0001770\", \"Toe syndactyly\"], [\"HP:0009623\", \"Proximal placement of thumb\"], [\"HP:0008807\", \"Acetabular dysplasia\"], [\"HP:0012385\", \"Camptodactyly\"], [\"HP:0001763\", \"Pes planus\"], [\"HP:0001169\", \"Broad palm\"], [\"HP:0002808\", \"Kyphosis\"], [\"HP:0001831\", \"Short toe\"], [\"HP:0001762\", \"Talipes equinovarus\"], [\"HP:0000938\", \"Osteopenia\"], [\"HP:0002650\", \"Scoliosis\"], [\"HP:0001769\", \"Broad foot\"], [\"HP:0001182\", \"Tapered finger\"]]}",
+  "pcf_top30": null,
+  "gm_top30": null,
+  "raw_response": {
+    "content": "{\"pcf_k\":7,\"gm_k\":13,\"reason\":\"Phenotype is broad (ID/GDD, feeding/FTT, recurrent infections, hearing impairment) with limited specific dysmorphology captured in HPO; this favors keeping a modest PCF list. The facial image provides an additional independent signal that can disambiguate among multiple syndromic possibilities, so allocate a larger share to GestaltMatcher while still avoiding large symmetric cutoffs. Total retained set stays within budget while preserving diversity of plausible candidates.\"}",
+    "additional_kwargs": {
+      "parsed": {
+        "pcf_k": 7,
+        "gm_k": 13,
+        "reason": "Phenotype is broad (ID/GDD, feeding/FTT, recurrent infections, hearing impairment) with limited specific dysmorphology captured in HPO; this favors keeping a modest PCF list. The facial image provides an additional independent signal that can disambiguate among multiple syndromic possibilities, so allocate a larger share to GestaltMatcher while still avoiding large symmetric cutoffs. Total retained set stays within budget while preserving diversity of plausible candidates."
+      },
+      "refusal": null
+    },
+    "response_metadata": {
+      "token_usage": {
+        "completion_tokens": 113,
+        "prompt_tokens": 1916,
+        "total_tokens": 2029,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": 0,
+          "audio_tokens": 0,
+          "reasoning_tokens": 0,
+          "rejected_prediction_tokens": 0
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cached_tokens": 0
+        },
+        "latency_checkpoint": {
+          "engine_tbt_ms": 19,
+          "engine_ttft_ms": 323,
+          "engine_ttlt_ms": 2464,
+          "pre_inference_ms": 237,
+          "service_tbt_ms": 19,
+          "service_ttft_ms": 710,
+          "service_ttlt_ms": 2875,
+          "user_visible_ttft_ms": 473
+        }
+      },
+      "model_name": "gpt-5.2-2025-12-11",
+      "system_fingerprint": null,
+      "id": "chatcmpl-EPLSR7jlsWhNcmzs3exqxFUBNkczr",
+      "service_tier": "default",
+      "prompt_filter_results": [
+        {
+          "prompt_index": 0,
+          "content_filter_results": {
+            "hate": {
+              "filtered": false,
+              "severity": "safe"
+            },
+            "jailbreak": {
+              "detected": false,
+              "filtered": false
+            },
+            "self_harm": {
+              "filtered": false,
+              "severity": "safe"
+            },
+            "sexual": {
+              "filtered": false,
+              "severity": "safe"
+            },
+            "violence": {
+              "filtered": false,
+              "severity": "safe"
+            }
+          }
+        }
+      ],
+      "finish_reason": "stop",
+      "logprobs": null,
+      "content_filter_results": {
+        "protected_material_code": {
+          "detected": false,
+          "filtered": false
+        },
+        "protected_material_text": {
+          "detected": false,
+          "filtered": false
+        }
+      }
+    },
+    "type": "ai",
+    "name": null,
+    "id": "run--f807cb62-23eb-4bd6-b425-437df3387a1e-0",
+    "example": false,
+    "tool_calls": [],
+    "invalid_tool_calls": [],
+    "usage_metadata": {
+      "input_tokens": 1916,
+      "output_tokens": 113,
+      "total_tokens": 2029,
+      "input_token_details": {
+        "audio": 0,
+        "cache_read": 0
+      },
+      "output_token_details": {
+        "audio": 0,
+        "reasoning": 0
+      }
+    }
+  }
+}

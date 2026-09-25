@@ -1,0 +1,538 @@
+{
+  "status": "ok",
+  "mode": "tool_results",
+  "image_id": "500",
+  "model": "gpt-5-2",
+  "pcf_k": 12,
+  "gm_k": 6,
+  "requested_pcf_k": 12,
+  "requested_gm_k": 6,
+  "reason": "PCF shows a strong high-confidence plateau: ranks 1-4 have maximal score 1.0, and ranks 5-12 remain very high (0.992 to 0.9669) with multiple closely matching neurodevelopmental/behavioral phenotypes (microcephaly, GDD/ID, autism/speech delay). After rank 12 the scores begin a gradual decline (rank 13 = 0.962), so retaining through 12 captures the densest high-score region while limiting cost.\nGestaltMatcher has moderate separation and a relatively flat gradient: rank 1 score 0.4738 (distance 0.684) down to rank 6 score 0.4454 (distance 0.721); beyond rank 6 the scores continue to drift downward with minimal incremental separation (e.g., rank 9 score 0.43, distance 0.741). Also, GM rank 5 (ADNP/HVDAS) overlaps a PCF candidate (PCF rank 27), indicating GM adds some complementary coverage early; however, deeper GM ranks appear less discriminative. Therefore keep GM top 6 to capture the strongest gestalt-supported syndromic candidates while allocating most budget to the more sharply high-scoring PCF list. Total retained = 18 <= 20.",
+  "budget": 20,
+  "elapsed_ms": 37652.03,
+  "prompt": "You triage two disease ranking tools using the supplied PCF and GestaltMatcher rankings. Choose how many top results to retain from each tool (0 to 30) for downstream evidence review. Use rank, disease name, and score/distance as evidence. This is a constrained budget problem: maximize the probability that the true disease remains in the retained union while minimizing review cost. You MUST satisfy pcf_k + gm_k <= 20. Allocate more ranks to a tool only when its evidence supports meaningful additional coverage; do not use large symmetric cutoffs as a safety default. Do not diagnose and do not use the known answer. Prefer the smallest cutoffs that preserve plausible candidates. Return only the requested JSON.\nPATIENT:\n{\"sex\": \"female\", \"onset\": \"\", \"present_hpo\": [[\"HP:0000252\", \"Microcephaly\"], [\"HP:0001357\", \"Plagiocephaly\"], [\"HP:0001263\", \"Global developmental delay\"], [\"HP:0002194\", \"Delayed gross motor development\"], [\"HP:0000750\", \"Delayed speech and language development\"], [\"HP:0001249\", \"Intellectual disability\"], [\"HP:0000729\", \"Autistic behavior\"]], \"absent_hpo\": [[\"HP:0011968\", \"Feeding difficulties\"]], \"pcf_top30\": [{\"rank\": 1, \"omim_id\": \"OMIM:620455\", \"disease_name\": \"neurodevelopmental disorder with hypotonia and speech delay, with or without seizures\", \"score\": 1.0}, {\"rank\": 2, \"omim_id\": \"OMIM:619512\", \"disease_name\": \"neurodevelopmental disorder with hypotonia and brain abnormalities\", \"score\": 1.0}, {\"rank\": 3, \"omim_id\": \"OMIM:620985\", \"disease_name\": \"Karayol-Borroto-Haghshenas neurodevelopmental syndrome\", \"score\": 1.0}, {\"rank\": 4, \"omim_id\": \"OMIM:616364\", \"disease_name\": \"intellectual disability-microcephaly-strabismus-behavioral abnormalities syndrome\", \"score\": 1.0}, {\"rank\": 5, \"omim_id\": \"OMIM:619480\", \"disease_name\": \"neurodevelopmental disorder with dysmorphic facies and thin corpus callosum\", \"score\": 0.9921117029630495}, {\"rank\": 6, \"omim_id\": \"OMIM:617360\", \"disease_name\": \"congenital heart defects, dysmorphic facial features, and intellectual developmental disorder\", \"score\": 0.9671421277196344}, {\"rank\": 7, \"omim_id\": \"OMIM:621304\", \"disease_name\": \"developmental and epileptic encephalopathy 119\", \"score\": 0.9671421277196344}, {\"rank\": 8, \"omim_id\": \"OMIM:619475\", \"disease_name\": \"developmental delay, impaired speech, and behavioral abnormalities\", \"score\": 0.9671421277196344}, {\"rank\": 9, \"omim_id\": \"OMIM:615829\", \"disease_name\": \"AHDC1-related intellectual disability - obstructive sleep apnea - mild dysmorphism syndrome\", \"score\": 0.9671421277196344}, {\"rank\": 10, \"omim_id\": \"OMIM:300868\", \"disease_name\": \"multiple congenital anomalies-hypotonia-seizures syndrome 2\", \"score\": 0.9671421277196344}, {\"rank\": 11, \"omim_id\": \"OMIM:618505\", \"disease_name\": \"neurodevelopmental disorder with coarse facies and mild distal skeletal abnormalities\", \"score\": 0.9671421277196344}, {\"rank\": 12, \"omim_id\": \"OMIM:619927\", \"disease_name\": \"intellectual developmental disorder, autosomal dominant 67\", \"score\": 0.9669254010567544}, {\"rank\": 13, \"omim_id\": \"OMIM:620330\", \"disease_name\": \"intellectual developmental disorder, autosomal dominant 71, with behavioral abnormalities\", \"score\": 0.962053807712771}, {\"rank\": 14, \"omim_id\": \"OMIM:618430\", \"disease_name\": \"developmental delay with variable intellectual impairment and behavioral abnormalities\", \"score\": 0.9611459080691506}, {\"rank\": 15, \"omim_id\": \"OMIM:618672\", \"disease_name\": \"intellectual developmental disorder with speech delay, autism, and dysmorphic facies\", \"score\": 0.9602476945333682}, {\"rank\": 16, \"omim_id\": \"OMIM:618885\", \"disease_name\": \"congenital disorder of glycosylation, type iit\", \"score\": 0.9518579684495794}, {\"rank\": 17, \"omim_id\": \"OMIM:618798\", \"disease_name\": \"Beck-Fahrner syndrome\", \"score\": 0.9518579684495794}, {\"rank\": 18, \"omim_id\": \"OMIM:617452\", \"disease_name\": \"intellectual developmental disorder with dysmorphic facies, seizures, and distal limb anomalies\", \"score\": 0.9518579684495794}, {\"rank\": 19, \"omim_id\": \"OMIM:300966\", \"disease_name\": \"intellectual disability, X-linked, syndromic 33\", \"score\": 0.9518579684495794}, {\"rank\": 20, \"omim_id\": \"OMIM:610042\", \"disease_name\": \"cortical dysplasia-focal epilepsy syndrome\", \"score\": 0.9518579684495794}, {\"rank\": 21, \"omim_id\": \"OMIM:621254\", \"disease_name\": \"immunodeficiency 133 with ectodermal dysplasia with or without peripheral neuropathy\", \"score\": 0.9518579684495794}, {\"rank\": 22, \"omim_id\": \"OMIM:620851\", \"disease_name\": \"neurodevelopmental disorder with hypotonia, brain anomalies, distinctive facies, and absent language\", \"score\": 0.9518579684495794}, {\"rank\": 23, \"omim_id\": \"OMIM:300983\", \"disease_name\": \"intellectual disability, X-linked 104\", \"score\": 0.9439696714126289}, {\"rank\": 24, \"omim_id\": \"OMIM:619320\", \"disease_name\": \"intellectual developmental disorder, autosomal dominant 65\", \"score\": 0.9439696714126289}, {\"rank\": 25, \"omim_id\": \"OMIM:615656\", \"disease_name\": \"chromosome 15q11.2 deletion syndrome\", \"score\": 0.9340675287763888}, {\"rank\": 26, \"omim_id\": \"OMIM:619005\", \"disease_name\": \"neurodevelopmental disorder with dysmorphic facies, impaired speech, and hypotonia\", \"score\": 0.9340675287763888}, {\"rank\": 27, \"omim_id\": \"OMIM:615873\", \"disease_name\": \"ADNP-related multiple congenital anomalies - intellectual disability - autism spectrum disorder\", \"score\": 0.9340675287763888}, {\"rank\": 28, \"omim_id\": \"OMIM:616362\", \"disease_name\": \"Houge-Janssens syndrome 2\", \"score\": 0.9302145334513193}, {\"rank\": 29, \"omim_id\": \"OMIM:617798\", \"disease_name\": \"intellectual disability, autosomal dominant 53\", \"score\": 0.9302145334513193}, {\"rank\": 30, \"omim_id\": \"OMIM:619149\", \"disease_name\": \"Lessel-Kreienkamp syndrome\", \"score\": 0.9289792087695253}], \"gm_top30\": [{\"rank\": 1, \"omim_id\": \"135900\", \"disease_name\": \"Coffin-Siris syndrome\", \"distance\": 0.684, \"gestalt_score\": 0.616, \"score\": 0.4738461538461538}, {\"rank\": 2, \"omim_id\": \"616355\", \"disease_name\": \"Houge-Janssens syndrome\", \"distance\": 0.702, \"gestalt_score\": 0.598, \"score\": 0.4600000000000001}, {\"rank\": 3, \"omim_id\": \"147920\", \"disease_name\": \"Kabuki syndrome\", \"distance\": 0.708, \"gestalt_score\": 0.592, \"score\": 0.45538461538461544}, {\"rank\": 4, \"omim_id\": \"239850\", \"disease_name\": \"CANTU SYNDROME\", \"distance\": 0.715, \"gestalt_score\": 0.585, \"score\": 0.45000000000000007}, {\"rank\": 5, \"omim_id\": \"615873\", \"disease_name\": \"HELSMOORTEL-VAN DER AA SYNDROME; HVDAS\", \"distance\": 0.719, \"gestalt_score\": 0.581, \"score\": 0.446923076923077}, {\"rank\": 6, \"omim_id\": \"600987\", \"disease_name\": \"CLEFT PALATE, CARDIAC DEFECTS, AND IMPAIRED INTELLECTUAL DEVELOPMENT; CPCMR\", \"distance\": 0.721, \"gestalt_score\": 0.579, \"score\": 0.44538461538461543}, {\"rank\": 7, \"omim_id\": \"617732\", \"disease_name\": \"FACIAL PALSY, CONGENITAL, WITH PTOSIS AND VELOPHARYNGEAL DYSFUNCTION; FPVEPD\", \"distance\": 0.734, \"gestalt_score\": 0.566, \"score\": 0.4353846153846154}, {\"rank\": 8, \"omim_id\": \"616224\", \"disease_name\": \"MYASTHENIC SYNDROME, CONGENITAL, 22; CMS22\", \"distance\": 0.737, \"gestalt_score\": 0.563, \"score\": 0.4330769230769231}, {\"rank\": 9, \"omim_id\": \"616083\", \"disease_name\": \"INTELLECTUAL DEVELOPMENTAL DISORDER, AUTOSOMAL DOMINANT 30, WITH SPEECH DELAY AND BEHAVIORAL ABNORMALITIES; MRD30\", \"distance\": 0.741, \"gestalt_score\": 0.559, \"score\": 0.43000000000000005}, {\"rank\": 10, \"omim_id\": \"154500\", \"disease_name\": \"Treacher Collins syndrome\", \"distance\": 0.745, \"gestalt_score\": 0.555, \"score\": 0.42692307692307696}, {\"rank\": 11, \"omim_id\": \"160150\", \"disease_name\": \"Myopathy, centronuclear\", \"distance\": 0.747, \"gestalt_score\": 0.553, \"score\": 0.4253846153846154}, {\"rank\": 12, \"omim_id\": \"251260\", \"disease_name\": \"NIJMEGEN BREAKAGE SYNDROME; NBS\", \"distance\": 0.751, \"gestalt_score\": 0.549, \"score\": 0.42230769230769233}, {\"rank\": 13, \"omim_id\": \"607014\", \"disease_name\": \"Mucopolysaccharidoses\", \"distance\": 0.754, \"gestalt_score\": 0.546, \"score\": 0.42000000000000004}, {\"rank\": 14, \"omim_id\": \"309590\", \"disease_name\": \"INTELLECTUAL DEVELOPMENTAL DISORDER, X-LINKED, SYNDROMIC, TURNER TYPE; MRXST\", \"distance\": 0.755, \"gestalt_score\": 0.545, \"score\": 0.41923076923076924}, {\"rank\": 15, \"omim_id\": \"618298\", \"disease_name\": \"DEVELOPMENTAL AND EPILEPTIC ENCEPHALOPATHY 70; DEE70\", \"distance\": 0.759, \"gestalt_score\": 0.541, \"score\": 0.41615384615384615}, {\"rank\": 16, \"omim_id\": \"616579\", \"disease_name\": \"NEURODEVELOPMENTAL DISORDER WITH HYPOTONIA, IMPAIRED LANGUAGE, AND DYSMORPHIC FEATURES; NEDHILD\", \"distance\": 0.76, \"gestalt_score\": 0.54, \"score\": 0.4153846153846154}, {\"rank\": 17, \"omim_id\": \"605130\", \"disease_name\": \"WIEDEMANN-STEINER SYNDROME; WDSTS\", \"distance\": 0.761, \"gestalt_score\": 0.539, \"score\": 0.4146153846153846}, {\"rank\": 18, \"omim_id\": \"251450\", \"disease_name\": \"Desbuquois dysplasia\", \"distance\": 0.762, \"gestalt_score\": 0.538, \"score\": 0.41384615384615386}, {\"rank\": 19, \"omim_id\": \"616459\", \"disease_name\": \"AL-RAQAD SYNDROME; ARS\", \"distance\": 0.763, \"gestalt_score\": 0.537, \"score\": 0.41307692307692306}, {\"rank\": 20, \"omim_id\": \"236100\", \"disease_name\": \"Holoprosencephaly\", \"distance\": 0.765, \"gestalt_score\": 0.535, \"score\": 0.4115384615384616}, {\"rank\": 21, \"omim_id\": \"210710\", \"disease_name\": \"MICROCEPHALIC OSTEODYSPLASTIC PRIMORDIAL DWARFISM, TYPE I; MOPD1\", \"distance\": 0.766, \"gestalt_score\": 0.534, \"score\": 0.4107692307692308}, {\"rank\": 22, \"omim_id\": \"614202\", \"disease_name\": \"RAFIQ SYNDROME; RAFQS\", \"distance\": 0.767, \"gestalt_score\": 0.533, \"score\": 0.41000000000000003}, {\"rank\": 23, \"omim_id\": \"300958\", \"disease_name\": \"INTELLECTUAL DEVELOPMENTAL DISORDER, X-LINKED, SYNDROMIC, SNIJDERS BLOK TYPE; MRXSSB\", \"distance\": 0.768, \"gestalt_score\": 0.532, \"score\": 0.40923076923076923}, {\"rank\": 24, \"omim_id\": \"607721\", \"disease_name\": \"Noonan syndrome-like disorder with loose anagen hair\", \"distance\": 0.769, \"gestalt_score\": 0.531, \"score\": 0.4084615384615385}, {\"rank\": 25, \"omim_id\": \"610253\", \"disease_name\": \"Kleefstra syndrome\", \"distance\": 0.77, \"gestalt_score\": 0.53, \"score\": 0.4076923076923077}, {\"rank\": 26, \"omim_id\": \"617804\", \"disease_name\": \"NEURODEVELOPMENTAL DISORDER WITH VARIABLE MOTOR AND LANGUAGE IMPAIRMENT; NEDMIAL\", \"distance\": 0.77, \"gestalt_score\": 0.53, \"score\": 0.4076923076923077}, {\"rank\": 27, \"omim_id\": \"216550\", \"disease_name\": \"COHEN SYNDROME; COH1\", \"distance\": 0.771, \"gestalt_score\": 0.529, \"score\": 0.40692307692307694}, {\"rank\": 28, \"omim_id\": \"618793\", \"disease_name\": \"INTELLECTUAL DEVELOPMENTAL DISORDER, AUTOSOMAL DOMINANT 62; MRD62\", \"distance\": 0.772, \"gestalt_score\": 0.528, \"score\": 0.40615384615384614}, {\"rank\": 29, \"omim_id\": \"618741\", \"disease_name\": \"NEURODEVELOPMENTAL DISORDER WITH EPILEPSY, SPASTICITY, AND BRAIN ATROPHY; NEDESBA\", \"distance\": 0.772, \"gestalt_score\": 0.528, \"score\": 0.40615384615384614}, {\"rank\": 30, \"omim_id\": \"220210\", \"disease_name\": \"Ritscher-Schinzel syndrome\", \"distance\": 0.773, \"gestalt_score\": 0.527, \"score\": 0.4053846153846154}]}",
+  "pcf_top30": [
+    {
+      "rank": 1,
+      "omim_id": "OMIM:620455",
+      "disease_name": "neurodevelopmental disorder with hypotonia and speech delay, with or without seizures",
+      "score": 1.0
+    },
+    {
+      "rank": 2,
+      "omim_id": "OMIM:619512",
+      "disease_name": "neurodevelopmental disorder with hypotonia and brain abnormalities",
+      "score": 1.0
+    },
+    {
+      "rank": 3,
+      "omim_id": "OMIM:620985",
+      "disease_name": "Karayol-Borroto-Haghshenas neurodevelopmental syndrome",
+      "score": 1.0
+    },
+    {
+      "rank": 4,
+      "omim_id": "OMIM:616364",
+      "disease_name": "intellectual disability-microcephaly-strabismus-behavioral abnormalities syndrome",
+      "score": 1.0
+    },
+    {
+      "rank": 5,
+      "omim_id": "OMIM:619480",
+      "disease_name": "neurodevelopmental disorder with dysmorphic facies and thin corpus callosum",
+      "score": 0.9921117029630495
+    },
+    {
+      "rank": 6,
+      "omim_id": "OMIM:617360",
+      "disease_name": "congenital heart defects, dysmorphic facial features, and intellectual developmental disorder",
+      "score": 0.9671421277196344
+    },
+    {
+      "rank": 7,
+      "omim_id": "OMIM:621304",
+      "disease_name": "developmental and epileptic encephalopathy 119",
+      "score": 0.9671421277196344
+    },
+    {
+      "rank": 8,
+      "omim_id": "OMIM:619475",
+      "disease_name": "developmental delay, impaired speech, and behavioral abnormalities",
+      "score": 0.9671421277196344
+    },
+    {
+      "rank": 9,
+      "omim_id": "OMIM:615829",
+      "disease_name": "AHDC1-related intellectual disability - obstructive sleep apnea - mild dysmorphism syndrome",
+      "score": 0.9671421277196344
+    },
+    {
+      "rank": 10,
+      "omim_id": "OMIM:300868",
+      "disease_name": "multiple congenital anomalies-hypotonia-seizures syndrome 2",
+      "score": 0.9671421277196344
+    },
+    {
+      "rank": 11,
+      "omim_id": "OMIM:618505",
+      "disease_name": "neurodevelopmental disorder with coarse facies and mild distal skeletal abnormalities",
+      "score": 0.9671421277196344
+    },
+    {
+      "rank": 12,
+      "omim_id": "OMIM:619927",
+      "disease_name": "intellectual developmental disorder, autosomal dominant 67",
+      "score": 0.9669254010567544
+    },
+    {
+      "rank": 13,
+      "omim_id": "OMIM:620330",
+      "disease_name": "intellectual developmental disorder, autosomal dominant 71, with behavioral abnormalities",
+      "score": 0.962053807712771
+    },
+    {
+      "rank": 14,
+      "omim_id": "OMIM:618430",
+      "disease_name": "developmental delay with variable intellectual impairment and behavioral abnormalities",
+      "score": 0.9611459080691506
+    },
+    {
+      "rank": 15,
+      "omim_id": "OMIM:618672",
+      "disease_name": "intellectual developmental disorder with speech delay, autism, and dysmorphic facies",
+      "score": 0.9602476945333682
+    },
+    {
+      "rank": 16,
+      "omim_id": "OMIM:618885",
+      "disease_name": "congenital disorder of glycosylation, type iit",
+      "score": 0.9518579684495794
+    },
+    {
+      "rank": 17,
+      "omim_id": "OMIM:618798",
+      "disease_name": "Beck-Fahrner syndrome",
+      "score": 0.9518579684495794
+    },
+    {
+      "rank": 18,
+      "omim_id": "OMIM:617452",
+      "disease_name": "intellectual developmental disorder with dysmorphic facies, seizures, and distal limb anomalies",
+      "score": 0.9518579684495794
+    },
+    {
+      "rank": 19,
+      "omim_id": "OMIM:300966",
+      "disease_name": "intellectual disability, X-linked, syndromic 33",
+      "score": 0.9518579684495794
+    },
+    {
+      "rank": 20,
+      "omim_id": "OMIM:610042",
+      "disease_name": "cortical dysplasia-focal epilepsy syndrome",
+      "score": 0.9518579684495794
+    },
+    {
+      "rank": 21,
+      "omim_id": "OMIM:621254",
+      "disease_name": "immunodeficiency 133 with ectodermal dysplasia with or without peripheral neuropathy",
+      "score": 0.9518579684495794
+    },
+    {
+      "rank": 22,
+      "omim_id": "OMIM:620851",
+      "disease_name": "neurodevelopmental disorder with hypotonia, brain anomalies, distinctive facies, and absent language",
+      "score": 0.9518579684495794
+    },
+    {
+      "rank": 23,
+      "omim_id": "OMIM:300983",
+      "disease_name": "intellectual disability, X-linked 104",
+      "score": 0.9439696714126289
+    },
+    {
+      "rank": 24,
+      "omim_id": "OMIM:619320",
+      "disease_name": "intellectual developmental disorder, autosomal dominant 65",
+      "score": 0.9439696714126289
+    },
+    {
+      "rank": 25,
+      "omim_id": "OMIM:615656",
+      "disease_name": "chromosome 15q11.2 deletion syndrome",
+      "score": 0.9340675287763888
+    },
+    {
+      "rank": 26,
+      "omim_id": "OMIM:619005",
+      "disease_name": "neurodevelopmental disorder with dysmorphic facies, impaired speech, and hypotonia",
+      "score": 0.9340675287763888
+    },
+    {
+      "rank": 27,
+      "omim_id": "OMIM:615873",
+      "disease_name": "ADNP-related multiple congenital anomalies - intellectual disability - autism spectrum disorder",
+      "score": 0.9340675287763888
+    },
+    {
+      "rank": 28,
+      "omim_id": "OMIM:616362",
+      "disease_name": "Houge-Janssens syndrome 2",
+      "score": 0.9302145334513193
+    },
+    {
+      "rank": 29,
+      "omim_id": "OMIM:617798",
+      "disease_name": "intellectual disability, autosomal dominant 53",
+      "score": 0.9302145334513193
+    },
+    {
+      "rank": 30,
+      "omim_id": "OMIM:619149",
+      "disease_name": "Lessel-Kreienkamp syndrome",
+      "score": 0.9289792087695253
+    }
+  ],
+  "gm_top30": [
+    {
+      "rank": 1,
+      "omim_id": "135900",
+      "disease_name": "Coffin-Siris syndrome",
+      "distance": 0.684,
+      "gestalt_score": 0.616,
+      "score": 0.4738461538461538
+    },
+    {
+      "rank": 2,
+      "omim_id": "616355",
+      "disease_name": "Houge-Janssens syndrome",
+      "distance": 0.702,
+      "gestalt_score": 0.598,
+      "score": 0.4600000000000001
+    },
+    {
+      "rank": 3,
+      "omim_id": "147920",
+      "disease_name": "Kabuki syndrome",
+      "distance": 0.708,
+      "gestalt_score": 0.592,
+      "score": 0.45538461538461544
+    },
+    {
+      "rank": 4,
+      "omim_id": "239850",
+      "disease_name": "CANTU SYNDROME",
+      "distance": 0.715,
+      "gestalt_score": 0.585,
+      "score": 0.45000000000000007
+    },
+    {
+      "rank": 5,
+      "omim_id": "615873",
+      "disease_name": "HELSMOORTEL-VAN DER AA SYNDROME; HVDAS",
+      "distance": 0.719,
+      "gestalt_score": 0.581,
+      "score": 0.446923076923077
+    },
+    {
+      "rank": 6,
+      "omim_id": "600987",
+      "disease_name": "CLEFT PALATE, CARDIAC DEFECTS, AND IMPAIRED INTELLECTUAL DEVELOPMENT; CPCMR",
+      "distance": 0.721,
+      "gestalt_score": 0.579,
+      "score": 0.44538461538461543
+    },
+    {
+      "rank": 7,
+      "omim_id": "617732",
+      "disease_name": "FACIAL PALSY, CONGENITAL, WITH PTOSIS AND VELOPHARYNGEAL DYSFUNCTION; FPVEPD",
+      "distance": 0.734,
+      "gestalt_score": 0.566,
+      "score": 0.4353846153846154
+    },
+    {
+      "rank": 8,
+      "omim_id": "616224",
+      "disease_name": "MYASTHENIC SYNDROME, CONGENITAL, 22; CMS22",
+      "distance": 0.737,
+      "gestalt_score": 0.563,
+      "score": 0.4330769230769231
+    },
+    {
+      "rank": 9,
+      "omim_id": "616083",
+      "disease_name": "INTELLECTUAL DEVELOPMENTAL DISORDER, AUTOSOMAL DOMINANT 30, WITH SPEECH DELAY AND BEHAVIORAL ABNORMALITIES; MRD30",
+      "distance": 0.741,
+      "gestalt_score": 0.559,
+      "score": 0.43000000000000005
+    },
+    {
+      "rank": 10,
+      "omim_id": "154500",
+      "disease_name": "Treacher Collins syndrome",
+      "distance": 0.745,
+      "gestalt_score": 0.555,
+      "score": 0.42692307692307696
+    },
+    {
+      "rank": 11,
+      "omim_id": "160150",
+      "disease_name": "Myopathy, centronuclear",
+      "distance": 0.747,
+      "gestalt_score": 0.553,
+      "score": 0.4253846153846154
+    },
+    {
+      "rank": 12,
+      "omim_id": "251260",
+      "disease_name": "NIJMEGEN BREAKAGE SYNDROME; NBS",
+      "distance": 0.751,
+      "gestalt_score": 0.549,
+      "score": 0.42230769230769233
+    },
+    {
+      "rank": 13,
+      "omim_id": "607014",
+      "disease_name": "Mucopolysaccharidoses",
+      "distance": 0.754,
+      "gestalt_score": 0.546,
+      "score": 0.42000000000000004
+    },
+    {
+      "rank": 14,
+      "omim_id": "309590",
+      "disease_name": "INTELLECTUAL DEVELOPMENTAL DISORDER, X-LINKED, SYNDROMIC, TURNER TYPE; MRXST",
+      "distance": 0.755,
+      "gestalt_score": 0.545,
+      "score": 0.41923076923076924
+    },
+    {
+      "rank": 15,
+      "omim_id": "618298",
+      "disease_name": "DEVELOPMENTAL AND EPILEPTIC ENCEPHALOPATHY 70; DEE70",
+      "distance": 0.759,
+      "gestalt_score": 0.541,
+      "score": 0.41615384615384615
+    },
+    {
+      "rank": 16,
+      "omim_id": "616579",
+      "disease_name": "NEURODEVELOPMENTAL DISORDER WITH HYPOTONIA, IMPAIRED LANGUAGE, AND DYSMORPHIC FEATURES; NEDHILD",
+      "distance": 0.76,
+      "gestalt_score": 0.54,
+      "score": 0.4153846153846154
+    },
+    {
+      "rank": 17,
+      "omim_id": "605130",
+      "disease_name": "WIEDEMANN-STEINER SYNDROME; WDSTS",
+      "distance": 0.761,
+      "gestalt_score": 0.539,
+      "score": 0.4146153846153846
+    },
+    {
+      "rank": 18,
+      "omim_id": "251450",
+      "disease_name": "Desbuquois dysplasia",
+      "distance": 0.762,
+      "gestalt_score": 0.538,
+      "score": 0.41384615384615386
+    },
+    {
+      "rank": 19,
+      "omim_id": "616459",
+      "disease_name": "AL-RAQAD SYNDROME; ARS",
+      "distance": 0.763,
+      "gestalt_score": 0.537,
+      "score": 0.41307692307692306
+    },
+    {
+      "rank": 20,
+      "omim_id": "236100",
+      "disease_name": "Holoprosencephaly",
+      "distance": 0.765,
+      "gestalt_score": 0.535,
+      "score": 0.4115384615384616
+    },
+    {
+      "rank": 21,
+      "omim_id": "210710",
+      "disease_name": "MICROCEPHALIC OSTEODYSPLASTIC PRIMORDIAL DWARFISM, TYPE I; MOPD1",
+      "distance": 0.766,
+      "gestalt_score": 0.534,
+      "score": 0.4107692307692308
+    },
+    {
+      "rank": 22,
+      "omim_id": "614202",
+      "disease_name": "RAFIQ SYNDROME; RAFQS",
+      "distance": 0.767,
+      "gestalt_score": 0.533,
+      "score": 0.41000000000000003
+    },
+    {
+      "rank": 23,
+      "omim_id": "300958",
+      "disease_name": "INTELLECTUAL DEVELOPMENTAL DISORDER, X-LINKED, SYNDROMIC, SNIJDERS BLOK TYPE; MRXSSB",
+      "distance": 0.768,
+      "gestalt_score": 0.532,
+      "score": 0.40923076923076923
+    },
+    {
+      "rank": 24,
+      "omim_id": "607721",
+      "disease_name": "Noonan syndrome-like disorder with loose anagen hair",
+      "distance": 0.769,
+      "gestalt_score": 0.531,
+      "score": 0.4084615384615385
+    },
+    {
+      "rank": 25,
+      "omim_id": "610253",
+      "disease_name": "Kleefstra syndrome",
+      "distance": 0.77,
+      "gestalt_score": 0.53,
+      "score": 0.4076923076923077
+    },
+    {
+      "rank": 26,
+      "omim_id": "617804",
+      "disease_name": "NEURODEVELOPMENTAL DISORDER WITH VARIABLE MOTOR AND LANGUAGE IMPAIRMENT; NEDMIAL",
+      "distance": 0.77,
+      "gestalt_score": 0.53,
+      "score": 0.4076923076923077
+    },
+    {
+      "rank": 27,
+      "omim_id": "216550",
+      "disease_name": "COHEN SYNDROME; COH1",
+      "distance": 0.771,
+      "gestalt_score": 0.529,
+      "score": 0.40692307692307694
+    },
+    {
+      "rank": 28,
+      "omim_id": "618793",
+      "disease_name": "INTELLECTUAL DEVELOPMENTAL DISORDER, AUTOSOMAL DOMINANT 62; MRD62",
+      "distance": 0.772,
+      "gestalt_score": 0.528,
+      "score": 0.40615384615384614
+    },
+    {
+      "rank": 29,
+      "omim_id": "618741",
+      "disease_name": "NEURODEVELOPMENTAL DISORDER WITH EPILEPSY, SPASTICITY, AND BRAIN ATROPHY; NEDESBA",
+      "distance": 0.772,
+      "gestalt_score": 0.528,
+      "score": 0.40615384615384614
+    },
+    {
+      "rank": 30,
+      "omim_id": "220210",
+      "disease_name": "Ritscher-Schinzel syndrome",
+      "distance": 0.773,
+      "gestalt_score": 0.527,
+      "score": 0.4053846153846154
+    }
+  ],
+  "raw_response": {
+    "content": "{\"pcf_k\":12,\"gm_k\":6,\"reason\":\"PCF shows a strong high-confidence plateau: ranks 1-4 have maximal score 1.0, and ranks 5-12 remain very high (0.992 to 0.9669) with multiple closely matching neurodevelopmental/behavioral phenotypes (microcephaly, GDD/ID, autism/speech delay). After rank 12 the scores begin a gradual decline (rank 13 = 0.962), so retaining through 12 captures the densest high-score region while limiting cost.\\nGestaltMatcher has moderate separation and a relatively flat gradient: rank 1 score 0.4738 (distance 0.684) down to rank 6 score 0.4454 (distance 0.721); beyond rank 6 the scores continue to drift downward with minimal incremental separation (e.g., rank 9 score 0.43, distance 0.741). Also, GM rank 5 (ADNP/HVDAS) overlaps a PCF candidate (PCF rank 27), indicating GM adds some complementary coverage early; however, deeper GM ranks appear less discriminative. Therefore keep GM top 6 to capture the strongest gestalt-supported syndromic candidates while allocating most budget to the more sharply high-scoring PCF list. Total retained = 18 <= 20.\"}",
+    "additional_kwargs": {
+      "parsed": {
+        "pcf_k": 12,
+        "gm_k": 6,
+        "reason": "PCF shows a strong high-confidence plateau: ranks 1-4 have maximal score 1.0, and ranks 5-12 remain very high (0.992 to 0.9669) with multiple closely matching neurodevelopmental/behavioral phenotypes (microcephaly, GDD/ID, autism/speech delay). After rank 12 the scores begin a gradual decline (rank 13 = 0.962), so retaining through 12 captures the densest high-score region while limiting cost.\nGestaltMatcher has moderate separation and a relatively flat gradient: rank 1 score 0.4738 (distance 0.684) down to rank 6 score 0.4454 (distance 0.721); beyond rank 6 the scores continue to drift downward with minimal incremental separation (e.g., rank 9 score 0.43, distance 0.741). Also, GM rank 5 (ADNP/HVDAS) overlaps a PCF candidate (PCF rank 27), indicating GM adds some complementary coverage early; however, deeper GM ranks appear less discriminative. Therefore keep GM top 6 to capture the strongest gestalt-supported syndromic candidates while allocating most budget to the more sharply high-scoring PCF list. Total retained = 18 <= 20."
+      },
+      "refusal": null
+    },
+    "response_metadata": {
+      "token_usage": {
+        "completion_tokens": 291,
+        "prompt_tokens": 3981,
+        "total_tokens": 4272,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": 0,
+          "audio_tokens": 0,
+          "reasoning_tokens": 0,
+          "rejected_prediction_tokens": 0
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cached_tokens": 0
+        },
+        "latency_checkpoint": {
+          "engine_tbt_ms": 34,
+          "engine_ttft_ms": 170,
+          "engine_ttlt_ms": 10233,
+          "pre_inference_ms": 228,
+          "service_tbt_ms": 35,
+          "service_ttft_ms": 570,
+          "service_ttlt_ms": 10645,
+          "user_visible_ttft_ms": 342
+        }
+      },
+      "model_name": "gpt-5.2-2025-12-11",
+      "system_fingerprint": null,
+      "id": "chatcmpl-EPMD7yx6o8jcqWIdgV9XWTAW4mTcO",
+      "service_tier": "default",
+      "prompt_filter_results": [
+        {
+          "prompt_index": 0,
+          "content_filter_results": {
+            "hate": {
+              "filtered": false,
+              "severity": "safe"
+            },
+            "jailbreak": {
+              "detected": false,
+              "filtered": false
+            },
+            "self_harm": {
+              "filtered": false,
+              "severity": "safe"
+            },
+            "sexual": {
+              "filtered": false,
+              "severity": "safe"
+            },
+            "violence": {
+              "filtered": false,
+              "severity": "safe"
+            }
+          }
+        }
+      ],
+      "finish_reason": "stop",
+      "logprobs": null,
+      "content_filter_results": {
+        "protected_material_code": {
+          "detected": false,
+          "filtered": false
+        },
+        "protected_material_text": {
+          "detected": false,
+          "filtered": false
+        }
+      }
+    },
+    "type": "ai",
+    "name": null,
+    "id": "run--bc685c89-1292-4160-a633-6761dd645889-0",
+    "example": false,
+    "tool_calls": [],
+    "invalid_tool_calls": [],
+    "usage_metadata": {
+      "input_tokens": 3981,
+      "output_tokens": 291,
+      "total_tokens": 4272,
+      "input_token_details": {
+        "audio": 0,
+        "cache_read": 0
+      },
+      "output_token_details": {
+        "audio": 0,
+        "reasoning": 0
+      }
+    }
+  }
+}

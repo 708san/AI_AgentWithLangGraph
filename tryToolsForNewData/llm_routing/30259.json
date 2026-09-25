@@ -1,0 +1,116 @@
+{
+  "status": "ok",
+  "mode": "input_only",
+  "image_id": "30259",
+  "model": "gpt-5-2",
+  "pcf_k": 14,
+  "gm_k": 6,
+  "requested_pcf_k": 14,
+  "requested_gm_k": 6,
+  "reason": "Phenotype is broad (neurodevelopmental delay/ID/autism, hypotonia, CNS anomalies, optic nerve hypoplasia with nystagmus/visual impairment, pituitary hypoplasia, macroglossia/protruding tongue, and several craniofacial/limb findings). This favors deeper retention from phenotype-driven ranking to capture heterogeneous syndromic/endocrine-neuro-ocular differentials. Facial image shows some dysmorphism but not an extremely distinctive single-gestalt pattern and is partially confounded by glasses/angle, so retain fewer GestaltMatcher results while still covering plausible facial-similar syndromes. Total kept is constrained to 20 to balance recall vs review cost.",
+  "budget": 20,
+  "elapsed_ms": 30462.79,
+  "prompt": "You must allocate review depth for two disease ranking tools without seeing their results. Choose how many top results to retain from PCF and GestaltMatcher (0 to 30) using only the patient phenotype and facial image. Do not assume any particular disease or tool outcome. This is a constrained budget problem: maximize expected probability that the true disease remains in the retained union while minimizing review cost. You MUST satisfy pcf_k + gm_k <= 20. Do not choose large symmetric cutoffs as a safety default. Do not diagnose and do not use the known answer. Prefer the smallest cutoffs that preserve plausible candidates. Return only the requested JSON.\nPATIENT:\n{\"sex\": \"male\", \"onset\": \"\", \"present_hpo\": [[\"HP:0000609\", \"Optic nerve hypoplasia\"], [\"HP:0000639\", \"Nystagmus\"], [\"HP:0000505\", \"Visual impairment\"], [\"HP:0031936\", \"Delayed ability to walk\"], [\"HP:0010862\", \"Delayed fine motor development\"], [\"HP:0001252\", \"Hypotonia\"], [\"HP:0000750\", \"Delayed speech and language development\"], [\"HP:0000717\", \"Autism\"], [\"HP:0001249\", \"Intellectual disability\"], [\"HP:0000158\", \"Macroglossia\"], [\"HP:0006970\", \"Periventricular leukomalacia\"], [\"HP:0100702\", \"Arachnoid cyst\"], [\"HP:0012506\", \"Small pituitary gland\"], [\"HP:0000286\", \"Epicanthus\"], [\"HP:0000581\", \"Blepharophimosis\"], [\"HP:0000319\", \"Smooth philtrum\"], [\"HP:0005280\", \"Depressed nasal bridge\"], [\"HP:0011229\", \"Broad eyebrow\"], [\"HP:0006191\", \"Deep palmar crease\"], [\"HP:0001814\", \"Deep-set nails\"], [\"HP:0010808\", \"Protruding tongue\"]], \"absent_hpo\": [[\"HP:0000843\", \"Hyperparathyroidism\"], [\"HP:0002897\", \"Parathyroid adenoma\"], [\"HP:0000995\", \"Melanocytic nevus\"], [\"HP:0000957\", \"Cafe-au-lait spot\"], [\"HP:0011968\", \"Feeding difficulties\"], [\"HP:0002013\", \"Vomiting\"], [\"HP:0002578\", \"Gastroparesis\"], [\"HP:0002035\", \"Rectal prolapse\"], [\"HP:0100633\", \"Esophagitis\"], [\"HP:0002021\", \"Pyloric stenosis\"], [\"HP:0002015\", \"Dysphagia\"], [\"HP:0001622\", \"Premature birth\"], [\"HP:0001561\", \"Polyhydramnios\"], [\"HP:0001562\", \"Oligohydramnios\"], [\"HP:0001520\", \"Large for gestational age\"], [\"HP:0011410\", \"Caesarean section\"], [\"HP:0000405\", \"Conductive hearing impairment\"], [\"HP:0000407\", \"Sensorineural hearing impairment\"], [\"HP:0000486\", \"Strabismus\"], [\"HP:0000540\", \"Hypermetropia\"], [\"HP:0000541\", \"Retinal detachment\"], [\"HP:0000483\", \"Astigmatism\"], [\"HP:0000545\", \"Myopia\"], [\"HP:0000501\", \"Glaucoma\"], [\"HP:0025592\", \"Superior oblique muscle weakness\"], [\"HP:0000518\", \"Cataract\"], [\"HP:0006934\", \"Congenital nystagmus\"], [\"HP:0007443\", \"Partial albinism\"], [\"HP:0000648\", \"Optic atrophy\"], [\"HP:0001097\", \"Keratoconjunctivitis sicca\"], [\"HP:0001342\", \"Cerebral hemorrhage\"], [\"HP:0000646\", \"Amblyopia\"], [\"HP:0001250\", \"Seizure\"], [\"HP:0007018\", \"Attention deficit hyperactivity disorder\"], [\"HP:0000739\", \"Anxiety\"], [\"HP:0000713\", \"Agitation\"], [\"HP:0000718\", \"Aggressive behavior\"], [\"HP:0002591\", \"Polyphagia\"], [\"HP:0004305\", \"Involuntary movements\"], [\"HP:0003763\", \"Bruxism\"], [\"HP:0000716\", \"Depression\"], [\"HP:0000744\", \"Low frustration tolerance\"], [\"HP:0031473\", \"Anger\"], [\"HP:0000047\", \"Hypospadias\"], [\"HP:0001537\", \"Umbilical hernia\"], [\"HP:0000023\", \"Inguinal hernia\"], [\"HP:0000028\", \"Cryptorchidism\"], [\"HP:0002019\", \"Constipation\"], [\"HP:0002870\", \"Obstructive sleep apnea\"], [\"HP:0025267\", \"Snoring\"], [\"HP:0000126\", \"Hydronephrosis\"], [\"HP:0000787\", \"Nephrolithiasis\"], [\"HP:0000085\", \"Horseshoe kidney\"], [\"HP:0000121\", \"Nephrocalcinosis\"], [\"HP:0000256\", \"Macrocephaly\"], [\"HP:6001070\", \"Subdural hygroma\"], [\"HP:0100309\", \"Subdural hemorrhage\"], [\"HP:0002188\", \"Delayed CNS myelination\"], [\"HP:0002190\", \"Choroid plexus cyst\"], [\"HP:0002138\", \"Subarachnoid hemorrhage\"], [\"HP:0002280\", \"Enlarged cisterna magna\"], [\"HP:0002059\", \"Cerebral atrophy\"], [\"HP:0012520\", \"Dilation of Virchow-Robin spaces\"], [\"HP:0003416\", \"Spinal canal stenosis\"], [\"HP:0002079\", \"Hypoplasia of the corpus callosum\"], [\"HP:0012028\", \"Hepatocellular adenoma\"], [\"HP:0010722\", \"Asymmetry of the ears\"], [\"HP:0000396\", \"Overfolded helix\"], [\"HP:0000378\", \"Cupped ear\"], [\"HP:0009748\", \"Large earlobe\"], [\"HP:0000400\", \"Macrotia\"], [\"HP:0001057\", \"Aplasia cutis congenita\"], [\"HP:0000358\", \"Posteriorly rotated ears\"], [\"HP:0000384\", \"Preauricular skin tag\"], [\"HP:0000391\", \"Thickened helices\"], [\"HP:0000369\", \"Low-set ears\"], [\"HP:0000656\", \"Ectropion\"], [\"HP:0000629\", \"Periorbital fullness\"], [\"HP:0000582\", \"Upslanted palpebral fissure\"], [\"HP:0000506\", \"Telecanthus\"], [\"HP:0000637\", \"Long palpebral fissure\"], [\"HP:0000494\", \"Downslanted palpebral fissures\"], [\"HP:0000316\", \"Hypertelorism\"], [\"HP:0000276\", \"Long face\"], [\"HP:0000280\", \"Coarse facial features\"], [\"HP:0000307\", \"Pointed chin\"], [\"HP:0011800\", \"Midface retrusion\"], [\"HP:0000275\", \"Narrow face\"], [\"HP:0000272\", \"Malar flattening\"], [\"HP:0011220\", \"Prominent forehead\"], [\"HP:0002007\", \"Frontal bossing\"], [\"HP:0000341\", \"Narrow forehead\"], [\"HP:0000337\", \"Broad forehead\"], [\"HP:0000219\", \"Thin upper lip vermilion\"], [\"HP:0000347\", \"Micrognathia\"], [\"HP:0000189\", \"Narrow palate\"], [\"HP:0000343\", \"Long philtrum\"], [\"HP:0000278\", \"Retrognathia\"], [\"HP:0000154\", \"Wide mouth\"], [\"HP:0000303\", \"Mandibular prognathia\"], [\"HP:0000218\", \"High palate\"], [\"HP:0003189\", \"Long nose\"], [\"HP:0000414\", \"Bulbous nose\"], [\"HP:0000455\", \"Broad nasal tip\"], [\"HP:0000448\", \"Prominent nose\"], [\"HP:0009931\", \"Enlarged naris\"], [\"HP:0009765\", \"Low hanging columella\"], [\"HP:0002213\", \"Fine hair\"], [\"HP:0002217\", \"Slow-growing hair\"], [\"HP:0009890\", \"High anterior hairline\"], [\"HP:0011231\", \"Prominent eyelashes\"], [\"HP:0100874\", \"Thick hair\"], [\"HP:0002162\", \"Low posterior hairline\"], [\"HP:0000998\", \"Hypertrichosis\"], [\"HP:0000574\", \"Thick eyebrow\"], [\"HP:0000294\", \"Low anterior hairline\"], [\"HP:0002553\", \"Highly arched eyebrow\"], [\"HP:0002286\", \"Fair hair\"], [\"HP:0000475\", \"Broad neck\"], [\"HP:0000260\", \"Wide anterior fontanel\"], [\"HP:0001476\", \"Delayed closure of the anterior fontanelle\"], [\"HP:0000262\", \"Turricephaly\"], [\"HP:0001217\", \"Clubbing\"], [\"HP:0001382\", \"Joint hypermobility\"], [\"HP:0000767\", \"Pectus excavatum\"], [\"HP:0030031\", \"Small toe\"], [\"HP:0000926\", \"Platyspondyly\"], [\"HP:0001385\", \"Hip dysplasia\"], [\"HP:0006101\", \"Finger syndactyly\"], [\"HP:0001840\", \"Metatarsus adductus\"], [\"HP:0100259\", \"Postaxial polydactyly\"], [\"HP:0008455\", \"Dysplastic sacrum\"], [\"HP:0003301\", \"Irregular vertebral endplates\"], [\"HP:0001773\", \"Short foot\"], [\"HP:0001176\", \"Large hands\"], [\"HP:0003304\", \"Spondylolysis\"], [\"HP:0000954\", \"Single transverse palmar crease\"], [\"HP:0001845\", \"Overlapping toe\"], [\"HP:0000768\", \"Pectus carinatum\"], [\"HP:0030084\", \"Clinodactyly\"], [\"HP:0001822\", \"Hallux valgus\"], [\"HP:0001831\", \"Short toe\"], [\"HP:0001792\", \"Small nail\"], [\"HP:0012532\", \"Chronic pain\"], [\"HP:0001373\", \"Joint dislocation\"], [\"HP:0002650\", \"Scoliosis\"], [\"HP:0001182\", \"Tapered finger\"], [\"HP:0003302\", \"Spondylolisthesis\"], [\"HP:0011069\", \"Supernumerary tooth\"], [\"HP:0000678\", \"Dental crowding\"], [\"HP:0000201\", \"Pierre-Robin sequence\"], [\"HP:0000684\", \"Delayed eruption of teeth\"], [\"HP:0006335\", \"Persistence of primary teeth\"], [\"HP:0000175\", \"Cleft palate\"], [\"HP:0000691\", \"Microdontia\"]]}",
+  "pcf_top30": null,
+  "gm_top30": null,
+  "raw_response": {
+    "content": "{\"pcf_k\":14,\"gm_k\":6,\"reason\":\"Phenotype is broad (neurodevelopmental delay/ID/autism, hypotonia, CNS anomalies, optic nerve hypoplasia with nystagmus/visual impairment, pituitary hypoplasia, macroglossia/protruding tongue, and several craniofacial/limb findings). This favors deeper retention from phenotype-driven ranking to capture heterogeneous syndromic/endocrine-neuro-ocular differentials. Facial image shows some dysmorphism but not an extremely distinctive single-gestalt pattern and is partially confounded by glasses/angle, so retain fewer GestaltMatcher results while still covering plausible facial-similar syndromes. Total kept is constrained to 20 to balance recall vs review cost.\"}",
+    "additional_kwargs": {
+      "parsed": {
+        "pcf_k": 14,
+        "gm_k": 6,
+        "reason": "Phenotype is broad (neurodevelopmental delay/ID/autism, hypotonia, CNS anomalies, optic nerve hypoplasia with nystagmus/visual impairment, pituitary hypoplasia, macroglossia/protruding tongue, and several craniofacial/limb findings). This favors deeper retention from phenotype-driven ranking to capture heterogeneous syndromic/endocrine-neuro-ocular differentials. Facial image shows some dysmorphism but not an extremely distinctive single-gestalt pattern and is partially confounded by glasses/angle, so retain fewer GestaltMatcher results while still covering plausible facial-similar syndromes. Total kept is constrained to 20 to balance recall vs review cost."
+      },
+      "refusal": null
+    },
+    "response_metadata": {
+      "token_usage": {
+        "completion_tokens": 166,
+        "prompt_tokens": 2806,
+        "total_tokens": 2972,
+        "completion_tokens_details": {
+          "accepted_prediction_tokens": 0,
+          "audio_tokens": 0,
+          "reasoning_tokens": 0,
+          "rejected_prediction_tokens": 0
+        },
+        "prompt_tokens_details": {
+          "audio_tokens": 0,
+          "cached_tokens": 2432
+        },
+        "latency_checkpoint": {
+          "engine_tbt_ms": 26,
+          "engine_ttft_ms": 241,
+          "engine_ttlt_ms": 4564,
+          "pre_inference_ms": 304,
+          "service_tbt_ms": 26,
+          "service_ttft_ms": 754,
+          "service_ttlt_ms": 5072,
+          "user_visible_ttft_ms": 449
+        }
+      },
+      "model_name": "gpt-5.2-2025-12-11",
+      "system_fingerprint": null,
+      "id": "chatcmpl-EPLtFhDgNYDTxD6TqH7uxogI2io2G",
+      "service_tier": "default",
+      "prompt_filter_results": [
+        {
+          "prompt_index": 0,
+          "content_filter_results": {
+            "hate": {
+              "filtered": false,
+              "severity": "safe"
+            },
+            "jailbreak": {
+              "detected": false,
+              "filtered": false
+            },
+            "self_harm": {
+              "filtered": false,
+              "severity": "safe"
+            },
+            "sexual": {
+              "filtered": false,
+              "severity": "safe"
+            },
+            "violence": {
+              "filtered": false,
+              "severity": "safe"
+            }
+          }
+        }
+      ],
+      "finish_reason": "stop",
+      "logprobs": null,
+      "content_filter_results": {
+        "protected_material_code": {
+          "detected": false,
+          "filtered": false
+        },
+        "protected_material_text": {
+          "detected": false,
+          "filtered": false
+        }
+      }
+    },
+    "type": "ai",
+    "name": null,
+    "id": "run--9f8e6fda-5ac0-4110-aa42-1e7bda9e0af1-0",
+    "example": false,
+    "tool_calls": [],
+    "invalid_tool_calls": [],
+    "usage_metadata": {
+      "input_tokens": 2806,
+      "output_tokens": 166,
+      "total_tokens": 2972,
+      "input_token_details": {
+        "audio": 0,
+        "cache_read": 2432
+      },
+      "output_token_details": {
+        "audio": 0,
+        "reasoning": 0
+      }
+    }
+  }
+}
