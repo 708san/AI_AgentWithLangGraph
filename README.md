@@ -46,6 +46,26 @@ python scripts/run_from_phenopacket.py --help
 Local sample datasets and historical experiments are kept under
 `local_artifacts/` in this workspace and are intentionally ignored by git.
 
+### Running legacy patient 276 with a facial image
+
+The repository includes a legacy TSV/image pair for patient `276` (image
+`359.png`). The adapter below materializes the old TSV row as a compatible
+Phenopacket and saves the complete run under a timestamped directory:
+
+```bash
+python scripts/run_old_phenopacket_patient.py --patient-id 276
+```
+
+Before making API calls, validate the resolved input and image with:
+
+```bash
+python scripts/run_old_phenopacket_patient.py --patient-id 276 --dry-run
+```
+
+Each run saves `input/phenopacket.json`, `input/metadata_row.json`, a copy of
+the face image, `process.log`, `logs/`, `node_results/`, the final JSON result,
+and `execution_summary.json` under `run_outputs/legacy_phenopacket/`.
+
 ---
 ## Log
 If you set enable_log=True when creating the pipeline, all node results and prompts will be saved in a human-readable log file under the log/ directory.
