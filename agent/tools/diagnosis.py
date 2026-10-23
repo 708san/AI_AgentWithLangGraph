@@ -1,9 +1,19 @@
 from typing import Optional
 import re
 from langchain.schema import HumanMessage
-from ..state.state_types import State, DiagnosisOutput, DiagnosisFormat
+from ..state.state_types import (
+    State,
+    DiagnosisOutput,
+    DiagnosisFormat,
+    DiagnosisOutputV2,
+    DiagnosisFormatV2,
+    EvidenceItem,
+    MergedDiseaseCandidateV2,
+    SourceRecord,
+)
 from ..llm.prompt import prompt_dict, build_prompt
 from ..utils.response_serializer import omim_number
+from .candidate_metadata import canonical_omim_id, enrich_candidates
 
 
 _REFERENCE_SOURCE_ALIASES = (
@@ -15,6 +25,18 @@ _REFERENCE_SOURCE_ALIASES = (
 )
 _URL_PATTERN = re.compile(r"https?://[^\s)]+")
 _MISSING_URL_PATTERN = re.compile(r"\s*URL:\s*(?:Not provided|N/A)\.?", re.IGNORECASE)
+_PUBMED_URL_PATTERN = re.compile(
+    r"https?://(?:www\.)?(?:pubmed\.ncbi\.nlm\.nih\.gov|pmc\.ncbi\.nlm\.nih\.gov)/",
+    re.IGNORECASE,
+)
+
+
+def is_pubmed_reference(reference: str) -> bool:
+    """Return whether a legacy reference is an external PubMed/PMC citation."""
+    value = str(reference or "")
+    if "phenotypesearch" in value.lower():
+        return False
+    return bool(_PUBMED_URL_PATTERN.search(value))
 
 
 def _parse_reference_entries(reference_text: Optional[str]) -> dict[int, str]:
@@ -34,7 +56,9 @@ def _parse_reference_entries(reference_text: Optional[str]) -> dict[int, str]:
 
 def _reference_ids_from_description(description: str, reference_entries: dict[int, str]) -> list[int]:
     """Resolve explicit citations, with a deterministic tool-name fallback."""
-    cited_ids = [int(value) for value in re.findall(r"\[(\d+)\]", description or "")]
+    cited_ids: list[int] = []
+    for group in re.findall(r"\[((?:\d+\s*,\s*)*\d+)\]", description or ""):
+        cited_ids.extend(int(value.strip()) for value in group.split(","))
     if cited_ids:
         return cited_ids
 
@@ -95,29 +119,76 @@ def _enrich_reference_block(reference_text: Optional[str], source_records) -> Op
     )
 
 
+def _filter_and_renumber_references(reference_text: Optional[str], source_records):
+    """Keep the old numbered-string format while retaining only PubMed/PMC items."""
+    entries = _parse_reference_entries(reference_text)
+    if not entries:
+        return {}, {}, reference_text
+
+    enriched = {
+        reference_id: _enrich_reference(reference, source_records)
+        for reference_id, reference in entries.items()
+    }
+    allowed = {
+        reference_id: reference
+        for reference_id, reference in enriched.items()
+        if is_pubmed_reference(reference)
+    }
+    old_to_new = {
+        old_id: new_id
+        for new_id, old_id in enumerate(sorted(allowed), 1)
+    }
+    filtered = {
+        old_to_new[old_id]: reference
+        for old_id, reference in allowed.items()
+    }
+    block = "\n".join(
+        f"{reference_id}. {filtered[reference_id]}"
+        for reference_id in sorted(filtered)
+    )
+    return filtered, old_to_new, block
+
+
+def _rewrite_citations(description: str, old_to_new: dict[int, int]) -> str:
+    def replace(match):
+        mapped = [
+            old_to_new[int(value.strip())]
+            for value in match.group(1).split(",")
+            if int(value.strip()) in old_to_new
+        ]
+        return f"[{','.join(str(value) for value in mapped)}]" if mapped else ""
+
+    return re.sub(r"\[((?:\d+\s*,\s*)*\d+)\]", replace, description or "")
+
+
 def attach_diagnosis_references(diagnosis_output: DiagnosisOutput, source_records=None) -> DiagnosisOutput:
-    """Attach cited/tool references and source URLs to each diagnosis item."""
+    """Attach PubMed/PMC references without changing the legacy string format."""
     if not diagnosis_output or not getattr(diagnosis_output, "ans", None):
         return diagnosis_output
 
-    reference_entries = _parse_reference_entries(diagnosis_output.reference)
-    enriched_entries = {
-        reference_id: _enrich_reference(reference, source_records)
-        for reference_id, reference in reference_entries.items()
-    }
-    diagnosis_output.reference = _enrich_reference_block(diagnosis_output.reference, source_records)
+    enriched_entries, old_to_new, reference_block = _filter_and_renumber_references(
+        diagnosis_output.reference,
+        source_records,
+    )
+    diagnosis_output.reference = reference_block
     for diagnosis in diagnosis_output.ans:
-        reference_ids = _reference_ids_from_description(diagnosis.description or "", reference_entries)
+        diagnosis.description = _rewrite_citations(diagnosis.description or "", old_to_new)
+        original_ids = _reference_ids_from_description(
+            diagnosis.description or "",
+            _parse_reference_entries(diagnosis_output.reference),
+        )
+        # Descriptions have already been renumbered, so these IDs are current IDs.
+        reference_ids = original_ids
         mapped = [enriched_entries[reference_id] for reference_id in reference_ids if reference_id in enriched_entries]
         existing = []
         for reference in list(getattr(diagnosis, "reference", []) or []):
             numeric_match = re.fullmatch(r"\s*\[?(\d+)\]?\.?\s*", str(reference))
             if numeric_match and int(numeric_match.group(1)) in enriched_entries:
                 existing.append(enriched_entries[int(numeric_match.group(1))])
-            else:
+            elif is_pubmed_reference(_enrich_reference(str(reference), source_records)):
                 existing.append(_enrich_reference(str(reference), source_records))
         diagnosis.reference = list(
-            dict.fromkeys(_enrich_reference(reference, source_records) for reference in existing + mapped)
+            dict.fromkeys(reference for reference in existing + mapped if is_pubmed_reference(reference))
         )
     return diagnosis_output
 
@@ -137,7 +208,8 @@ def parse_diagnosis_text(text: str) -> DiagnosisOutput:
         desc_match = re.search(r"DESCRIPTION::(.*)", block, re.DOTALL)
         
         if rank_match and disease_match and desc_match:
-            rank = int(rank_match.group(1).strip())
+            # The legacy rank is display order. Tool ranks are stored separately.
+            rank = len(cases) + 1
             disease = disease_match.group(1).strip()
             omim = omim_match.group(1).strip() if omim_match else None
             desc = desc_match.group(1).strip()
@@ -275,3 +347,134 @@ def createDiagnosis(state: State) -> Optional[DiagnosisOutput]:
         return (diagnosis_output, prompt)
     
     return None, None
+
+
+def _v2_status(candidate: MergedDiseaseCandidateV2, evidence: list[EvidenceItem], sources: list[SourceRecord]) -> str:
+    candidate_evidence = [item for item in evidence if item.candidate_id == candidate.candidate_id]
+    source_map = {source.source_id: source for source in sources}
+    if any(item.support == "contradicts" for item in candidate_evidence) and not any(
+        item.support == "supports" for item in candidate_evidence
+    ):
+        return "contradictory"
+    if any(
+        item.support == "supports"
+        and source_map.get(item.source_id)
+        and source_map[item.source_id].source_type == "literature"
+        for item in candidate_evidence
+    ):
+        return "supported"
+    if candidate_evidence:
+        return "insufficient"
+    return "not_retrieved"
+
+
+def _v2_reason(candidate: MergedDiseaseCandidateV2, evidence: list[EvidenceItem], status: str) -> tuple[str, str]:
+    candidate_evidence = [item for item in evidence if item.candidate_id == candidate.candidate_id]
+    if candidate_evidence:
+        claims_en = "; ".join(item.claim_en for item in candidate_evidence[:4])
+        claims_ja = "；".join(item.claim_ja for item in candidate_evidence[:4])
+    else:
+        claims_en = "No validated literature evidence was retrieved for this candidate."
+        claims_ja = "この候補を支持する検証済みの文献根拠は取得できませんでした。"
+    suffix_en = {
+        "supported": " Literature evidence supports the candidate, but this is not a confirmed diagnosis.",
+        "insufficient": " The candidate remains possible, but literature support is insufficient.",
+        "contradictory": " Retrieved evidence contains a clinically important contradiction.",
+        "not_retrieved": " Literature evidence was not retrieved; this candidate must not be described as literature-supported.",
+    }[status]
+    suffix_ja = {
+        "supported": " 文献根拠はこの候補を支持しますが、確定診断ではありません。",
+        "insufficient": " 候補としては残りますが、文献支持は不十分です。",
+        "contradictory": " 取得した文献根拠には臨床的に重要な矛盾が含まれます。",
+        "not_retrieved": " 文献根拠を取得できていないため、文献支持済みとは表現できません。",
+    }[status]
+    return claims_en + suffix_en, claims_ja + suffix_ja
+
+
+def createDiagnosisV2(state: State) -> tuple[DiagnosisOutputV2 | None, str]:
+    """Generate a bilingual tentative diagnosis from structured Evidence only."""
+    llm = state.get("llm")
+    candidates = enrich_candidates(state.get("mergedDiseaseCandidates", []) or [])
+    evidence = list(state.get("evidence", []) or [])
+    sources = list(state.get("sources", []) or [])
+    if not candidates:
+        return DiagnosisOutputV2(ans=[], evidence=evidence), ""
+
+    def fallback() -> DiagnosisOutputV2:
+        answers = []
+        for rank, candidate in enumerate(candidates[:10], 1):
+            status = _v2_status(candidate, evidence, sources)
+            description_en, description_ja = _v2_reason(candidate, evidence, status)
+            answers.append(
+                DiagnosisFormatV2(
+                    candidate_id=candidate.candidate_id,
+                    disease_name_en=candidate.disease_name,
+                    disease_name_ja=candidate.disease_name,
+                    OMIM_id=canonical_omim_id(candidate.OMIM_id),
+                    rank=rank,
+                    description_en=description_en,
+                    description_ja=description_ja,
+                    evidence_ids=[item.evidence_id for item in evidence if item.candidate_id == candidate.candidate_id],
+                    literature_status=status,
+                )
+            )
+        return DiagnosisOutputV2(ans=answers, evidence=evidence)
+
+    if not llm:
+        return fallback(), ""
+
+    evidence_text = []
+    for item in evidence:
+        evidence_text.append(
+            f"{item.evidence_id} | candidate={item.candidate_id} | type={item.evidence_type} | "
+            f"support={item.support} | confidence={item.confidence} | EN={item.claim_en} | JA={item.claim_ja} | "
+            f"excerpt={item.excerpt}"
+        )
+    candidate_text = []
+    for index, candidate in enumerate(candidates[:10], 1):
+        supports = "; ".join(
+            f"{support.tool}:rank={support.rank},score={support.score}"
+            for support in candidate.tool_supports
+        )
+        candidate_text.append(
+            f"candidate_order={index}; candidate_id={candidate.candidate_id}; disease={candidate.disease_name}; OMIM={candidate.OMIM_id or 'N/A'}; "
+            f"tools={supports or 'none'}"
+        )
+    prompt = f"""You are a clinical genetics assistant generating a bilingual differential diagnosis.
+Use ONLY the supplied candidate list and validated Evidence items. Do not cite diagnostic tools as literature.
+The CANDIDATES list is the authoritative, already-merged candidate list; do not split, duplicate, or invent candidates.
+Return up to five selected candidates. If N candidates are returned, the final differential ranks MUST be exactly 1, 2, ..., N in the same order as the returned items.
+Rank 1 is the most likely final diagnosis. The rank field is the final differential rank, not a PubCaseFinder, GestaltMatcher, ZeroShot, PhenoBrain, or PhenotypeSearch rank.
+Tool ranks and scores are auxiliary signals for deciding order only; NEVER copy a tool rank into the final rank field, and NEVER reuse a rank.
+Use the candidate order shown above as the default ordering; change it only when the supplied phenotype and literature Evidence provide a clear reason.
+Use exactly the supplied candidate_id and evidence_id values.
+English and Japanese descriptions must express the same claims and evidence IDs. Never invent a reference, PMID, gene, phenotype, or mechanism.
+Descriptions must state concrete patient features that match the supplied Evidence, not only say that the candidate is supported.
+Each description should be a concise but substantive multi-sentence explanation: (1) identify the most relevant patient findings, (2) state the specific disease features reported in the supplied Evidence, (3) explain why the patient findings do or do not correspond to those features, and (4) state important limitations and the conclusion. Do not reduce the explanation to "matches" or "is supported."
+When Evidence contains limitations, distinguish explicitly absent findings from findings that were not reported.
+Do not present general medical knowledge as literature evidence; use only the supplied Evidence IDs for literature claims.
+Set literature_status to supported only when a literature Evidence item supports the candidate; use insufficient or not_retrieved otherwise.
+
+PATIENT_PRESENT_HPO: {', '.join(state.get('hpoDict', {}).values())}
+PATIENT_ABSENT_HPO: {', '.join(state.get('absentHpoDict', {}).values()) if state.get('use_absentHPO') else 'N/A'}
+CANDIDATES:\n{chr(10).join(candidate_text)}
+EVIDENCE:\n{chr(10).join(evidence_text) or 'No validated Evidence'}"""
+    try:
+        result = llm.get_structured_llm(DiagnosisOutputV2).invoke([HumanMessage(content=prompt)])
+        allowed_candidates = {candidate.candidate_id: candidate for candidate in candidates}
+        allowed_evidence = {item.evidence_id: item for item in evidence}
+        answers = []
+        for item in getattr(result, "ans", []) or []:
+            if item.candidate_id not in allowed_candidates:
+                continue
+            item.OMIM_id = canonical_omim_id(allowed_candidates[item.candidate_id].OMIM_id)
+            item.evidence_ids = [evidence_id for evidence_id in item.evidence_ids if evidence_id in allowed_evidence]
+            if not item.evidence_ids:
+                item.literature_status = "not_retrieved"
+            answers.append(item)
+        if not answers:
+            return fallback(), prompt
+        return DiagnosisOutputV2(ans=answers, evidence=evidence), prompt
+    except Exception as exc:
+        print(f"[DiagnosisV2] structured generation failed: {exc}")
+        return fallback(), prompt

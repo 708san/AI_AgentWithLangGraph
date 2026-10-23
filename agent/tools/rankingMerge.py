@@ -78,6 +78,7 @@ def merge_ranked_disease_candidates(state: State) -> list[MergedDiseaseCandidate
             {
                 "tool": "PubCaseFinder",
                 "rank": result.get("rank") or index,
+                "rank_source": "api" if result.get("rank") is not None else "agent_enumeration",
                 "score": result.get("score"),
                 "matched_hpo_id": result.get("matched_hpo_id", ""),
                 "note": result.get("description", ""),
@@ -94,6 +95,7 @@ def merge_ranked_disease_candidates(state: State) -> list[MergedDiseaseCandidate
                 {
                     "tool": "ZeroShot",
                     "rank": result.rank or index,
+                    "rank_source": "model",
                     "note": "Generated from present and optional absent HPO terms.",
                 },
             )
@@ -105,8 +107,10 @@ def merge_ranked_disease_candidates(state: State) -> list[MergedDiseaseCandidate
             result.get("omim_id"),
             {
                 "tool": "GestaltMatcher",
-                "rank": result.get("rank") or index,
+                "rank": result.get("rank") if result.get("rank") is not None else index,
+                "rank_source": result.get("rank_source") or ("api" if result.get("rank") is not None else "agent_enumeration"),
                 "score": result.get("score"),
+                "raw_distance": result.get("raw_distance"),
                 "note": f"image_id={result.get('image_id', '')}",
             },
         )
@@ -121,6 +125,7 @@ def merge_ranked_disease_candidates(state: State) -> list[MergedDiseaseCandidate
             {
                 "tool": "PhenoBrain",
                 "rank": result.get("rank") or index,
+                "rank_source": "api" if result.get("rank") is not None else "agent_enumeration",
                 "score": result.get("score"),
                 "note": f"PhenoBrain RD={rd_id}, ORPHA={orpha_id}",
             },
@@ -137,6 +142,7 @@ def merge_ranked_disease_candidates(state: State) -> list[MergedDiseaseCandidate
             {
                 "tool": "PhenotypeSearch",
                 "rank": result_rank,
+                "rank_source": "search" if result.rank is not None else "agent_enumeration",
                 "score": result.similarity_score,
                 "note": disease_info.definition or "",
             },

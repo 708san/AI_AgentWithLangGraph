@@ -2,11 +2,12 @@ import os
 import time
 from langchain.schema import HumanMessage
 from typing_extensions import Optional
-from ..state.state_types import State, DiagnosisOutput
+from ..state.state_types import State, DiagnosisOutput, DiagnosisOutputV2, DiagnosisFormatV2, EvidenceItem, ReflectionOutputV2
 from ..llm.prompt import prompt_dict, build_prompt
 from ..llm.llm_wrapper import is_content_filter_error
 from ..utils.response_serializer import omim_number
 from .diagnosis import attach_diagnosis_references
+from .candidate_metadata import canonical_omim_id, enrich_candidates
 
 
 def _is_content_filter_error(error: Exception) -> bool:
@@ -248,3 +249,82 @@ def createFinalDiagnosis(state: State) -> Optional[DiagnosisOutput]:
             raise
 
     return None, last_prompt
+
+
+def createFinalDiagnosisV2(state: State) -> tuple[DiagnosisOutputV2 | None, str]:
+    """Generate the final bilingual diagnosis from tentative output and Evidence."""
+    tentative = state.get("tentativeDiagnosis")
+    reflection = state.get("reflection")
+    evidence = list(state.get("evidence", []) or [])
+    sources = list(state.get("sources", []) or [])
+    llm = state.get("llm")
+    if tentative is None or not hasattr(tentative, "ans"):
+        return DiagnosisOutputV2(ans=[], evidence=evidence), ""
+
+    tentative_items = [item for item in tentative.ans if isinstance(item, DiagnosisFormatV2)]
+    if not tentative_items:
+        return DiagnosisOutputV2(ans=[], evidence=evidence), ""
+
+    def fallback() -> DiagnosisOutputV2:
+        return DiagnosisOutputV2(
+            ans=[item.model_copy(deep=True) for item in tentative_items],
+            evidence=evidence,
+        )
+
+    if not llm:
+        return fallback(), ""
+
+    evidence_text = "\n".join(
+        f"{item.evidence_id} | candidate={item.candidate_id} | support={item.support} | "
+        f"confidence={item.confidence} | EN={item.claim_en} | JA={item.claim_ja} | "
+        f"excerpt={item.excerpt}"
+        for item in evidence
+    ) or "No validated Evidence"
+    reflection_text = "\n".join(
+        f"{item.candidate_id} | correctness={item.correctness} | status={item.literature_status} | "
+        f"EN={item.diagnosis_analysis_en} | JA={item.diagnosis_analysis_ja} | evidence={item.evidence_ids}"
+        for item in (getattr(reflection, "ans", []) or [])
+        if isinstance(item, object)
+    ) or "No Reflection output"
+    tentative_text = "\n".join(
+        f"tentative_order={index} | {item.candidate_id} | {item.disease_name_en} | "
+        f"status={item.literature_status} | evidence={item.evidence_ids}"
+        for index, item in enumerate(tentative_items, 1)
+    )
+    prompt = f"""You are the final clinical-genetics reviewer.
+Produce a bilingual final differential diagnosis from the tentative diagnoses, reflection, and validated Evidence below.
+Every diagnosis must use an existing candidate_id and only existing evidence_ids. Do not introduce claims unsupported by Evidence.
+A candidate may be marked supported only when a literature Evidence item supports it. Database records and diagnostic-tool ranks are auxiliary only.
+If Evidence is insufficient, preserve the candidate but explicitly say so in both English and Japanese.
+Keep the English and Japanese descriptions semantically aligned and use the same evidence_ids.
+Explain the concrete patient features in relation to the supplied literature claims and identify important uncertainty.
+Write a substantive multi-sentence explanation for each diagnosis. It must connect the patient findings to the specific disease features reported in the Evidence, explain the clinical interpretation of that connection, and state what remains uncertain. Do not return only a conclusion such as "supported" or "not supported". Tool rankings may be mentioned as auxiliary signals, but they are not citations and must not be treated as sufficient evidence.
+Do not invent absent findings or treat an unreported feature as absent.
+Do not claim a mechanism, inheritance pattern, or phenotype from general model knowledge unless it is present in the supplied Evidence.
+Return at most five diagnoses. The order of the returned items is the final differential order, and their rank fields MUST be exactly 1, 2, ..., N with no gaps or duplicates.
+Rank 1 is the most likely final diagnosis. Do not copy any rank from a diagnostic tool or from an earlier provisional output; tool/provisional ranks are not final ranks.
+Use the tentative order as the default order, changing it only when the reflection and validated literature Evidence provide a clear reason.
+
+PATIENT_HPO: {', '.join((state.get('hpoDict', {}) or {}).values())}
+TENTATIVE:\n{tentative_text}
+REFLECTION:\n{reflection_text}
+EVIDENCE:\n{evidence_text}"""
+    try:
+        result = llm.get_structured_llm(DiagnosisOutputV2).invoke([HumanMessage(content=prompt)])
+        allowed_candidates = {item.candidate_id: item for item in tentative_items}
+        allowed_evidence = {item.evidence_id for item in evidence}
+        answers = []
+        for item in getattr(result, "ans", []) or []:
+            if item.candidate_id not in allowed_candidates:
+                continue
+            item.OMIM_id = canonical_omim_id(allowed_candidates[item.candidate_id].OMIM_id)
+            item.evidence_ids = [value for value in item.evidence_ids if value in allowed_evidence]
+            if not item.evidence_ids:
+                item.literature_status = "not_retrieved"
+            answers.append(item)
+        if not answers:
+            return fallback(), prompt
+        return DiagnosisOutputV2(ans=answers, evidence=evidence), prompt
+    except Exception as exc:
+        print(f"[FinalDiagnosisV2] structured generation failed: {exc}")
+        return fallback(), prompt

@@ -7,6 +7,7 @@ from openai import AzureOpenAI
 from dotenv import load_dotenv
 from typing import Optional
 from ..state.state_types import State,ZeroShotOutput
+from .candidate_metadata import canonical_omim_id
 
 load_dotenv()
 
@@ -61,6 +62,8 @@ def normalize_pcf_results(state: State) -> list:
     pcf_results = state.get("pubCaseFinder", [])
     for result in pcf_results:
         omim_id_num = extract_omim_number(result.get("omim_id"))
+        if omim_id_num:
+            result["omim_id"] = canonical_omim_id(omim_id_num)
         if omim_id_num and omim_id_num in omim_mapping_by_number:
             result["disease_name"] = omim_mapping_by_number[omim_id_num]
     return pcf_results
@@ -73,6 +76,8 @@ def normalize_gestalt_results(state: State) -> list:
     gestalt_results = state.get("GestaltMatcher", [])
     for result in gestalt_results:
         omim_id_num = extract_omim_number(result.get("omim_id"))
+        if omim_id_num:
+            result["omim_id"] = canonical_omim_id(omim_id_num)
         if omim_id_num and omim_id_num in omim_mapping_by_number:
             # GestaltMatcherの出力キーに合わせて 'syndrome_name' を更新
             result["syndrome_name"] = omim_mapping_by_number[omim_id_num]
@@ -95,15 +100,14 @@ def normalize_zeroshot_results(state: State) -> Optional[ZeroShotOutput]:
         disease_name_upper = cleaned_name.upper()
         omim_id, omim_label, sim = disease_normalize(disease_name_upper)
 
-        # 類似度が高い場合のみ採用し、OMIM IDがユニークであることを確認
-        if sim >= 0.70 and omim_id not in unique_omim_ids:
-            diag.OMIM_id = omim_id
+        canonical_id = canonical_omim_id(omim_id)
+        if sim >= 0.70 and canonical_id and canonical_id not in unique_omim_ids:
+            diag.OMIM_id = canonical_id
             diag.disease_name = omim_label
             normalized_ans.append(diag)
-            unique_omim_ids.add(omim_id)
+            unique_omim_ids.add(canonical_id)
         else:
             print(f"Filtered out {diag.disease_name} (OMIM: {omim_id}) due to low similarity ({sim:.2f}) or duplication.")
-    
     zeroshot_output.ans = normalized_ans
     return zeroshot_output
 
@@ -146,7 +150,7 @@ def diseaseNormalizeForDiagnosis(Diagnosis):
     for diag in Diagnosis.ans:
         existing_omim_num = extract_omim_number(getattr(diag, "OMIM_id", None))
         if existing_omim_num:
-            diag.OMIM_id = f"OMIM:{existing_omim_num}"
+            diag.OMIM_id = canonical_omim_id(existing_omim_num)
             diag.disease_name = omim_mapping_by_number.get(
                 existing_omim_num,
                 diag.disease_name.strip().strip("*")
@@ -158,7 +162,7 @@ def diseaseNormalizeForDiagnosis(Diagnosis):
         omim_id, omim_label, sim = disease_normalize(disease_name_upper)
 
         if sim >= 0.75:
-            diag.OMIM_id = omim_id
+            diag.OMIM_id = canonical_omim_id(omim_id)
             diag.disease_name = omim_label
             filtered_ans.append(diag)
         else:

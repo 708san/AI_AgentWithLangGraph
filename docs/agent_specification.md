@@ -1,5 +1,7 @@
 # agent ディレクトリ仕様書
 
+> 注意: 文献根拠付き・日英併記診断フローの新規実装仕様は、[evidence_grounded_diagnosis_specification.md](evidence_grounded_diagnosis_specification.md)を正式版とする。この文書は現行v1実装の参照資料であり、v2実装では新仕様を優先する。
+
 ## 1. 概要
 
 `agent/` は、HPO ID、患者顔画像、発症時期、性別などを入力として希少疾患の鑑別診断を支援する LangGraph ベースのエージェントである。

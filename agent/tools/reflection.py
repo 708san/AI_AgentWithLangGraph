@@ -3,7 +3,15 @@ import re
 import time
 from langchain.schema import HumanMessage
 from openai import LengthFinishReasonError
-from ..state.state_types import ReflectionFormat, State
+from ..state.state_types import (
+    ReflectionFormat,
+    ReflectionOutputV2,
+    ReflectionFormatV2,
+    EvidenceAssessment,
+    State,
+)
+from .candidate_metadata import enrich_candidates
+from .diagnosis import is_pubmed_reference
 from ..llm.prompt import prompt_dict, build_prompt
 from ..llm.llm_wrapper import is_content_filter_error
 
@@ -301,6 +309,11 @@ def create_reflection(state: State, diagnosis_to_judge):
                 reflection_result = ReflectionFormat(**result)
             else:
                 reflection_result = result
+            reflection_result.references = [
+                reference
+                for reference in reflection_result.references
+                if is_pubmed_reference(reference)
+            ]
             reflection_result = _apply_tool_supported_reflection_override(
                 reflection_result,
                 state,
@@ -336,3 +349,104 @@ def create_reflection(state: State, diagnosis_to_judge):
                 references=[]
             )
             return fallback_result, prompt
+
+
+def create_reflection_v2(state: State) -> tuple[ReflectionOutputV2, str]:
+    """Reflect on candidates using Evidence IDs, with bilingual output."""
+    candidates = enrich_candidates(state.get("mergedDiseaseCandidates", []) or [])
+    evidence = list(state.get("evidence", []) or [])
+    sources = {source.source_id: source for source in state.get("sources", []) or []}
+    present_hpo = ", ".join((state.get("hpoDict", {}) or {}).values())
+    llm = state.get("llm")
+
+    def status_for(candidate):
+        items = [item for item in evidence if item.candidate_id == candidate.candidate_id]
+        if any(item.support == "contradicts" for item in items) and not any(item.support == "supports" for item in items):
+            return "contradictory"
+        if any(
+            item.support == "supports" and sources.get(item.source_id) and sources[item.source_id].source_type == "literature"
+            for item in items
+        ):
+            return "supported"
+        return "insufficient" if items else "not_retrieved"
+
+    def fallback() -> ReflectionOutputV2:
+        answers = []
+        for candidate in candidates[:10]:
+            items = [item for item in evidence if item.candidate_id == candidate.candidate_id]
+            status = status_for(candidate)
+            assessments = [
+                EvidenceAssessment(
+                    evidence_id=item.evidence_id,
+                    relevance="high" if item.support == "supports" else "medium",
+                    supports_patient="yes" if item.support == "supports" else "no" if item.support == "contradicts" else "unknown",
+                    reason_en=item.claim_en,
+                    reason_ja=item.claim_ja,
+                )
+                for item in items
+            ]
+            answers.append(
+                ReflectionFormatV2(
+                    candidate_id=candidate.candidate_id,
+                    disease_name_en=candidate.disease_name,
+                    disease_name_ja=candidate.disease_name,
+                    correctness=status != "contradictory",
+                    patient_summary_en=f"Patient features supplied to the flow: {present_hpo or 'not provided'}.",
+                    patient_summary_ja=f"フローに入力された患者所見: {present_hpo or '未提供'}。",
+                    diagnosis_analysis_en=(
+                        "The candidate is supported by validated literature evidence."
+                        if status == "supported"
+                        else "The candidate cannot be considered literature-supported yet."
+                    ),
+                    diagnosis_analysis_ja=(
+                        "この候補は検証済みの文献Evidenceにより支持されています。"
+                        if status == "supported"
+                        else "この候補は現時点では文献支持済みとは判断できません。"
+                    ),
+                    evidence_assessments=assessments,
+                    evidence_ids=[item.evidence_id for item in items],
+                    literature_status=status,
+                )
+            )
+        return ReflectionOutputV2(ans=answers)
+
+    if not llm or not candidates:
+        return fallback(), ""
+
+    evidence_text = "\n".join(
+        f"{item.evidence_id} candidate={item.candidate_id} support={item.support} confidence={item.confidence} "
+        f"EN={item.claim_en} JA={item.claim_ja} excerpt={item.excerpt}"
+        for item in evidence
+    ) or "No validated Evidence"
+    candidate_text = "\n".join(
+        f"{candidate.candidate_id}: {candidate.disease_name}" for candidate in candidates[:10]
+    )
+    prompt = f"""You are reviewing a rare-disease differential diagnosis.
+Use only the supplied candidates and validated Evidence. Do not treat tool rank as a citation.
+For every selected candidate return ReflectionFormatV2 with English and Japanese fields.
+Use only supplied candidate_id and evidence_id values. Keep evidence_ids identical across the bilingual analysis.
+Literature status must be supported only when a literature Evidence item supports the candidate.
+Explain in prose how the patient features relate to the disease claims in the Evidence.
+Do not create a separate match, impact, or limitation object; state uncertainty in the analysis text.
+Do not use a general medical-knowledge statement as if it came from a cited literature source.
+
+PATIENT_FEATURES: {present_hpo or 'not provided'}
+CANDIDATES:\n{candidate_text}
+EVIDENCE:\n{evidence_text}"""
+    try:
+        result = llm.get_structured_llm(ReflectionOutputV2).invoke([HumanMessage(content=prompt)])
+        allowed_candidates = {candidate.candidate_id for candidate in candidates}
+        allowed_evidence = {item.evidence_id for item in evidence}
+        answers = []
+        for item in getattr(result, "ans", []) or []:
+            if item.candidate_id not in allowed_candidates:
+                continue
+            item.evidence_ids = [value for value in item.evidence_ids if value in allowed_evidence]
+            item.evidence_assessments = [
+                assessment for assessment in item.evidence_assessments if assessment.evidence_id in allowed_evidence
+            ]
+            answers.append(item)
+        return (ReflectionOutputV2(ans=answers), prompt) if answers else (fallback(), prompt)
+    except Exception as exc:
+        print(f"[ReflectionV2] structured generation failed: {exc}")
+        return fallback(), prompt
