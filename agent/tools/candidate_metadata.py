@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any, Iterable
 from functools import lru_cache
@@ -32,6 +33,13 @@ def candidate_id_for(disease_name: str, omim_id: Any = None) -> str:
         return canonical
     normalized = re.sub(r"[^a-z0-9]+", "-", (disease_name or "unknown").lower()).strip("-")
     return f"DISEASE:{normalized or 'unknown'}"
+
+
+def normalize_disease_name(value: Any) -> str:
+    """Normalize only presentation details; do not infer a new disease."""
+    text = unicodedata.normalize("NFKC", str(value or "")).lower()
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _as_dict(value: Any) -> dict[str, Any]:
@@ -66,6 +74,52 @@ def _metadata_for(omim_id: str | None, disease_name: str) -> dict[str, Any]:
         "phenotype_labels": list(dict.fromkeys(phenotype_labels)),
         "gene_symbols": [],
     }
+
+
+def known_disease_name(omim_id: Any) -> str | None:
+    """Return a locally known canonical label for an OMIM disease ID."""
+    canonical = canonical_omim_id(omim_id)
+    if not canonical:
+        return None
+    record = _load_omim_records().get(canonical)
+    if record and record.get("disease_name"):
+        return str(record["disease_name"])
+    return None
+
+
+def known_disease_aliases(omim_id: Any) -> list[str]:
+    canonical = canonical_omim_id(omim_id)
+    record = _load_omim_records().get(canonical or "", {})
+    return [
+        item.strip()
+        for item in str(record.get("synonym") or "").split(",")
+        if item.strip()
+    ]
+
+
+def names_compatible(observed: Any, expected: Any, synonyms: Iterable[Any] = ()) -> bool:
+    """Conservative compatibility check for aliases and subtype formatting.
+
+    This is deliberately not a fuzzy disease replacer. It accepts exact names,
+    contained OMIM-style titles, and substantial token overlap, but does not
+    turn an unrelated name into the expected disease merely because an ID exists.
+    """
+    observed_norm = normalize_disease_name(observed)
+    expected_norm = normalize_disease_name(expected)
+    if not observed_norm or not expected_norm:
+        return False
+    alternatives = [expected_norm] + [normalize_disease_name(item) for item in synonyms]
+    observed_tokens = set(observed_norm.split())
+    for alternative in alternatives:
+        if not alternative:
+            continue
+        if observed_norm == alternative or observed_norm in alternative or alternative in observed_norm:
+            return True
+        alternative_tokens = set(alternative.split())
+        overlap = len(observed_tokens & alternative_tokens) / max(len(observed_tokens | alternative_tokens), 1)
+        if overlap >= 0.6:
+            return True
+    return False
 
 
 def _support_from_legacy(item: dict[str, Any]) -> CandidateSupport:

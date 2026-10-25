@@ -8,6 +8,7 @@ to a PMID/PMCID/DOI and the original abstract or full text.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import time
@@ -16,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterable
 
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .candidate_metadata import canonical_omim_id
 from ..state.state_types import MergedDiseaseCandidateV2, SourceRecord
@@ -23,7 +25,8 @@ from ..state.state_types import MergedDiseaseCandidateV2, SourceRecord
 
 NCBI_BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 DEFAULT_MAX_RESULTS = int(os.getenv("PUBMED_MAX_RESULTS_PER_CANDIDATE", "2"))
-DEFAULT_MAX_QUERIES = int(os.getenv("PUBMED_MAX_QUERIES_PER_CANDIDATE", "2"))
+DEFAULT_MAX_QUERIES = max(4, int(os.getenv("PUBMED_MAX_QUERIES_PER_CANDIDATE", "6")))
+LITERATURE_MAX_WORKERS = max(1, int(os.getenv("PUBMED_MAX_WORKERS", "2")))
 REQUEST_TIMEOUT = float(os.getenv("PUBMED_REQUEST_TIMEOUT_SECONDS", "20"))
 MAX_ABSTRACT_LENGTH = int(os.getenv("PUBMED_MAX_ABSTRACT_LENGTH", "12000"))
 MAX_FULL_TEXT_LENGTH = int(os.getenv("PMC_MAX_FULL_TEXT_LENGTH", "50000"))
@@ -45,6 +48,12 @@ def build_literature_queries(
     retry: bool = False,
 ) -> list[str]:
     disease = _clean_term(_candidate_value(candidate, "disease_name"))
+    disease_names = [
+        _clean_term(part)
+        for part in re.split(r"\s*[;|]\s*", disease)
+        if _clean_term(part)
+    ]
+    primary_name = disease_names[0] if disease_names else disease
     omim = canonical_omim_id(_candidate_value(candidate, "OMIM_id"))
     genes = [_clean_term(value) for value in (_candidate_value(candidate, "gene_symbols", []) or []) if _clean_term(value)]
     synonyms = [_clean_term(value) for value in (_candidate_value(candidate, "synonyms", []) or []) if _clean_term(value)]
@@ -52,27 +61,46 @@ def build_literature_queries(
     hpos = [_clean_term(value) for value in hpo_labels if _clean_term(value)]
 
     queries: list[str] = []
-    if disease:
-        queries.append(f'"{disease}"')
-        queries.append(f'"{disease}" AND (phenotype OR "clinical features")')
+    # Keep identifier and alternate-name searches ahead of broad phenotype
+    # searches.  Previously the first two exact display-name queries consumed
+    # the default query budget, silently omitting OMIM IDs and synonyms.
     if omim:
-        queries.append(f'"{omim}"')
+        number = re.sub(r"^OMIM:", "", omim, flags=re.IGNORECASE)
+        queries.append(f'"{number}"[All Fields]')
+    if primary_name:
+        queries.append(f'"{primary_name}"')
     if genes:
-        queries.append(f'"{disease}" AND ({" OR ".join(genes[:3])})')
-    if synonyms:
-        queries.append(f'("{disease}" OR "{synonyms[0]}") AND (syndrome OR disease)')
+        query_name = primary_name or disease
+        queries.append(f'("{query_name}" OR {" OR ".join(genes[:3])})')
+    for synonym in synonyms:
+        if synonym.casefold() != primary_name.casefold():
+            queries.append(f'"{synonym}"')
+    for name in disease_names[1:]:
+        if name.casefold() != primary_name.casefold():
+            queries.append(f'"{name}"')
     feature_terms = list(dict.fromkeys(phenotypes[:2] + hpos[:2]))
     if genes and feature_terms:
         queries.append(f'({genes[0]}) AND ({" OR ".join(feature_terms)})')
-    if retry and disease:
+    if primary_name and feature_terms:
+        queries.append(f'"{primary_name}" AND ({" OR ".join(feature_terms[:3])})')
+    if retry and primary_name:
         queries.extend([
-            f'"{disease}" AND (genotype OR inheritance OR diagnosis)',
-            f'"{disease}" AND ("case report" OR cohort OR series)',
+            f'"{primary_name}" AND (genotype OR inheritance OR diagnosis)',
+            f'"{primary_name}" AND ("case report" OR cohort OR series)',
         ])
-    return list(dict.fromkeys(query for query in queries if query))[:DEFAULT_MAX_QUERIES]
+    # A retry gets a small additional budget so the fallback terms are not
+    # appended and then immediately truncated by the original limit.
+    query_limit = DEFAULT_MAX_QUERIES + (2 if retry else 0)
+    return list(dict.fromkeys(query for query in queries if query))[:query_limit]
 
 
-def _request_json(session: requests.Session, endpoint: str, params: dict[str, Any], retries: int = 2) -> dict[str, Any]:
+def _request_json(
+    session: requests.Session,
+    endpoint: str,
+    params: dict[str, Any],
+    retries: int = 2,
+    on_error=None,
+) -> dict[str, Any]:
     for attempt in range(retries + 1):
         try:
             response = session.get(endpoint, params=params, timeout=REQUEST_TIMEOUT)
@@ -81,14 +109,22 @@ def _request_json(session: requests.Session, endpoint: str, params: dict[str, An
                 continue
             response.raise_for_status()
             return response.json()
-        except (requests.RequestException, ValueError):
+        except (requests.RequestException, ValueError) as exc:
             if attempt >= retries:
+                if on_error:
+                    on_error(str(exc))
                 return {}
             time.sleep(2 ** attempt)
     return {}
 
 
-def _request_text(session: requests.Session, endpoint: str, params: dict[str, Any], retries: int = 2) -> str:
+def _request_text(
+    session: requests.Session,
+    endpoint: str,
+    params: dict[str, Any],
+    retries: int = 2,
+    on_error=None,
+) -> str:
     for attempt in range(retries + 1):
         try:
             response = session.get(endpoint, params=params, timeout=REQUEST_TIMEOUT)
@@ -97,8 +133,10 @@ def _request_text(session: requests.Session, endpoint: str, params: dict[str, An
                 continue
             response.raise_for_status()
             return response.text
-        except requests.RequestException:
+        except requests.RequestException as exc:
             if attempt >= retries:
+                if on_error:
+                    on_error(str(exc))
                 return ""
             time.sleep(2 ** attempt)
     return ""
@@ -280,27 +318,49 @@ def search_candidate_literature(
         for key in _source_keys(source)
     }
     sources: list[SourceRecord] = []
+    diagnostic = {
+        "candidate_id": candidate_id,
+        "retry": retry,
+        "queries": [],
+        "accepted_sources": 0,
+    }
     for query in build_literature_queries(candidate, hpo_labels, retry=retry):
+        query_diagnostic = {
+            "query": query,
+            "hits": 0,
+            "articles_fetched": 0,
+            "identity_rejected": 0,
+            "duplicate_or_missing_pmid": 0,
+            "accepted_sources": 0,
+            "errors": [],
+        }
+        diagnostic["queries"].append(query_diagnostic)
         search_payload = _request_json(
             session,
             f"{NCBI_BASE_URL}/esearch.fcgi",
             {"db": "pubmed", "term": query, "retmode": "json", "retmax": DEFAULT_MAX_RESULTS},
+            on_error=query_diagnostic["errors"].append,
         )
         ids = search_payload.get("esearchresult", {}).get("idlist", [])
+        query_diagnostic["hits"] = len(ids)
         if not ids:
             continue
         xml = _request_text(
             session,
             f"{NCBI_BASE_URL}/efetch.fcgi",
             {"db": "pubmed", "id": ",".join(ids), "retmode": "xml"},
+            on_error=query_diagnostic["errors"].append,
         )
         if not xml:
             continue
         try:
             root = ET.fromstring(xml)
         except ET.ParseError:
+            query_diagnostic["errors"].append("PubMed returned invalid XML")
             continue
-        for article_node in root.findall(".//PubmedArticle"):
+        article_nodes = root.findall(".//PubmedArticle")
+        query_diagnostic["articles_fetched"] = len(article_nodes)
+        for article_node in article_nodes:
             article = _parse_article(article_node)
             pmid = article.get("pmid")
             pmcid = _pmc_identifier(article.get("pmc"))
@@ -312,8 +372,10 @@ def search_candidate_literature(
                 if value
             }
             if not pubmed_identifier or article_keys & existing_keys:
+                query_diagnostic["duplicate_or_missing_pmid"] += 1
                 continue
             if not _matches_candidate(article, candidate):
+                query_diagnostic["identity_rejected"] += 1
                 continue
 
             content = article.get("abstract", "")
@@ -331,6 +393,7 @@ def search_candidate_literature(
                     source_url = f"https://pmc.ncbi.nlm.nih.gov/articles/{pmcid}/"
 
             if not content:
+                query_diagnostic["errors"].append(f"No abstract/full text for PMID:{pmid}")
                 continue
             source = SourceRecord(
                 source_id=_source_id(identifier, candidate_id),
@@ -356,9 +419,13 @@ def search_candidate_literature(
                 citation_allowed=True,
             )
             sources.append(source)
+            query_diagnostic["accepted_sources"] += 1
+            diagnostic["accepted_sources"] += 1
             existing_keys.update(article_keys)
             if len(sources) >= DEFAULT_MAX_RESULTS:
+                print(f"[LiteratureSearchDiagnostic] {json.dumps(diagnostic, ensure_ascii=False)}")
                 return sources
+    print(f"[LiteratureSearchDiagnostic] {json.dumps(diagnostic, ensure_ascii=False)}")
     return sources
 
 
@@ -367,19 +434,64 @@ def search_literature_for_candidates(
     hpo_dict: dict[str, str] | None = None,
     existing_sources: Iterable[SourceRecord] = (),
     retry: bool = False,
+    retry_candidate_ids: set[str] | None = None,
 ) -> list[SourceRecord]:
+    candidate_list = list(candidates)
     all_sources = list(existing_sources)
     hpo_labels = list((hpo_dict or {}).values())
-    # The old flow can produce many merged candidates.  Literature search is
-    # expensive, so keep the same candidate order while limiting retrieval to
-    # the five candidates shown in the differential.
-    for candidate in list(candidates)[:5]:
-        all_sources.extend(
-            search_candidate_literature(
+
+    if not candidate_list:
+        return all_sources
+
+    # Each worker gets the same immutable snapshot.  Sharing the growing
+    # ``all_sources`` list between workers would make de-duplication racey.
+    # Results are merged in candidate order below, preserving the old output
+    # order and its first-source-wins behavior.
+    base_sources = list(all_sources)
+    results_by_index: list[list[SourceRecord]] = [[] for _ in candidate_list]
+
+    def search_one(index: int, candidate: MergedDiseaseCandidateV2) -> tuple[int, list[SourceRecord]]:
+        candidate_id = _candidate_value(candidate, "candidate_id")
+        if retry and retry_candidate_ids is not None and candidate_id not in retry_candidate_ids:
+            print(
+                f"[Literature] retry skipped; candidate is not unresolved: {candidate_id}"
+            )
+            return index, []
+        try:
+            return index, search_candidate_literature(
                 candidate,
                 hpo_labels=hpo_labels,
-                existing_sources=all_sources,
+                existing_sources=base_sources,
                 retry=retry,
             )
-        )
+        except Exception as exc:
+            print(f"[Literature] search failed for {candidate_id}: {exc}")
+            return index, []
+
+    max_workers = min(len(candidate_list), LITERATURE_MAX_WORKERS)
+    print(f"[Literature] candidate search max_workers={max_workers}")
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(search_one, index, candidate): index
+            for index, candidate in enumerate(candidate_list)
+        }
+        for future in as_completed(futures):
+            index, sources = future.result()
+            results_by_index[index] = sources
+
+    # Merge deterministically and retain the previous de-duplication semantics
+    # when two candidates return the same PMID/PMCID/DOI.
+    seen_literature_keys = {
+        key
+        for source in all_sources
+        if source.source_type == "literature"
+        for key in _source_keys(source)
+    }
+    for candidate_sources in results_by_index:
+        for source in candidate_sources:
+            source_keys = _source_keys(source)
+            if source_keys & seen_literature_keys:
+                continue
+            all_sources.append(source)
+            seen_literature_keys.update(source_keys)
     return all_sources

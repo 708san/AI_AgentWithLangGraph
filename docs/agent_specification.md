@@ -154,16 +154,16 @@ run(
 | `createHPODictNode` | `hpoList` | `hpoDict` | `phenotype_mapping.json` で HPO ID をラベル化 |
 | `createAbsentHPODictNode` | `absentHpoList` | `absentHpoDict` | 明示的に観察されなかった HPO ID をラベル化 |
 | `createZeroShotNode` | `hpoDict`, `absentHpoDict`, `use_absentHPO`, `onset`, `sex`, `llm` | `zeroShotResult`, `prompt` | LLM 構造化出力で候補疾患を生成。`use_absentHPO=True` の場合のみ absent HPO を使用 |
-| `NormalizeZeroShotNode` | `zeroShotResult` | `zeroShotResult` | 疾患名を embedding 正規化し、類似度 0.70 未満と重複 OMIM を除外 |
+| `NormalizeZeroShotNode` | `zeroShotResult` | `zeroShotResult` | 疾患名を embedding 検索し、病名互換性を確認してOMIM IDを付与。互換性が不明でも候補は保持し、重複 OMIM を除外 |
 | `HPOwebSearchNode` | `hpoDict`, `llm` | `webresources` | HPO から DDGS 検索クエリを生成し、検索結果スニペットを要約 |
 | `DiseaseSearchWithHPONode` | `hpoDict`, `depth` | `phenotypeSearchResult` | HPO ラベルを embedding 化し、FAISS で類似 OMIM 疾患を検索 |
 | `mergeCandidateResultsNode` | `pubCaseFinder`, `zeroShotResult`, `GestaltMatcher`, `phenotypeSearchResult` | `mergedDiseaseCandidates` | 診断前に各ツールの順位付き疾患候補を疾患単位で統合し、どのツールで何位だったかを保持 |
 | `createDiagnosisNode` | `mergedDiseaseCandidates`, HPO, Web, LLM | `tentativeDiagnosis`, `prompt` | 統合済み候補表と患者情報・Web 結果を使って暫定診断を生成。`use_absentHPO=True` の場合のみ absent HPO を使用 |
-| `diseaseNormalizeNode` | `tentativeDiagnosis` | `tentativeDiagnosis` | 暫定診断疾患名を embedding 正規化し、類似度 0.75 未満を除外 |
+| `diseaseNormalizeNode` | `tentativeDiagnosis` | `tentativeDiagnosis` | 暫定診断疾患名を embedding 検索し、病名互換性を確認してOMIM IDを付与。低類似度を理由に候補は除外しない |
 | `diseaseSearchNode` | `tentativeDiagnosis`, `depth`, `llm`, `memory` | `memory` | 各暫定疾患について Wikipedia/PubMed を並列検索し要約 |
 | `reflectionNode` | `tentativeDiagnosis`, `hpoDict`, `absentHpoDict`, `use_absentHPO`, `memory`, `llm` | `reflection`, `prompt` | 各暫定疾患を LLM で妥当性評価。最大 10 スレッドで並列実行。`use_absentHPO=True` の場合のみ absent HPO を使用 |
 | `finalDiagnosisNode` | `tentativeDiagnosis`, `reflection`, HPO, `llm` | `finalDiagnosis`, `prompt` | reflection までの情報を統合して最終診断を生成。`use_absentHPO=True` の場合のみ absent HPO を使用 |
-| `diseaseNormalizeForFinalNode` | `finalDiagnosis` | `finalDiagnosis` | 最終診断疾患名を embedding 正規化し、類似度 0.75 未満を除外 |
+| `diseaseNormalizeForFinalNode` | `finalDiagnosis` | `finalDiagnosis` | 最終診断疾患名を embedding 検索し、病名互換性を確認してOMIM IDを付与。低類似度を理由に候補は除外しない |
 
 ### 4.2 エッジ
 
@@ -360,8 +360,9 @@ run(
 - Azure OpenAI `text-embedding-3-large` で疾患名を embedding 化する。
 - FAISS インデックスで最近傍 OMIM ラベルを検索する。
 - `omim_mapping.json` にある正式病名へ置換する。
-- `zeroShotResult` は類似度 0.70 以上のみ採用し、OMIM ID 重複を除去する。
-- `DiagnosisOutput` は類似度 0.75 以上のみ採用する。
+- embedding 類似度の数値閾値による候補除外は行わない。
+- 最近傍のOMIM病名と名称互換性を確認できた場合のみOMIM IDを付与する。互換性が確認できない候補は、元の病名を保ったままOMIM ID未確定で残す。
+- 重複OMIM IDは引き続き除去する。
 
 出力:
 

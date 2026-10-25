@@ -4,6 +4,7 @@
 > search/Evidence -> reflection -> final` を維持する。`patient_matches`、
 > `limitations`、`impact`、`relationship`、`reasoning`、`reference_catalog` などの
 > 二重管理は行わず、診断文とEvidenceの原文抜粋、番号付きReferenceだけを正式データとする。
+> 候補統合後は上位5件へ切り詰めず、統合された全候補を文献検索・Evidence抽出・Reflection・tentativeDiagnosisへ渡す。公開する最終鑑別のみ最大5件とする。
 
 ## 1. 前提
 
@@ -88,6 +89,8 @@ Evidence抽出・原文抜粋検証
 - `State`に`sources`、`evidence`、`flow_iteration`、`max_flow_iterations`、validation情報を追加する。
 - State初期値に`evidence_mode="v2"`、`sources=[]`、`evidence=[]`を追加する。legacyは明示指定時だけ使用する。
 - OMIM正規化関数を共通化し、すべての入力境界で`OMIM:数字`にする。
+- Zero-shotは理由付き一時モデルをログ専用で使用し、理由を除いた候補だけをStateへ渡す。正規化前後と、match/normalized/mismatch/unconfirmed/duplicate/excludedの判定を評価用に保存する。
+- 暫定診断は全統合候補を候補IDごとに一度ずつ含め、候補ID・OMIM・病名・順位を検証する。不整合や候補欠落時は1回だけ再生成し、再生成後も不正なら全候補を含む安全なフォールバックと検証メタデータを残す。
 
 重要な実装方針:
 
@@ -152,6 +155,7 @@ Evidence抽出・原文抜粋検証
 - PMCまたは取得可能なfull textがある場合は、source metadataを区別して保存する。
 - クエリごとの重複PMIDを排除する。
 - Candidate IDと使用クエリをSourceRecordへ保存する。
+- 候補統合後の全Candidateを検索対象とし、検索前に公開鑑別の件数へ切り詰めない。
 - 429、timeout、空結果、metadata欠損を個別に扱う。
 - 一般Web検索は補助経路として残すが、PubMed/PMCと混ぜない。
 
@@ -260,11 +264,14 @@ mergeCandidateResultsNode
 - evidenceがcreateDiagnosisへ渡るテスト
 - Reflection後の再検索上限テスト
 - `literatureSearchNode`失敗時のpartial statusテスト
+- 統合候補全件が文献検索・Evidence抽出・Reflectionへ渡るテスト
 
 完了条件:
 
 - v2グラフに暫定診断後の旧文献検索経路が残っていない。
 - Evidenceなしで最終診断へ進んだ場合、その状態が明示される。
+- 文献検索とReflectionは全統合候補を扱い、公開最終鑑別だけが最大5件に制限される。
+- tentativeDiagnosisは全統合候補を候補IDごとに一度ずつ含め、公開最終鑑別はその中から最大5件を選ぶ。
 
 実装上の注意:
 
@@ -318,6 +325,9 @@ v2ノードは`evidence_mode="v2"`の場合だけ実行する。legacyモード�
 - Evidenceにない病態機序を出力しないテスト
 - PhenotypeSearchが文献Referenceへ入らないテスト
 - legacy aliasの整合性テスト
+- Zero-shot selection_reasonがState・Evidence・公開レスポンスへ混入しないテスト
+- Zero-shotの正規化前後とidentity statusの保存テスト
+- 暫定診断の候補外ID・重複・OMIM不一致・順位不整合に対する1回再生成テスト
 
 完了条件:
 
@@ -368,6 +378,7 @@ v2ノードは`evidence_mode="v2"`の場合だけ実行する。legacyモード�
 - Evidence excerptがraw_contentに存在するか確認する。
 - 英日文章のEvidence ID集合と確信度を比較する。
 - 既存74ケース等を使い、v1/v2の候補、Reference、失敗率を比較する。
+- `scripts/evaluation/`でZero-shot正規化前後、候補統合、暫定診断前後、最終診断を実行ごとに保存し、Hit@k・MRR・候補欠落・候補外追加・重複・identity errorを比較する。
 
 評価指標:
 

@@ -18,7 +18,32 @@ JSONには次の情報が含まれます。
 5. 文献から抽出したEvidence
 6. 暫定診断、検証結果、最終診断
 
+LLMプロンプトとローカルファイルシステム上の画像パスは公開JSONに含めません。
+文献引用番号はトップレベル`references`を共通の番号空間として使います。
+
 LLMのプロンプト、文献本文全体、検索クエリ、取得時刻などは、フロント向けJSONには含めません。
+
+## 1.5 現行外部形式との互換出力
+
+既存の外部連携では、ノード名をトップレベルに持つ次の形式も使用します。
+
+~~~json
+{
+  "finalDiagnosis": {
+    "ans": [],
+    "reference": "..."
+  }
+}
+~~~
+
+v2のテスト実行では、正規の`public_response.json`に加えて、
+`external_response.json`と各ノード単位のJSONを出力します。
+`finalDiagnosis.json`、`reflection.json`、`tentativeDiagnosis.json`などは、
+このノード名ラップ形式です。
+
+互換形式の`ans`には旧来の`rank`、`OMIM_id`、`description`、`disease_name`を残し、
+候補ID、文献状態、引用番号などのv2情報も追加します。
+Referenceは自由記述をそのまま再利用せず、検証済みEvidenceから構造化して生成します。
 
 ## 1.1 旧版JSONとの関係
 
@@ -126,15 +151,15 @@ JSONの形式は変更せず、用途だけを次のように整理します。
 | finalDiagnosis.references[].evidence | その文献を根拠にした主張と原文抜粋。 |
 | finalDiagnosis.validation_status | 最終診断の検証状態。 |
 
-最終診断の文章にある[1]は、同じfinalDiagnosis内の
-finalDiagnosis.references[].numberが1のReferenceに対応します。
+最終診断の文章にある[n]は、トップレベル`references[].number == n`のReferenceに対応します。
+`finalDiagnosis.references`には、最終診断で使用したReferenceの部分集合も含まれます。
 
 ### 症例情報として使うキー
 
 | JSONパス | 用途 |
 |---|---|
 | patient_id | 症例の識別。 |
-| imagePath | 顔貌画像などの表示。 |
+| imagePath | HTTP(S)の公開URLがある場合のみ画像表示に使用。ローカルファイルパスは出力しない。 |
 | hpoDict | 患者に認められた所見の表示。 |
 | absentHpoDict | 明示的に認められない所見の表示。 |
 | sex | 性別。 |
@@ -151,6 +176,7 @@ finalDiagnosis.references[].numberが1のReferenceに対応します。
 | mergedDiseaseCandidates[].tool_rankings | ツールごとの順位やスコア。 |
 | sources | 検索で取得した全ての文献。最終診断で未使用の文献も含む。 |
 | evidence | 全候補から抽出されたEvidence。最終診断で未使用のものも含む。 |
+| references | 全Evidenceに対する共通の文献番号一覧。Reflectionを含めた引用解決に使う。 |
 
 ### 通常の診断表示では直接使わないキー
 
@@ -166,8 +192,8 @@ finalDiagnosis.references[].numberが1のReferenceに対応します。
 | validation_errors | エラー表示が必要な場合だけ使用。 |
 | flow_iteration / max_flow_iterations | 実行状態の確認用。 |
 
-最終診断の出典表示には、トップレベルのsourcesやevidenceを直接使わず、
-finalDiagnosis.referencesを使うことを推奨します。
+最終診断の出典表示には`finalDiagnosis.references`を使えます。
+本文中の引用番号を機械的に解決する場合は、全ブロック共通のトップレベル`references`を使います。
 
 ## 2. データ型
 
@@ -201,6 +227,7 @@ public_response
 ├─ 文献とEvidence
 │  ├─ sources
 │  └─ evidence
+├─ references
 ├─ tentativeDiagnosis
 ├─ reflection
 ├─ finalDiagnosis
@@ -217,7 +244,7 @@ public_response
 | キー | 型 | 内容 |
 |---|---|---|
 | depth | integer | 処理の深さ。通常は1。 |
-| imagePath | string | 入力画像のパス。 |
+| imagePath | string（任意） | HTTP(S)画像URLのみ公開。ローカルファイルパスの場合はキーごと省略。 |
 | clinicalText | string \| null | 自由記載の臨床情報。入力がない場合はnull。 |
 | hpoList | array<string> | 患者に認められたHPO IDの一覧。 |
 | hpoDict | object<string, string> | HPO IDからHPO名への対応。 |
@@ -413,9 +440,9 @@ Evidenceと文献の対応はreference_numberを介して確認します。
 ~~~text
 evidence.reference_number = 1
         ↓
-finalDiagnosis.references[].number = 1
+references[].number = 1
         ↓
-finalDiagnosis.references[].url / title / evidence
+references[].url / title / evidence
 ~~~
 
 最終診断の表示では、トップレベルのevidenceよりも、
@@ -470,16 +497,17 @@ diagnosis
 
 | 値 | 意味 |
 |---|---|
-| supported | 文献Evidenceがあり、候補を支持する内容として扱える。 |
-| insufficient | 文献はあるが、診断を支持するには不十分。 |
-| contradictory | 文献内容が候補と矛盾する方向。 |
-| not_retrieved | 最終診断の候補に文献Evidenceが紐づいていない。検索結果全体に文献がないことと必ずしも同義ではない。 |
+| supported | 候補との同一性が確認された文献Evidenceが、候補を支持する。 |
+| insufficient | 候補に紐づく文献Sourceは取得できたが、支持・反証する具体的Evidenceが不十分。 |
+| contradictory | 候補との同一性が確認された文献Evidenceが、候補を明確に反証する。 |
+| not_retrieved | この実行では候補に紐づく文献Sourceを取得できなかった。検索語不足、API失敗、ヒットなし、候補照合での除外などを含み、文献不存在や候補への反証を意味しない。 |
 
 ### 9.3 references
 
 型：array<object>
 
 この診断ブロックで実際に引用された文献だけが入ります。
+各Referenceの`number`はトップレベル`references`と共通で、診断ブロックごとに振り直しません。
 
 ただし、現在の新版フローではtentativeDiagnosisが文献検索より前に作られるため、
 通常は次の状態になります。
@@ -496,7 +524,7 @@ tentativeDiagnosisにReferenceが入るのは、将来フローを変更した�
 
 | キー | 型 | 内容 |
 |---|---|---|
-| number | integer | この診断ブロック内のReference番号。 |
+| number | integer | トップレベル`references`と共通のReference番号。 |
 | source_name | string | PubMedまたはPMC。 |
 | title | string | 論文タイトル。 |
 | identifier | string | PMIDまたはPMCID。 |
@@ -550,14 +578,8 @@ reflection
 | literature_status | string | 文献Evidenceの状態。 |
 | citation_numbers | array<integer> | 分析文で参照したReference番号。 |
 
-reflection自体にはreferences配列がありません。表示上のURLや論文情報が必要な場合は、
-最終診断ではfinalDiagnosis.references、全体ではsourcesとevidenceの対応を使います。
-
-ただし、現在の公開形式ではreflectionのcitation_numbersだけから、
-reflection専用のReference URLを一意に取得する構造にはなっていません。
-そのため、フロントでクリック可能な出典を表示する場合は、
-最終診断の出典表示をfinalDiagnosis.referencesから行うことを推奨します。
-reflectionの推論文自体は、患者所見とEvidenceを検討した説明として表示します。
+reflection自体にはreferences配列がありませんが、`citation_numbers`と本文中の`[n]`は
+全体共通のトップレベル`references`を参照します。そこからURLや文献情報を解決できます。
 
 旧版のreflection.ans[].referencesのように、候補ごとに文献やツールの説明を自由記述で持たせる方式は、
 文献とツールの区別や番号対応が難しいため、新版では採用していません。
@@ -575,10 +597,10 @@ finalDiagnosis.ans[0].description_en
 finalDiagnosis.ans[0].citation_numbers
     [1]
         ↓
-finalDiagnosis.references[0].number
+references[0].number
     1
         ↓
-finalDiagnosis.references[0]
+references[0]
     ├─ title
     ├─ identifier
     ├─ url
@@ -591,7 +613,7 @@ finalDiagnosis.references[0]
 
 1. finalDiagnosis.ansから診断候補を表示する。
 2. citation_numbersを取得する。
-3. その番号と一致するfinalDiagnosis.references[].numberを探す。
+3. その番号と一致するトップレベルreferences[].numberを探す。
 4. 該当Referenceのtitle、evidence、urlを表示する。
 5. [1]のクリック先としてReferenceのurlを使う。
 
@@ -605,7 +627,7 @@ finalDiagnosis.references[0]
 }
 ~~~
 
-この場合、同じfinalDiagnosis内でnumberが1のReferenceを探します。
+この場合、トップレベルreferencesでnumberが1のReferenceを探します。
 
 ~~~json
 {
@@ -616,38 +638,36 @@ finalDiagnosis.references[0]
 ~~~
 
 [1]はタイトルの順番や検索順位ではなく、
-finalDiagnosis.references[].number == 1で対応付けます。
+トップレベルreferences[].number == 1で対応付けます。
 
-### 10.3 tentativeDiagnosisとfinalDiagnosisの番号は別管理
+### 10.3 引用番号はレスポンス全体で共通
 
-現在の実装では、tentativeDiagnosis.referencesとfinalDiagnosis.referencesはそれぞれ独立して番号を振ります。
+トップレベル`references`が、レスポンス全体で一意な番号を持つ正規のReference一覧です。
+`tentativeDiagnosis.references`と`finalDiagnosis.references`は、そのうち各診断ブロックで使用した項目の部分集合で、番号は維持されます。
 
-そのため、次の2つの[1]が同じ文献とは限りません。
+したがって、診断ブロックが異なっても同じ番号は同じ文献を指します。
 
 ~~~text
 tentativeDiagnosisの[1]
-    → tentativeDiagnosis.references[].number == 1
+    → references[].number == 1
 
 finalDiagnosisの[1]
-    → finalDiagnosis.references[].number == 1
+    → references[].number == 1
 ~~~
 
-最終結果画面では、finalDiagnosisだけを表示対象にすると番号の混乱を避けられます。
+Reflectionの`citation_numbers`も同じトップレベル`references`で解決できます。
 
-### 10.4 トップレベルevidenceのreference_number
+### 10.4 Reference番号とEvidenceの対応
 
-トップレベルのevidenceにもreference_numberがあります。これは検索・Evidence全体を対象にした対応番号です。
-
-一方、finalDiagnosis.references[].numberは最終診断ブロック内で使用した文献だけを対象にした番号です。
+トップレベル`evidence[].reference_number`と各Referenceの`number`は同じ共通番号です。
 
 | 場所 | 番号の範囲 | 主な用途 |
 |---|---|---|
-| evidence[].reference_number | 全Evidenceを対象 | 全体のEvidence確認 |
-| finalDiagnosis.references[].number | 最終診断で使用した文献のみ | フロントの最終診断表示 |
+| references[].number | 全Referenceで一意 | レスポンス全体の出典解決 |
+| evidence[].reference_number | 対応するReferenceと同じ番号 | Evidenceから文献への結合 |
+| diagnosis.references[].number | 全体番号を保持した部分集合 | 診断ブロック内で使った文献の表示 |
 
-フロントで最終診断の[1]を表示する場合は、
-トップレベルevidence[].reference_numberではなく、
-finalDiagnosis.references[].numberを使ってください。
+本文の`[n]`と`citation_numbers`は、トップレベル`references[].number == n`で解決してください。
 
 ## 11. ReferenceとEvidenceの役割の違い
 
@@ -655,6 +675,7 @@ finalDiagnosis.references[].numberを使ってください。
 |---|---|
 | sources | 検索で取得した文献の情報。タイトル、ID、URLなど。 |
 | evidence | 文献本文から抽出した具体的な主張と原文抜粋。 |
+| references | 全体共通の番号を持つ文献一覧。 |
 | finalDiagnosis.ans[].citation_numbers | 診断説明がどのReferenceを使ったか。 |
 | finalDiagnosis.references | 診断説明に実際に使われた文献と、そのEvidence。 |
 | finalDiagnosis.reference | Referenceの簡易な文字列表示。 |
@@ -701,8 +722,8 @@ citation_numbersが空の場合、その候補には現在の最終診断説明�
 
 1. finalDiagnosis.referencesは、検索で取得した全論文ではなく、最終診断がEvidenceを引用した論文だけです。
 2. 検索済みの全論文を確認する場合はトップレベルのsourcesを見ます。
-3. not_retrievedは「PubMedに文献が存在しない」という意味ではなく、最終診断候補にEvidenceが紐づいていないという意味になる場合があります。
+3. not_retrievedは「PubMedに文献が存在しない」という意味ではなく、この実行で候補に紐づくSourceを取得できなかったことを示します。検索語やAPI等の影響を含むため、疾患への反証には使いません。
 4. tentativeDiagnosisとfinalDiagnosisのReference番号は独立しています。
 5. ツール結果は診断候補の補助情報であり、文献Referenceではありません。
-6. source_idやevidence_idは内部追跡用です。現在のフロント向けEvidenceでは、Reference番号を中心に文献と対応付けます。
+6. source_idやevidence_idは内部追跡用です。外部向けのReferenceとEvidenceはReference番号を中心に対応付けます。
 

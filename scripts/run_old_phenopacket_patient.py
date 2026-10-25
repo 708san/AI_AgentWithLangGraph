@@ -82,8 +82,17 @@ def find_metadata_file(explicit: str | None) -> Path:
     raise FileNotFoundError(f"No metadata TSV found. Checked: {candidates}")
 
 
-def load_patient_row(metadata_path: Path, patient_id: str) -> dict[str, str]:
-    """Load exactly one patient row, accepting the repository's TSV variants."""
+def load_patient_row(
+    metadata_path: Path,
+    patient_id: str,
+    occurrence: int | None = None,
+) -> dict[str, str]:
+    """Load one patient row, optionally selecting a duplicate-row occurrence.
+
+    The default remains strict for the legacy runner.  Batch image-case tests
+    can explicitly select the first row for a patient whose TSV contains
+    multiple images for the same patient ID.
+    """
     with metadata_path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle, delimiter="\t")
         if not reader.fieldnames:
@@ -92,6 +101,13 @@ def load_patient_row(metadata_path: Path, patient_id: str) -> dict[str, str]:
 
     if not matches:
         raise LookupError(f"Patient ID {patient_id} was not found in {metadata_path}")
+    if occurrence is not None:
+        if occurrence < 0 or occurrence >= len(matches):
+            raise IndexError(
+                f"Patient ID {patient_id} occurrence {occurrence} is out of range; "
+                f"found {len(matches)} rows in {metadata_path}."
+            )
+        return {key: value or "" for key, value in matches[occurrence].items()}
     if len(matches) > 1:
         raise ValueError(
             f"Patient ID {patient_id} occurs {len(matches)} times in {metadata_path}; "

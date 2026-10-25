@@ -110,8 +110,6 @@ class RareDiseaseDiagnosisPipeline:
         if not self.enable_log:
             return
         log_node_result(self.logfile_path, node_name, result)
-        if state is not None:
-            save_node_result(node_name, result, state)
 
     def _build_graph(self, evidence_mode: str = DEFAULT_EVIDENCE_MODE):
         graph_builder = StateGraph(State)
@@ -120,6 +118,11 @@ class RareDiseaseDiagnosisPipeline:
             def wrapped(state):
                 result = node_func(state)
                 self._log(node_name, result, state)
+                # Decorated nodes already persist themselves. Persist only
+                # nodes without the legacy decorator so graph execution still
+                # produces a complete artifact set without duplicate writes.
+                if not getattr(node_func, "_saves_result", False):
+                    save_node_result(node_name, result, state)
                 # プロンプト付きdictの場合はresult["result"]を返す
                 if isinstance(result, dict) and "result" in result:
                     return result["result"]
@@ -176,9 +179,14 @@ class RareDiseaseDiagnosisPipeline:
                 maximum = state.get("max_flow_iterations", 1)
                 if not isinstance(reflection, ReflectionOutputV2) or not reflection.ans:
                     return "ProceedToFinalDiagnosisNode"
-                statuses = {item.literature_status for item in reflection.ans}
-                evidence_insufficient = statuses.issubset({"insufficient", "not_retrieved"})
-                if evidence_insufficient and iteration < maximum:
+                # Retry only candidates whose retrieval/Evidence remains
+                # unresolved. Missing literature for every candidate is not
+                # required, and it is never a clinical rejection rule.
+                has_unresolved_literature = any(
+                    item.literature_status in {"not_retrieved", "insufficient"}
+                    for item in reflection.ans
+                )
+                if has_unresolved_literature and iteration < maximum:
                     return "RetryLiteratureSearchNode"
                 return "ProceedToFinalDiagnosisNode"
 
@@ -280,6 +288,10 @@ class RareDiseaseDiagnosisPipeline:
             "flow_iteration": 0,
             "max_flow_iterations": max_flow_iterations,
             "tentativeDiagnosis": None,
+            "zeroShotRaw": None,
+            "zeroShotValidation": None,
+            "tentativeRaw": None,
+            "tentativeValidation": None,
             "reflection": None,
             "finalDiagnosis": None,
             "onset": onset if onset else "Unknown",

@@ -1,12 +1,15 @@
 from langchain.schema import HumanMessage
-from ..state.state_types import ZeroShotOutput, State
+from ..state.state_types import ZeroShotFormat, ZeroShotOutput, ZeroShotReasonedOutput, State
 from ..llm.prompt import prompt_dict, build_prompt
 
 
-def createZeroshot(state: State):
+def createZeroshot(state: State, *, reasoning_sink=None):
     """
-    hpo_dictを使ってZero-Shot診断プロンプトを作成し、LLMに投げる。
-    use_absentHPO=True の場合のみ、明示的に観察されなかったHPOもプロンプトへ含める。
+    Generate reasoned Zero-shot candidates and return a reason-free snapshot.
+
+    ``reasoning_sink`` receives the independent model output for audit logging;
+    the returned ``ZeroShotOutput`` intentionally excludes ``selection_reason``.
+    Explicitly absent HPO terms are included only when ``use_absentHPO=True``.
     """
     hpo_dict = state.get("hpoDict", {})
     absent_hpo_dict = state.get("absentHpoDict", {})
@@ -37,11 +40,26 @@ def createZeroshot(state: State):
     )
 
     # structured_llmを使う場合
-    structured_llm = llm.get_structured_llm(ZeroShotOutput)
+    # Reasons are generated in a separate schema and copied to the optional
+    # sink before any downstream normalization. They never enter State.
+    structured_llm = llm.get_structured_llm(ZeroShotReasonedOutput)
     messages = [HumanMessage(content=prompt)]
-    result = llm.invoke_with_content_filter_retry(
+    generated = llm.invoke_with_content_filter_retry(
         structured_llm,
         messages,
         context="ZeroShot",
     )
+    if generated is None:
+        return None, prompt
+
+    if reasoning_sink is not None:
+        reasoning_sink(generated.model_dump())
+    result = ZeroShotOutput(ans=[
+        ZeroShotFormat(
+            disease_name=item.disease_name,
+            rank=item.rank,
+            OMIM_id=item.OMIM_id,
+        )
+        for item in generated.ans
+    ])
     return result, prompt

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Iterable
 
@@ -45,6 +46,7 @@ def _exact_excerpt_span(raw_content: str, excerpt: str) -> tuple[int, int] | Non
 CHUNK_MAX_CHARS = int(os.getenv("EVIDENCE_CHUNK_MAX_CHARS", "3500"))
 MAX_CHUNKS_PER_SOURCE = int(os.getenv("EVIDENCE_MAX_CHUNKS_PER_SOURCE", "2"))
 MAX_CHUNKS_PER_CANDIDATE = int(os.getenv("EVIDENCE_MAX_CHUNKS_PER_CANDIDATE", "10"))
+EVIDENCE_MAX_WORKERS = max(1, int(os.getenv("EVIDENCE_MAX_WORKERS", "2")))
 
 
 @dataclass(frozen=True)
@@ -243,6 +245,89 @@ negative_finding, phenotype_overlap, phenotype_mismatch, disease_mechanism.
 {chr(10).join(source_blocks)}"""
 
 
+def _extract_evidence_for_candidate(
+    candidate: MergedDiseaseCandidateV2,
+    source_list: list[SourceRecord],
+    present_hpo: list[str],
+    absent_hpo: list[str],
+    llm: Any,
+) -> list[EvidenceItem]:
+    candidate_sources = [
+        source for source in source_list if candidate.candidate_id in source.candidate_ids
+        and (
+            source.source_type != "literature"
+            or matches_candidate_identity(
+                {"title": source.title, "abstract": source.raw_content}, candidate
+            )
+        )
+    ]
+    if not candidate_sources:
+        return []
+    selected_chunks = _select_relevant_chunks(candidate, candidate_sources, present_hpo)
+    if not selected_chunks:
+        return []
+    try:
+        structured = llm.get_structured_llm(EvidenceExtractionOutput)
+        result = structured.invoke(
+            [HumanMessage(content=_candidate_prompt(candidate, selected_chunks, present_hpo, absent_hpo))]
+        )
+    except Exception as exc:
+        print(f"[Evidence] extraction failed for {candidate.candidate_id}: {exc}")
+        return []
+
+    drafts = getattr(result, "evidence", []) or []
+    source_map = {source.source_id: source for source in candidate_sources}
+    chunks_by_source: dict[str, list[_SourceChunk]] = {}
+    for chunk in selected_chunks:
+        chunks_by_source.setdefault(chunk.source_id, []).append(chunk)
+
+    extracted: dict[str, EvidenceItem] = {}
+    for draft in drafts:
+        source_id = _value(draft, "source_id")
+        source = source_map.get(source_id)
+        excerpt = str(_value(draft, "excerpt", "") or "").strip()
+        claim_en = str(_value(draft, "claim_en", "") or "").strip()
+        claim_ja = str(_value(draft, "claim_ja", "") or "").strip()
+        if not source or not excerpt or not claim_en or not claim_ja:
+            continue
+        if not _contains_excerpt(source.raw_content, excerpt):
+            print(f"[Evidence] rejected non-verbatim excerpt from {source_id}")
+            continue
+        source_chunks = chunks_by_source.get(source_id, [])
+        draft_chunk_id = str(_value(draft, "source_chunk_id", "") or "")
+        chunk = next((item for item in source_chunks if item.chunk_id == draft_chunk_id), None)
+        if chunk is None:
+            chunk = next(
+                (item for item in source_chunks if _contains_excerpt(item.text, excerpt)),
+                None,
+            )
+        source_section = _value(draft, "source_section") or (chunk.section if chunk else None)
+        excerpt_span = _exact_excerpt_span(source.raw_content, excerpt)
+        source_start, source_end = excerpt_span if excerpt_span else (None, None)
+        evidence_id = _evidence_id(
+            candidate.candidate_id,
+            source_id,
+            str(_value(draft, "evidence_type")),
+            excerpt,
+        )
+        extracted[evidence_id] = EvidenceItem(
+            evidence_id=evidence_id,
+            candidate_id=candidate.candidate_id,
+            source_id=source_id,
+            evidence_type=_value(draft, "evidence_type"),
+            claim_en=claim_en,
+            claim_ja=claim_ja,
+            excerpt=excerpt,
+            support=_value(draft, "support", "unknown"),
+            confidence=_value(draft, "confidence", "low"),
+            source_chunk_id=chunk.chunk_id if chunk else None,
+            source_section=source_section,
+            source_start=source_start,
+            source_end=source_end,
+        )
+    return list(extracted.values())
+
+
 def extract_evidence_for_candidates(
     candidates: Iterable[MergedDiseaseCandidateV2],
     sources: Iterable[SourceRecord],
@@ -252,80 +337,43 @@ def extract_evidence_for_candidates(
 ) -> list[EvidenceItem]:
     if not llm:
         return []
+    candidate_list = list(candidates)
     source_list = list(sources)
     present_hpo = list((hpo_dict or {}).values())
     absent_hpo = list((absent_hpo_dict or {}).values())
+    if not candidate_list:
+        return []
+
+    # Candidate extraction is independent.  Keep the worker count low by
+    # default because each task may make an LLM request; the LLM wrapper's
+    # shared rate limiter still controls request pacing.
+    results_by_index: list[list[EvidenceItem]] = [[] for _ in candidate_list]
+    max_workers = min(len(candidate_list), EVIDENCE_MAX_WORKERS)
+    print(f"[Evidence] candidate extraction max_workers={max_workers}")
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                _extract_evidence_for_candidate,
+                candidate,
+                source_list,
+                present_hpo,
+                absent_hpo,
+                llm,
+            ): index
+            for index, candidate in enumerate(candidate_list)
+        }
+        for future in as_completed(futures):
+            index = futures[future]
+            try:
+                results_by_index[index] = future.result()
+            except Exception as exc:
+                candidate = candidate_list[index]
+                print(f"[Evidence] worker failed for {candidate.candidate_id}: {exc}")
+
+    # Merge in candidate order so external output remains deterministic even
+    # though the LLM calls complete in arbitrary order.
     existing: dict[str, EvidenceItem] = {}
-    for candidate in candidates:
-        candidate_sources = [
-            source for source in source_list if candidate.candidate_id in source.candidate_ids
-            and (
-                source.source_type != "literature"
-                or matches_candidate_identity(
-                    {"title": source.title, "abstract": source.raw_content}, candidate
-                )
-            )
-        ]
-        if not candidate_sources:
-            continue
-        selected_chunks = _select_relevant_chunks(candidate, candidate_sources, present_hpo)
-        if not selected_chunks:
-            continue
-        try:
-            structured = llm.get_structured_llm(EvidenceExtractionOutput)
-            result = structured.invoke(
-                [HumanMessage(content=_candidate_prompt(candidate, selected_chunks, present_hpo, absent_hpo))]
-            )
-        except Exception as exc:
-            print(f"[Evidence] extraction failed for {candidate.candidate_id}: {exc}")
-            continue
-        drafts = getattr(result, "evidence", []) or []
-        source_map = {source.source_id: source for source in candidate_sources}
-        chunks_by_source = {}
-        for chunk in selected_chunks:
-            chunks_by_source.setdefault(chunk.source_id, []).append(chunk)
-        for draft in drafts:
-            source_id = _value(draft, "source_id")
-            source = source_map.get(source_id)
-            excerpt = str(_value(draft, "excerpt", "") or "").strip()
-            claim_en = str(_value(draft, "claim_en", "") or "").strip()
-            claim_ja = str(_value(draft, "claim_ja", "") or "").strip()
-            if not source or not excerpt or not claim_en or not claim_ja:
-                continue
-            if not _contains_excerpt(source.raw_content, excerpt):
-                print(f"[Evidence] rejected non-verbatim excerpt from {source_id}")
-                continue
-            source_chunks = chunks_by_source.get(source_id, [])
-            draft_chunk_id = str(_value(draft, "source_chunk_id", "") or "")
-            chunk = next((item for item in source_chunks if item.chunk_id == draft_chunk_id), None)
-            if chunk is None:
-                chunk = next(
-                    (item for item in source_chunks if _contains_excerpt(item.text, excerpt)),
-                    None,
-                )
-            source_section = _value(draft, "source_section") or (chunk.section if chunk else None)
-            excerpt_span = _exact_excerpt_span(source.raw_content, excerpt)
-            source_start, source_end = excerpt_span if excerpt_span else (None, None)
-            evidence_id = _evidence_id(
-                candidate.candidate_id,
-                source_id,
-                str(_value(draft, "evidence_type")),
-                excerpt,
-            )
-            item = EvidenceItem(
-                evidence_id=evidence_id,
-                candidate_id=candidate.candidate_id,
-                source_id=source_id,
-                evidence_type=_value(draft, "evidence_type"),
-                claim_en=claim_en,
-                claim_ja=claim_ja,
-                excerpt=excerpt,
-                support=_value(draft, "support", "unknown"),
-                confidence=_value(draft, "confidence", "low"),
-                source_chunk_id=chunk.chunk_id if chunk else None,
-                source_section=source_section,
-                source_start=source_start,
-                source_end=source_end,
-            )
+    for candidate_items in results_by_index:
+        for item in candidate_items:
             existing[item.evidence_id] = item
     return list(existing.values())

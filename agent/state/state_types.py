@@ -156,6 +156,18 @@ class DiagnosisOutputV2(BaseModel):
     reference: Optional[str] = None
 
 
+class FinalDiagnosisGenerationOutput(BaseModel):
+    """LLM-only schema for final prose generation.
+
+    References and Evidence are authoritative State data, not fields the
+    final-diagnosis model should regenerate. Keeping this schema narrow also
+    prevents the structured-output parser from mixing source records with
+    diagnosis items.
+    """
+
+    ans: List[DiagnosisFormatV2] = Field(default_factory=list)
+
+
 class ReflectionFormatV2(BaseModel):
     candidate_id: str
     disease_name_en: str
@@ -227,6 +239,10 @@ class State(TypedDict):
     flow_iteration: int
     max_flow_iterations: int
     zeroShotResult: Optional['ZeroShotOutput']
+    zeroShotRaw: Optional['ZeroShotOutput']
+    zeroShotValidation: Optional[List[dict[str, Any]]]
+    tentativeRaw: Optional[Union['DiagnosisOutput', DiagnosisOutputV2]]
+    tentativeValidation: Optional[dict[str, Any]]
     tentativeDiagnosis: Optional[Union['DiagnosisOutput', DiagnosisOutputV2]]
     reflection: Optional[Union['ReflectionOutput', ReflectionOutputV2]]
     finalDiagnosis: Optional[Union['DiagnosisOutput', DiagnosisOutputV2]]
@@ -237,12 +253,32 @@ class State(TypedDict):
     
 # --- Pydantic Model for Zero-Shot Diagnosis Output ---
 class ZeroShotFormat(BaseModel):
-    disease_name: str = Field(..., description="The formal name of the most likely rare disease, based solely on the patient's HPO terms.")
+    disease_name: str = Field(..., description=(
+        "The disease name in OMIM entry-title format, preserving capitalization, punctuation, "
+        "and subtype numbers. Use plain text without explanations or Markdown."
+    ))
     rank: int = Field(..., description="The rank of the disease in the differential diagnosis list, where 1 is the most likely.")
-    OMIM_id: Optional[str] = Field(None, description="The OMIM identifier for the disease, if available.")
+    OMIM_id: Optional[str] = Field(None, description=(
+        "The disease's OMIM identifier as a six-digit string without the OMIM prefix. "
+        "Use JSON null when it is unknown; never invent a disease or gene identifier."
+    ))
 
 class ZeroShotOutput(BaseModel):
     ans: List[ZeroShotFormat]
+
+
+class ZeroShotReasonedCandidate(ZeroShotFormat):
+    selection_reason: str = Field(..., min_length=1, description=(
+        "A concise explanation, at most two sentences, of why this candidate was selected. "
+        "Use supplied patient findings only; mention an explicit contradiction or uncertainty "
+        "when relevant. This field is for logging and evaluation only."
+    ))
+
+
+class ZeroShotReasonedOutput(BaseModel):
+    """LLM-only output; selection_reason must never enter downstream State."""
+
+    ans: List[ZeroShotReasonedCandidate]
 
 
 # --- Pydantic Models for Tentative Diagnosis Output ---

@@ -1,3 +1,5 @@
+from collections import Counter
+import json
 from typing import Optional
 import re
 from langchain.schema import HumanMessage
@@ -13,7 +15,7 @@ from ..state.state_types import (
 )
 from ..llm.prompt import prompt_dict, build_prompt
 from ..utils.response_serializer import omim_number
-from .candidate_metadata import canonical_omim_id, enrich_candidates
+from .candidate_metadata import canonical_omim_id, enrich_candidates, names_compatible
 
 
 _REFERENCE_SOURCE_ALIASES = (
@@ -391,18 +393,91 @@ def _v2_reason(candidate: MergedDiseaseCandidateV2, evidence: list[EvidenceItem]
     return claims_en + suffix_en, claims_ja + suffix_ja
 
 
-def createDiagnosisV2(state: State) -> tuple[DiagnosisOutputV2 | None, str]:
-    """Generate a bilingual tentative diagnosis from structured Evidence only."""
+def validate_v2_candidate_output(output, candidates: list[MergedDiseaseCandidateV2]) -> dict:
+    """Validate identity fields without deciding clinical correctness.
+
+    Tentative diagnosis must retain every merged candidate. Unknown/duplicate
+    IDs, omitted candidates, rank corruption, OMIM mismatch, and clear
+    disease-name mismatch are generation errors and trigger one regeneration.
+    """
+    candidate_map = {candidate.candidate_id: candidate for candidate in candidates}
+    items = list(getattr(output, "ans", []) or []) if output is not None else []
+    errors: list[str] = []
+    ids = [getattr(item, "candidate_id", None) for item in items]
+    counts = Counter(ids)
+    unknown = [item_id for item_id in counts if item_id not in candidate_map]
+    duplicate = [item_id for item_id, count in counts.items() if count > 1]
+    omitted = [candidate.candidate_id for candidate in candidates if candidate.candidate_id not in counts]
+    if not items:
+        errors.append("Tentative diagnosis returned no candidates.")
+    if unknown:
+        errors.append(f"Unknown candidate_id values: {unknown}")
+    if duplicate:
+        errors.append(f"Duplicate candidate_id values: {duplicate}")
+    if omitted:
+        errors.append(f"Tentative diagnosis omitted merged candidates: {omitted}")
+
+    ranks = [getattr(item, "rank", None) for item in items]
+    if ranks != list(range(1, len(ranks) + 1)):
+        errors.append("Tentative diagnosis ranks must be contiguous and start at 1.")
+
+    identity_errors = []
+    for item in items:
+        candidate = candidate_map.get(getattr(item, "candidate_id", None))
+        if candidate is None:
+            continue
+        expected_omim = canonical_omim_id(candidate.OMIM_id)
+        actual_omim = canonical_omim_id(getattr(item, "OMIM_id", None))
+        if expected_omim != actual_omim:
+            identity_errors.append(
+                f"{candidate.candidate_id}: OMIM mismatch (expected {expected_omim}, got {actual_omim})."
+            )
+        if not names_compatible(getattr(item, "disease_name_en", ""), candidate.disease_name):
+            identity_errors.append(
+                f"{candidate.candidate_id}: disease_name_en conflicts with the authoritative candidate name."
+            )
+    errors.extend(identity_errors)
+    return {
+        "matched": not errors,
+        "status": "accepted" if not errors else "invalid",
+        "errors": errors,
+        "unknown_ids": unknown,
+        "duplicate_ids": duplicate,
+        "omitted_candidate_ids": omitted,
+        "candidate_count": len(items),
+    }
+
+
+def _v2_regeneration_prompt(original_prompt: str, output, validation: dict) -> str:
+    previous = output.model_dump_json() if hasattr(output, "model_dump_json") else json.dumps(output, ensure_ascii=False)
+    return (
+        f"{original_prompt}\n\n"
+        "## Previous tentative output\n"
+        f"{previous}\n\n"
+        "## Identity validation errors\n"
+        f"{json.dumps(validation, ensure_ascii=False)}\n\n"
+        "## Regeneration instructions\n"
+        "Return every supplied candidate exactly once, using only existing candidate_id values. "
+        "Do not omit a candidate or add one outside the input. Assign ranks 1..N, copy the authoritative OMIM_id exactly, "
+        "and use the authoritative disease identity rather than inventing a name or subtype. "
+        "Return the structured output only."
+    )
+
+
+def createDiagnosisV2(state: State) -> tuple[DiagnosisOutputV2 | None, str, dict]:
+    """Generate a bilingual tentative diagnosis with one identity-safe retry."""
     llm = state.get("llm")
     candidates = enrich_candidates(state.get("mergedDiseaseCandidates", []) or [])
     evidence = list(state.get("evidence", []) or [])
     sources = list(state.get("sources", []) or [])
     if not candidates:
-        return DiagnosisOutputV2(ans=[], evidence=evidence), ""
+        return DiagnosisOutputV2(ans=[], evidence=evidence), "", {
+            "status": "empty_input", "attempts": [], "errors": []
+        }
 
     def fallback() -> DiagnosisOutputV2:
         answers = []
-        for rank, candidate in enumerate(candidates[:10], 1):
+        for rank, candidate in enumerate(candidates, 1):
             status = _v2_status(candidate, evidence, sources)
             description_en, description_ja = _v2_reason(candidate, evidence, status)
             answers.append(
@@ -421,7 +496,7 @@ def createDiagnosisV2(state: State) -> tuple[DiagnosisOutputV2 | None, str]:
         return DiagnosisOutputV2(ans=answers, evidence=evidence)
 
     if not llm:
-        return fallback(), ""
+        return fallback(), "", {"status": "fallback_generation_error", "attempts": [], "errors": ["LLM instance not found."]}
 
     evidence_text = []
     for item in evidence:
@@ -431,7 +506,7 @@ def createDiagnosisV2(state: State) -> tuple[DiagnosisOutputV2 | None, str]:
             f"excerpt={item.excerpt}"
         )
     candidate_text = []
-    for index, candidate in enumerate(candidates[:10], 1):
+    for index, candidate in enumerate(candidates, 1):
         supports = "; ".join(
             f"{support.tool}:rank={support.rank},score={support.score}"
             for support in candidate.tool_supports
@@ -442,9 +517,9 @@ def createDiagnosisV2(state: State) -> tuple[DiagnosisOutputV2 | None, str]:
         )
     prompt = f"""You are a clinical genetics assistant generating a bilingual differential diagnosis.
 Use ONLY the supplied candidate list and validated Evidence items. Do not cite diagnostic tools as literature.
-The CANDIDATES list is the authoritative, already-merged candidate list; do not split, duplicate, or invent candidates.
-Return up to five selected candidates. If N candidates are returned, the final differential ranks MUST be exactly 1, 2, ..., N in the same order as the returned items.
-Rank 1 is the most likely final diagnosis. The rank field is the final differential rank, not a PubCaseFinder, GestaltMatcher, ZeroShot, PhenoBrain, or PhenotypeSearch rank.
+The CANDIDATES list is the authoritative, already-merged candidate list; do not split, duplicate, omit, or invent candidates.
+Return every supplied candidate exactly once, including candidates with no retrieved literature Evidence. If N candidates are supplied, return N items with ranks exactly 1, 2, ..., N.
+Rank candidates by overall clinical compatibility. The rank field is the tentative differential rank, not a PubCaseFinder, GestaltMatcher, ZeroShot, PhenoBrain, or PhenotypeSearch rank.
 Tool ranks and scores are auxiliary signals for deciding order only; NEVER copy a tool rank into the final rank field, and NEVER reuse a rank.
 Use the candidate order shown above as the default ordering; change it only when the supplied phenotype and literature Evidence provide a clear reason.
 Use exactly the supplied candidate_id and evidence_id values.
@@ -459,22 +534,44 @@ PATIENT_PRESENT_HPO: {', '.join(state.get('hpoDict', {}).values())}
 PATIENT_ABSENT_HPO: {', '.join(state.get('absentHpoDict', {}).values()) if state.get('use_absentHPO') else 'N/A'}
 CANDIDATES:\n{chr(10).join(candidate_text)}
 EVIDENCE:\n{chr(10).join(evidence_text) or 'No validated Evidence'}"""
-    try:
-        result = llm.get_structured_llm(DiagnosisOutputV2).invoke([HumanMessage(content=prompt)])
-        allowed_candidates = {candidate.candidate_id: candidate for candidate in candidates}
-        allowed_evidence = {item.evidence_id: item for item in evidence}
-        answers = []
-        for item in getattr(result, "ans", []) or []:
-            if item.candidate_id not in allowed_candidates:
-                continue
-            item.OMIM_id = canonical_omim_id(allowed_candidates[item.candidate_id].OMIM_id)
-            item.evidence_ids = [evidence_id for evidence_id in item.evidence_ids if evidence_id in allowed_evidence]
-            if not item.evidence_ids:
-                item.literature_status = "not_retrieved"
-            answers.append(item)
-        if not answers:
-            return fallback(), prompt
-        return DiagnosisOutputV2(ans=answers, evidence=evidence), prompt
-    except Exception as exc:
-        print(f"[DiagnosisV2] structured generation failed: {exc}")
-        return fallback(), prompt
+    structured_llm = llm.get_structured_llm(DiagnosisOutputV2)
+    validation = {"status": "not_run", "attempts": [], "errors": []}
+    current_prompt = prompt
+    for attempt in (1, 2):
+        try:
+            result = llm.invoke_with_content_filter_retry(
+                structured_llm,
+                [HumanMessage(content=current_prompt)],
+                context=f"DiagnosisV2:attempt_{attempt}",
+            )
+        except Exception as exc:
+            validation["attempts"].append({"attempt": attempt, "status": "generation_error", "error_type": type(exc).__name__})
+            validation["errors"].append(f"generation_error:{type(exc).__name__}")
+            validation["status"] = "fallback_generation_error"
+            return fallback(), current_prompt, validation
+
+        attempt_validation = validate_v2_candidate_output(result, candidates)
+        validation["attempts"].append({
+            "attempt": attempt,
+            "status": "accepted" if attempt_validation["matched"] else "candidate_mismatch",
+            "validation": attempt_validation,
+            "output": result.model_dump() if hasattr(result, "model_dump") else None,
+        })
+        if attempt_validation["matched"]:
+            allowed_candidates = {candidate.candidate_id: candidate for candidate in candidates}
+            allowed_evidence = {item.evidence_id for item in evidence}
+            accepted = result.model_copy(deep=True)
+            for item in accepted.ans:
+                authoritative = allowed_candidates[item.candidate_id]
+                item.OMIM_id = canonical_omim_id(authoritative.OMIM_id)
+                item.evidence_ids = [value for value in item.evidence_ids if value in allowed_evidence]
+                if not item.evidence_ids:
+                    item.literature_status = "not_retrieved"
+            validation["status"] = "accepted" if attempt == 1 else "regenerated"
+            return DiagnosisOutputV2(ans=accepted.ans, evidence=evidence), current_prompt, validation
+        validation["errors"] = attempt_validation["errors"]
+        if attempt == 1:
+            current_prompt = _v2_regeneration_prompt(prompt, result, attempt_validation)
+
+    validation["status"] = "fallback_after_regeneration"
+    return fallback(), current_prompt, validation

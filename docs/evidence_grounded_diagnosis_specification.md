@@ -3,8 +3,8 @@
 > **現在の最小仕様**: この文書の旧記述にある `patient_matches`、`limitations`、
 > `impact`、`relationship`、`match_level`、`reasoning`、`reference_catalog` は廃止する。
 > 現在の正式な公開対応は、診断文の `[n]`、`citation_numbers`、および
-> `finalDiagnosis.references[number=n]` のみとする。Referenceにはタイトル、URL、
-> 文献主張、原文抜粋を含める。診断ツールは候補順位の補助情報であり、文献Referenceには含めない。
+> `finalDiagnosis.references[number=n]` と、Evidenceを結ぶ `source_id` / `evidence_id` とする。
+> Referenceにはタイトル、URL、文献主張、原文抜粋、出典位置を含める。診断ツールは候補順位の補助情報であり、文献Referenceには含めない。
 > 実行順は `tool -> tentative -> literature search/Evidence -> reflection -> final` を維持する。
 
 ## 1. 目的と適用範囲
@@ -355,6 +355,8 @@ class State(TypedDict):
     pubCaseFinder: List[PCFres]
     GestaltMatcher: List[GestaltMatcherFormat]
     zeroShotResult: Optional[ZeroShotOutput]
+    zeroShotRaw: Optional[ZeroShotOutput]
+    zeroShotValidation: Optional[list[dict]]
     phenoBrain: List[PhenoBrainResult]
     phenotypeSearchResult: Optional[List[PhenotypeSearchFormat]]
     mergedDiseaseCandidates: List[Union[LegacyMergedDiseaseCandidate, MergedDiseaseCandidateV2]]
@@ -367,6 +369,8 @@ class State(TypedDict):
     webresources: List[webresource]
 
     tentativeDiagnosis: Optional[Union[LegacyDiagnosisOutput, DiagnosisOutputV2]]
+    tentativeRaw: Optional[Union[LegacyDiagnosisOutput, DiagnosisOutputV2]]
+    tentativeValidation: Optional[dict]
     reflection: Optional[Union[LegacyReflectionOutput, ReflectionOutputV2]]
     finalDiagnosis: Optional[Union[LegacyDiagnosisOutput, DiagnosisOutputV2]]
     validation_status: Literal["not_run", "passed", "failed", "partial"]
@@ -382,6 +386,10 @@ class State(TypedDict):
 `CandidateSupport`の正式な保存場所はv2の`mergedDiseaseCandidates[*].tool_supports`である。トップレベルに重複した`candidateSupport`配列は持たせない。legacy TypedDictでは移行期間中のみ`tool_rankings`を読み取り、v2境界で`tool_supports`へ変換する。
 
 `memory`は旧経路との互換用に残すが、新しい`createDiagnosisNode`、`reflectionNode`、`finalDiagnosisNode`は`evidence`と`sources`を使う。
+
+Zero-shotのLLM応答は、`selection_reason`を含むログ専用の一時モデルとして受け取り、理由を除いた`ZeroShotOutput`だけをStateへ渡す。正規化前の候補は`zeroShotRaw`、正規化結果は`zeroShotResult`として評価用に独立保存し、`selection_reason`や検証メタデータは公開レスポンスへ出さない。疾患名・OMIM IDの検証状態は`match`、`normalized`、`mismatch`、`unconfirmed`、`duplicate`、`excluded`を区別して記録する。
+
+暫定診断は全統合候補を候補IDごとに一度ずつ含める。候補外ID、候補欠落、重複ID、順位の不整合、候補IDとOMIM IDの不一致、明らかな病名不一致を検出する。問題があれば検証内容を記録した上で1回だけ再生成し、再生成後も不正なら全入力候補を含む安全な代替出力を作る。候補外の候補を黙って削除して成功扱いにはしない。
 
 初期Stateでは、公開実行のデフォルトとして`evidence_mode="v2"`、`sources=[]`、`evidence=[]`、`flow_iteration=0`、`max_flow_iterations=1`、`validation_status="not_run"`として初期化する。旧ルートは`evidence_mode="legacy"`を明示した場合だけ選択する。
 
@@ -428,6 +436,8 @@ Reflection
 最終正規化・出力検証
 ```
 
+候補統合後の候補集合は、文献検索・Evidence抽出・Reflection・tentativeDiagnosisの対象として保持する。tentativeDiagnosisでは統合済み候補を全件、候補IDごとに一度ずつ出力し、検索前や暫定診断段階で上位5件へ切り詰めてはならない。一方、公開する最終診断の鑑別候補は最大5件とする。
+
 ### 7.1 既存ノードとの対応
 
 | 役割 | 現行ノード | v2方針 |
@@ -454,6 +464,8 @@ Reflection
 
 各Candidateから次を生成する。
 
+対象は候補統合後の全Candidateであり、最終診断で表示する最大5件とは別の上限で管理する。
+
 - 正規化疾患名
 - OMIM ID
 - gene symbols
@@ -465,16 +477,18 @@ OMIM、遺伝子、別名が取得できない場合は、疾患名と患者HPO�
 
 ### 8.2 クエリプラン
 
-Candidateごとに、以下を別クエリとして生成する。1本の長大なクエリにすべてを詰め込まない。
+Candidateごとに、以下を別クエリとして生成する。1本の長大なクエリにすべてを詰め込まない。クエリ上限で先頭の語だけが残らないよう、識別子・正式名・遺伝子・同義語を優先し、広い表現型検索は後段に置く。疾患名にセミコロン等で略称が連結されている場合は分割・正規化する。
 
 ```text
-Q1: "disease name"
-Q2: "disease name" AND (phenotype OR clinical features OR syndrome)
-Q3: "disease name" AND gene_symbol
-Q4: "OMIM:123456" OR "123456"
-Q5: "synonym" AND distinctive_phenotype
-Q6: gene_symbol AND hpo_feature_1 AND hpo_feature_2
+Q1: "123456"[All Fields] (OMIM number)
+Q2: "normalized primary disease name"
+Q3: "primary disease name" OR gene_symbol
+Q4: "synonym or alternate disease name"
+Q5: gene_symbol AND distinctive_HPO
+Q6: "primary disease name" AND distinctive_HPO
 ```
+
+基本検索で候補に紐付くSourceが得られない、または得られたSourceから有用なEvidenceを抽出できない場合は、反復上限の範囲で該当候補だけを追加検索する。再検索では症例報告・診断・遺伝形式等を加えた別クエリも使う。
 
 ### 8.3 検索ソースの優先順位
 
@@ -499,6 +513,7 @@ PubMed/PMCから少なくとも次を保存する。
 - PubMed/PMC URL
 - 使用した検索クエリ
 - candidate_id
+- クエリごとのヒット件数、本文取得結果、同一性チェックによる採用・除外件数、失敗理由を実行ログに記録する
 
 LLMによる要約を原文の代替として保存してはならない。
 
@@ -564,31 +579,32 @@ Evidence抽出では、文献全文を短く要約するのではなく、以下
 
 ```text
 supported
-  1つ以上のliterature Evidenceが候補と患者所見を支持する
+  1つ以上の検証済みliterature Evidenceが候補の疾患同一性と患者所見を支持する
 
 insufficient
-  文献が少ない、または候補同一性を確認できないが、ツール支持や表現型一致により候補を残す
+  候補に紐付く文献Sourceは取得できたが、候補を支持・反証する具体的なEvidenceが不十分
 
 contradictory
-  文献または明示的陰性所見が疾患の中核と明確に矛盾する
+  疾患同一性が確認された文献Evidenceが、候補を明確に反証する
 
 not_retrieved
-  文献検索が実行されなかった、または検索失敗した
+  この実行では候補に紐付く文献Sourceを取得できなかった。検索語の不足、検索API失敗、ヒットなし、候補同一性チェックでの除外などを含み、文献不存在や候補への反証を意味しない
 ```
 
-`insufficient`は候補維持を許可するが、文献支持済みとして扱ってはならない。
+検索クエリの成否・ヒット数・除外理由は実行ログで確認し、`literature_status`だけから「文献が存在しない」と推論しない。`not_retrieved`と`insufficient`はいずれも単独では候補順位を下げる理由にしない。
 
 最終診断の「支持されている」という表現は、少なくとも1つの`literature` SourceRecord（PubMed/PMC）に紐付くEvidenceItemがある候補に限定する。OMIMなどの`database`は内部の疾患名・ID・遺伝子同定の補助には使えるが、番号付きReferenceや臨床的な最終支持を単独で与えない。`insufficient`や`not_retrieved`の候補を返す場合は、文献根拠が不足していることを英語・日本語の両方で明示する。
 
 ### 10.3 Reflection
 
-- 文献不足だけで`correctness=False`にしない。
-- ツール支持による候補維持と文献支持済みを分離する。
-- `contradictory`の場合は最終候補から除外または強く低順位化する。
-- `insufficient`の場合は診断文章に文献不足を明示する。
-- 明示的陰性所見と未報告を区別する。
+- `correctness=True`は「確定」ではなく「鑑別候補として残す妥当性がある」を意味する。最終上位5件入りを保証する値ではない。
+- 表現型の適合性・特異性と診断ツールの支持をもとに候補維持を評価し、文献検索の成否とは分離する。
+- 文献が未取得・不十分というだけで`correctness=False`にしない。検索失敗は臨床的反証ではない。
+- `correctness=False`は、明確な表現型不整合、決定的な反証、または非特異的な一致しかなく意味のあるツール支持もない場合に限る。
+- 未報告の所見を陰性として扱わない。明示された陰性所見のみ、該当する場合に評価する。
+- `literature_status`は取得した資料と検証済みEvidenceの状態を示し、候補の採否とは別に解釈する。
 
-既存の「文献不足ならツールrankでCorrectnessをTrueへoverrideする」処理は廃止する。代わりに`correctness`と`literature_status`を別々に判定する。
+最終順位は表現型の適合性・特異性、ツール支持、Reflectionを中心に決める。文献は疾患固有の説明を裏付け、候補と同一性が確認された反証を示す場合に評価へ反映する。文献数・検索成功そのものを順位スコアにしない。
 
 ## 11. 出力Reference仕様
 
@@ -610,7 +626,7 @@ not_retrieved
 }
 ```
 
-`evidence_ids`は`ReferenceRecord`でのみ公開する。正規の関係は`EvidenceItem.source_id`から決定論的に導出し、SourceRecordに同じ配列を保存して二重管理しない。
+`evidence_ids`は`ReferenceRecord`で公開し、各Reference内のEvidenceにも`evidence_id`と`source_id`を公開する。正規の関係は`EvidenceItem.source_id`から決定論的に導出し、SourceRecordに同じ配列を保存して二重管理しない。
 
 PhenotypeSearch、PCF、GestaltMatcherなどのCandidateSupportはこの一覧に入れない。
 
@@ -636,6 +652,8 @@ PhenotypeSearch、PCF、GestaltMatcherなどのCandidateSupportはこの一覧�
 16. ReferenceのURL、識別子、Source typeがSourceRecordと一致する。
 17. `supported`の最終候補が、同一Candidate IDに紐付く`literature` Evidenceを少なくとも1つ持つ。
 18. 最終診断の各主張が`evidence_ids`からReferenceへ追跡でき、ツールrankだけを根拠にしていない。
+19. 本文中の内部Evidenceマーカーが、公開時に対応するReference番号へ変換される。
+20. Reference内の`evidence_id`、`source_id`、`source_section`、`source_start`、`source_end`から原文位置へ戻れる。
 
 失敗時は黙って修正せず、`validation_status="failed"`と`validation_errors`を返す。候補を除外する場合も、除外理由を検証エラーまたは診断メタデータに残す。
 

@@ -61,6 +61,48 @@ def _write_json(path: Path, value: Any) -> None:
     )
 
 
+def _build_timing_summary(profiler: Any, pipeline_seconds: float, total_seconds: float) -> dict[str, Any]:
+    nodes: dict[str, dict[str, Any]] = {}
+    profiled_seconds = 0.0
+    for node_name, timings in sorted(
+        profiler.timings.items(),
+        key=lambda item: sum(item[1]),
+        reverse=True,
+    ):
+        values = [float(value) for value in timings]
+        node_total = sum(values)
+        profiled_seconds += node_total
+        nodes[node_name] = {
+            "count": len(values),
+            "total_seconds": round(node_total, 3),
+            "average_seconds": round(node_total / len(values), 3) if values else 0.0,
+            "min_seconds": round(min(values), 3) if values else 0.0,
+            "max_seconds": round(max(values), 3) if values else 0.0,
+        }
+    return {
+        "pipeline_wall_clock_seconds": round(pipeline_seconds, 3),
+        "profiled_node_seconds": round(profiled_seconds, 3),
+        "total_script_seconds": round(total_seconds, 3),
+        "nodes": nodes,
+    }
+
+
+def _print_timing_summary(timing: dict[str, Any]) -> None:
+    print("\n=== 実行時間サマリー ===")
+    print(f"パイプライン経過時間: {timing['pipeline_wall_clock_seconds']:.3f}秒")
+    print(f"スクリプト全体の経過時間: {timing['total_script_seconds']:.3f}秒")
+    print("ノード別:")
+    for node_name, values in timing["nodes"].items():
+        print(
+            f"  {node_name}: {values['total_seconds']:.3f}秒 "
+            f"(実行回数 {values['count']}, 平均 {values['average_seconds']:.3f}秒)"
+        )
+    print(
+        "※ノード別時間の合計は、並列実行されたノードを重複して数えるため、"
+        "パイプライン経過時間より長くなる場合があります。"
+    )
+
+
 def _load_case(path: str | None, phenopacket_path: str | None = None) -> dict[str, Any]:
     if path and phenopacket_path:
         raise ValueError("Use either --input or --phenopacket, not both.")
@@ -113,6 +155,13 @@ def _validate_case(case: dict[str, Any]) -> None:
         raise ValueError("Every hpo_list item must be a non-empty string.")
 
 
+def _positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be at least 1")
+    return parsed
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run one v2 rare-disease diagnosis case.")
     parser.add_argument(
@@ -154,6 +203,18 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Include absent_hpo_list in the LLM prompts.",
     )
+    parser.add_argument(
+        "--pubmed-max-workers",
+        type=_positive_int,
+        default=2,
+        help="Maximum concurrent candidate literature searches. Defaults to 2.",
+    )
+    parser.add_argument(
+        "--evidence-max-workers",
+        type=_positive_int,
+        default=2,
+        help="Maximum concurrent candidate Evidence extractions. Defaults to 2.",
+    )
     return parser
 
 
@@ -192,12 +253,23 @@ def main() -> int:
         if copied_image_path:
             case_artifact["image_path"] = copied_image_path
         _write_json(output_dir / "input_case.json", case_artifact)
-        os.environ["AGENT_RESULT_DIR"] = str(node_results_dir)
+        # Keep the tool-native aggregate patient JSON in node_results/, as in
+        # the original runner, while placing public/external handoff snapshots
+        # beside the run summary for easy discovery.
+        os.environ["AGENT_RESULT_DIR"] = str(output_dir)
+        os.environ["AGENT_NODE_RESULT_DIR"] = str(node_results_dir)
+        # Set these before importing the pipeline: the worker limits are read
+        # from the environment when the literature/evidence modules load.
+        os.environ["PUBMED_MAX_WORKERS"] = str(args.pubmed_max_workers)
+        os.environ["EVIDENCE_MAX_WORKERS"] = str(args.evidence_max_workers)
 
         # Import after the artifact path is ready so node save_result decorators
         # use this run's isolated result directory.
         from agent.agent_pipeline import RareDiseaseDiagnosisPipeline
         from agent.utils.response_serializer import serialize_public_state
+        from agent.utils.profiler import profiler
+
+        profiler.reset()
 
         pipeline = RareDiseaseDiagnosisPipeline(
             model_name=args.model,
@@ -207,6 +279,7 @@ def main() -> int:
         )
 
         runtime_log_path = output_dir / "runtime.log"
+        pipeline_started = time.monotonic()
         with runtime_log_path.open("w", encoding="utf-8") as runtime_log:
             with contextlib.redirect_stdout(runtime_log), contextlib.redirect_stderr(runtime_log):
                 result = pipeline.run(
@@ -222,6 +295,9 @@ def main() -> int:
                     evidence_mode=args.evidence_mode,
                     max_flow_iterations=args.max_flow_iterations,
                 )
+        pipeline_seconds = time.monotonic() - pipeline_started
+        timing = _build_timing_summary(profiler, pipeline_seconds, time.monotonic() - started)
+        _write_json(output_dir / "timing_summary.json", timing)
 
         _write_json(output_dir / "state.json", result)
         _write_json(output_dir / "public_response.json", serialize_public_state(result))
@@ -230,20 +306,30 @@ def main() -> int:
             "status": "completed",
             "patient_id": case["patient_id"],
             "evidence_mode": args.evidence_mode,
+            "worker_config": {
+                "pubmed_max_workers": args.pubmed_max_workers,
+                "evidence_max_workers": args.evidence_max_workers,
+            },
             "started_at": started_at.isoformat(),
             "finished_at": datetime.now(timezone.utc).isoformat(),
             "duration_seconds": round(time.monotonic() - started, 3),
+            "pipeline_wall_clock_seconds": timing["pipeline_wall_clock_seconds"],
+            "profiled_node_seconds": timing["profiled_node_seconds"],
             "artifact_dir": str(output_dir),
             "files": {
                 "input": str(output_dir / "input_case.json"),
                 "state": str(output_dir / "state.json"),
                 "public_response": str(output_dir / "public_response.json"),
+                "external_response": str(output_dir / "external_response.json"),
+                "tool_native_patient_result": str(node_results_dir / f"{case['patient_id']}.json"),
                 "agent_log": str(log_dir / "agent.log"),
                 "runtime_log": str(runtime_log_path),
+                "timing_summary": str(output_dir / "timing_summary.json"),
                 "node_results": str(node_results_dir),
             },
         }
         _write_json(output_dir / "execution_summary.json", summary)
+        _print_timing_summary(timing)
         print(json.dumps(summary, ensure_ascii=False, indent=2))
         return 0
     except Exception as exc:

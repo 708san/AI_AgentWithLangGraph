@@ -361,6 +361,11 @@ def create_reflection_v2(state: State) -> tuple[ReflectionOutputV2, str]:
 
     def status_for(candidate):
         items = [item for item in evidence if item.candidate_id == candidate.candidate_id]
+        candidate_sources = [
+            source for source in sources.values()
+            if source.source_type == "literature"
+            and candidate.candidate_id in (source.candidate_ids or [])
+        ]
         if any(item.support == "contradicts" for item in items) and not any(item.support == "supports" for item in items):
             return "contradictory"
         if any(
@@ -368,11 +373,15 @@ def create_reflection_v2(state: State) -> tuple[ReflectionOutputV2, str]:
             for item in items
         ):
             return "supported"
-        return "insufficient" if items else "not_retrieved"
+        # ``not_retrieved`` describes this run's retrieval outcome, not the
+        # existence of literature.  If a candidate-matched source was fetched
+        # but yielded no validated Evidence, retrieval succeeded but the
+        # available evidence is insufficient.
+        return "insufficient" if items or candidate_sources else "not_retrieved"
 
     def fallback() -> ReflectionOutputV2:
         answers = []
-        for candidate in candidates[:10]:
+        for candidate in candidates:
             items = [item for item in evidence if item.candidate_id == candidate.candidate_id]
             status = status_for(candidate)
             assessments = [
@@ -419,11 +428,22 @@ def create_reflection_v2(state: State) -> tuple[ReflectionOutputV2, str]:
         for item in evidence
     ) or "No validated Evidence"
     candidate_text = "\n".join(
-        f"{candidate.candidate_id}: {candidate.disease_name}" for candidate in candidates[:10]
+        f"{candidate.candidate_id}: {candidate.disease_name}; "
+        f"OMIM={candidate.OMIM_id or 'unknown'}; "
+        f"consensus_count={candidate.consensus_count}; best_rank={candidate.best_rank}; "
+        f"tools={', '.join(f'{support.tool}:rank={support.rank},score={support.score}' for support in candidate.tool_supports) or 'none'}; "
+        f"database_phenotypes={', '.join(candidate.phenotype_labels[:20]) or 'none'}"
+        for candidate in candidates
     )
     prompt = f"""You are reviewing a rare-disease differential diagnosis.
-Use only the supplied candidates and validated Evidence. Do not treat tool rank as a citation.
-For every selected candidate return ReflectionFormatV2 with English and Japanese fields.
+Judge whether each candidate should remain plausible in the differential, not whether it is confirmed.
+Set correctness=true when phenotype compatibility and/or diagnostic-tool support make the candidate reasonable to retain.
+Set correctness=false only for clear phenotype incompatibility, decisive contradictory findings, or support limited to nonspecific overlap with no meaningful tool support.
+Missing or weakly retrieved literature is uncertainty, never evidence against a candidate by itself. Do not set correctness=false only because no source or Evidence was retrieved.
+An explicitly absent finding may count against a candidate only when it is supplied in the absent-phenotype section; unreported findings are unknown.
+Tool rankings, consensus, and database phenotypes are auxiliary candidate-evaluation information, not literature citations.
+For every supplied candidate return ReflectionFormatV2 with English and Japanese fields.
+Do not drop a candidate solely because literature is insufficient; use `insufficient` or `not_retrieved` when appropriate. `not_retrieved` means no candidate-matched source was obtained in this run, not that no literature exists.
 Use only supplied candidate_id and evidence_id values. Keep evidence_ids identical across the bilingual analysis.
 Literature status must be supported only when a literature Evidence item supports the candidate.
 Explain in prose how the patient features relate to the disease claims in the Evidence.
@@ -431,22 +451,46 @@ Do not create a separate match, impact, or limitation object; state uncertainty 
 Do not use a general medical-knowledge statement as if it came from a cited literature source.
 
 PATIENT_FEATURES: {present_hpo or 'not provided'}
+PATIENT_ABSENT_FEATURES: {', '.join((state.get('absentHpoDict', {}) or {}).values()) if state.get('use_absentHPO') else 'not provided'}
 CANDIDATES:\n{candidate_text}
 EVIDENCE:\n{evidence_text}"""
     try:
         result = llm.get_structured_llm(ReflectionOutputV2).invoke([HumanMessage(content=prompt)])
         allowed_candidates = {candidate.candidate_id for candidate in candidates}
         allowed_evidence = {item.evidence_id for item in evidence}
-        answers = []
+        fallback_by_candidate = {
+            item.candidate_id: item
+            for item in fallback().ans
+        }
+        answers_by_candidate = {}
         for item in getattr(result, "ans", []) or []:
             if item.candidate_id not in allowed_candidates:
                 continue
-            item.evidence_ids = [value for value in item.evidence_ids if value in allowed_evidence]
-            item.evidence_assessments = [
-                assessment for assessment in item.evidence_assessments if assessment.evidence_id in allowed_evidence
+            candidate_evidence = {
+                evidence_item.evidence_id
+                for evidence_item in evidence
+                if evidence_item.candidate_id == item.candidate_id
+            }
+            item.evidence_ids = [
+                value for value in item.evidence_ids
+                if value in allowed_evidence and value in candidate_evidence
             ]
-            answers.append(item)
-        return (ReflectionOutputV2(ans=answers), prompt) if answers else (fallback(), prompt)
+            item.evidence_assessments = [
+                assessment
+                for assessment in item.evidence_assessments
+                if assessment.evidence_id in candidate_evidence
+            ]
+            answers_by_candidate[item.candidate_id] = item
+
+        # Reflection must cover every merged candidate.  If the model omits a
+        # candidate, keep the flow auditable by adding a deterministic
+        # insufficient/not_retrieved assessment instead of silently dropping it.
+        answers = [
+            answers_by_candidate.get(candidate.candidate_id)
+            or fallback_by_candidate[candidate.candidate_id]
+            for candidate in candidates
+        ]
+        return ReflectionOutputV2(ans=answers), prompt
     except Exception as exc:
         print(f"[ReflectionV2] structured generation failed: {exc}")
         return fallback(), prompt

@@ -1,3 +1,4 @@
+import copy
 import os
 
 from .state.state_types import State, ReflectionOutput, ReflectionOutputV2, DiagnosisOutputV2
@@ -170,16 +171,25 @@ def createAbsentHPODictNode(state: State):
 
 @profile_node
 def createZeroShotNode(state: State):
+    """Generate reasoned Zero-shot output while keeping reasons log-only."""
     print("createZeroShotNode called")
     hpo_dict = state.get("hpoDict", {})
     if state.get("zeroShotResult") is not None:
         return {"zeroShotResult": state["zeroShotResult"]}
     if hpo_dict:
-        # createZeroshotが(result, prompt)を返すように修正
-        result, prompt = createZeroshot(state)
+        reasoning = {}
+        result, prompt = createZeroshot(state, reasoning_sink=reasoning.update)
         if result:
-            # promptはstateに保存しないので、ここでは返さない
-            return {"zeroShotResult": result, "prompt": prompt}
+            # Keep an independent pre-normalization snapshot for evaluation.
+            # The reasoned LLM payload remains outside the graph State.
+            return {
+                "result": {
+                    "zeroShotResult": result,
+                    "zeroShotRaw": copy.deepcopy(result),
+                },
+                "prompt": prompt,
+                "zeroShotReasoning": reasoning,
+            }
     return {"zeroShotResult": None}
 
 @profile_node
@@ -192,7 +202,10 @@ def NormalizeZeroShotNode(state: State):
     if not normalized_result:
         return {}
     # 既存のキー 'zeroShotResult' を上書きする
-    return {"zeroShotResult": normalized_result}
+    return {
+        "zeroShotResult": normalized_result,
+        "zeroShotValidation": state.get("zeroShotValidation", []),
+    }
 
 @profile_node
 @save_result("mergeCandidateResultsNode")
@@ -212,8 +225,9 @@ def createDiagnosisNode(state: State):
     
     # The createDiagnosis function now takes the entire state as input.
     # It will handle extracting all necessary information internally.
+    validation = None
     if state.get("evidence_mode") == "v2":
-        result, prompt = createDiagnosisV2(state)
+        result, prompt, validation = createDiagnosisV2(state)
         result = attach_diagnosis_reasoning(
             result,
             enrich_candidates(state.get("mergedDiseaseCandidates", []) or []),
@@ -224,7 +238,12 @@ def createDiagnosisNode(state: State):
         result, prompt = createDiagnosis(state)
     
     if result:
-        return {"tentativeDiagnosis": result, "prompt": prompt}
+        return {
+            "tentativeDiagnosis": result,
+            "tentativeRaw": copy.deepcopy(result),
+            "tentativeValidation": validation,
+            "prompt": prompt,
+        }
     
     return {}
 
@@ -342,21 +361,31 @@ def diseaseNormalizeForFinalNode(state: State):
 @profile_node
 def candidateMetadataNode(state: State):
     """Convert legacy merged candidates and enrich them for literature search."""
-    candidates = enrich_candidates(state.get("mergedDiseaseCandidates", []) or [])[:5]
+    # Keep every merged candidate available to the evidence pipeline. The
+    # public differential is capped later, after literature and reflection.
+    candidates = enrich_candidates(state.get("mergedDiseaseCandidates", []) or [])
     return {"mergedDiseaseCandidates": candidates}
 
 
 @profile_node
 def literatureSearchNode(state: State):
     """Retrieve PubMed sources for each v2 candidate; never writes legacy memory."""
-    candidates = enrich_candidates(state.get("mergedDiseaseCandidates", []) or [])[:5]
+    # Search the complete merged differential; final response limits are
+    # applied separately from evidence retrieval.
+    candidates = enrich_candidates(state.get("mergedDiseaseCandidates", []) or [])
     existing_sources = list(state.get("sources", []) or [])
     is_retry = bool(state.get("reflection"))
+    retry_candidate_ids = {
+        item.candidate_id
+        for item in (getattr(state.get("reflection"), "ans", []) or [])
+        if item.literature_status in {"not_retrieved", "insufficient"}
+    }
     sources = search_literature_for_candidates(
         candidates,
         hpo_dict=state.get("hpoDict", {}),
         existing_sources=existing_sources,
         retry=is_retry,
+        retry_candidate_ids=retry_candidate_ids if is_retry else None,
     )
     result = {"sources": sources}
     if is_retry:
@@ -367,7 +396,8 @@ def literatureSearchNode(state: State):
 @profile_node
 def evidenceExtractionNode(state: State):
     """Extract structured Evidence and reject claims without source excerpts."""
-    candidates = enrich_candidates(state.get("mergedDiseaseCandidates", []) or [])[:5]
+    # Extract evidence for every candidate that reached the merged result.
+    candidates = enrich_candidates(state.get("mergedDiseaseCandidates", []) or [])
     extracted = extract_evidence_for_candidates(
         candidates=candidates,
         sources=state.get("sources", []) or [],
@@ -387,12 +417,16 @@ def diagnosisOutputValidationNode(state: State):
     if not isinstance(final_diagnosis, DiagnosisOutputV2):
         return {"validation_status": "partial", "validation_errors": ["finalDiagnosis is not DiagnosisOutputV2"]}
     candidates = enrich_candidates(state.get("mergedDiseaseCandidates", []) or [])
+    preexisting_errors = list(getattr(final_diagnosis, "validation_errors", []) or [])
     validated = validate_v2_output(
         final_diagnosis,
         candidates=candidates,
         sources=state.get("sources", []) or [],
         evidence=state.get("evidence", []) or [],
     )
+    validated.validation_errors = list(dict.fromkeys(preexisting_errors + validated.validation_errors))
+    if validated.validation_errors:
+        validated.validation_status = "failed"
     validated = attach_diagnosis_reasoning(
         validated,
         candidates,
