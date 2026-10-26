@@ -108,32 +108,53 @@ def _apply_evidence_contract(
         for marker_id in INLINE_EVIDENCE_MARKER.findall(text or "")
         if marker_id in allowed
     }
-    requested_ids = [evidence_id for evidence_id in item.evidence_ids if evidence_id in allowed]
-    evidence_ids = list(dict.fromkeys(requested_ids + sorted(marker_ids)))
+    requested_ids = list(dict.fromkeys(
+        evidence_id for evidence_id in item.evidence_ids if evidence_id in allowed
+    ))
 
-    # Models occasionally return valid evidence_ids but omit the inline marker.
-    # Append only the missing markers; normal model output keeps markers next
-    # to the relevant sentence.
-    if candidate_items and not evidence_ids:
-        evidence_ids = [evidence_item.evidence_id for evidence_item in candidate_items]
+    # Never attach a citation to the end of an unrelated explanation. If the
+    # model selected an Evidence ID but omitted its marker, repair it only
+    # when that Evidence's exact bilingual claim occurs in both descriptions.
+    evidence_by_id = {entry.evidence_id: entry for entry in candidate_items}
+    for evidence_id in dict.fromkeys(requested_ids + sorted(marker_ids)):
+        evidence_item = evidence_by_id.get(evidence_id)
+        if evidence_item is None:
+            continue
+        marker = f"[[EVIDENCE:{evidence_id}]]"
+        claim_en = evidence_item.claim_en.strip()
+        claim_ja = evidence_item.claim_ja.strip()
+        if claim_en and claim_en in item.description_en and marker not in item.description_en:
+            item.description_en = item.description_en.replace(
+                claim_en, f"{claim_en} {marker}", 1
+            )
+        if claim_ja and claim_ja in item.description_ja and marker not in item.description_ja:
+            item.description_ja = item.description_ja.replace(
+                claim_ja, f"{claim_ja} {marker}", 1
+            )
+
+    # Keep the bilingual descriptions and trace list in lockstep. Markers
+    # present in only one language are not a valid public citation pair.
+    en_markers = set(INLINE_EVIDENCE_MARKER.findall(item.description_en))
+    ja_markers = set(INLINE_EVIDENCE_MARKER.findall(item.description_ja))
+    paired_markers = en_markers & ja_markers & allowed
+    for evidence_id in (en_markers | ja_markers) - paired_markers:
+        marker = f"[[EVIDENCE:{evidence_id}]]"
+        item.description_en = item.description_en.replace(marker, "")
+        item.description_ja = item.description_ja.replace(marker, "")
+    evidence_ids = [
+        evidence_item.evidence_id
+        for evidence_item in candidate_items
+        if evidence_item.evidence_id in paired_markers
+    ]
+
     if evidence_ids:
-        selected_items = [
-            evidence_item
-            for evidence_item in candidate_items
-            if evidence_item.evidence_id in evidence_ids
-        ]
-        for evidence_id in evidence_ids:
-            marker = f"[[EVIDENCE:{evidence_id}]]"
-            if marker not in item.description_en:
-                item.description_en = f"{item.description_en.rstrip()} {marker}".strip()
-            if marker not in item.description_ja:
-                item.description_ja = f"{item.description_ja.rstrip()} {marker}".strip()
+        selected_items = [evidence_by_id[value] for value in evidence_ids]
         item.literature_status = _evidence_status(
-            selected_items or candidate_items,
+            selected_items,
             candidate_sources,
         )
     else:
-        item.literature_status = _evidence_status(candidate_items, candidate_sources)
+        item.literature_status = _evidence_status([], candidate_sources)
 
     item.evidence_ids = evidence_ids
     return item
@@ -425,7 +446,9 @@ def createFinalDiagnosisV2(state: State) -> tuple[DiagnosisOutputV2 | None, str]
     ) or "No validated Evidence"
     reflection_text = "\n".join(
         f"{item.candidate_id} | correctness={item.correctness} | status={item.literature_status} | "
-        f"EN={item.diagnosis_analysis_en} | JA={item.diagnosis_analysis_ja} | evidence={item.evidence_ids}"
+        f"EN={item.diagnosis_analysis_en} | JA={item.diagnosis_analysis_ja} | "
+        f"evidence={item.evidence_ids} | assessments="
+        f"{[(assessment.evidence_id, assessment.relevance, assessment.supports_patient) for assessment in item.evidence_assessments]}"
         for item in (getattr(reflection, "ans", []) or [])
         if isinstance(item, object)
     ) or "No Reflection output"
@@ -444,7 +467,7 @@ def createFinalDiagnosisV2(state: State) -> tuple[DiagnosisOutputV2 | None, str]
     )
     prompt = f"""You are the final clinical-genetics reviewer.
 Produce a bilingual final differential diagnosis by integrating patient phenotype fit, the diagnostic-tool signals, Reflection, and validated literature Evidence.
-Rank candidates primarily by the specificity and overall compatibility of the supplied patient findings with the candidate phenotype profile; use diagnostic-tool rank and cross-tool consensus as supporting prioritization signals, then use Reflection to resolve inclusion or uncertainty.
+Rank candidates primarily by the specificity and overall compatibility of the supplied patient findings with the candidate phenotype profile; use diagnostic-tool rank and cross-tool consensus as supporting prioritization signals, then use Reflection to resolve inclusion or uncertainty. A tool returning a candidate is not itself evidence of clinical fit. Prefer candidates with multiple matching findings or one genuinely distinctive match over candidates matching only generic neurodevelopmental findings.
 Literature retrieval success or the number of retrieved papers must not determine candidate rank. Missing or weakly retrieved literature is neutral, not evidence against a candidate. A candidate with correctness=true remains eligible for the top five even when literature_status is not_retrieved; exclude or strongly deprioritize it only for a stated clinical incompatibility or decisive, identity-matched contradictory Evidence.
 Every diagnosis must use an existing candidate_id and only existing evidence_ids. Do not introduce disease-specific claims unsupported by the supplied Evidence or candidate phenotype profile.
 A candidate may be described as literature-supported only when a validated literature Evidence item supports it. Tool rankings are not citations.
@@ -452,7 +475,7 @@ If no usable literature Evidence was retrieved, say that no candidate-matched li
 Keep the English and Japanese descriptions semantically aligned and use the same evidence_ids.
 Explain the concrete patient features in relation to the supplied literature claims and identify important uncertainty.
 Write a substantive multi-sentence explanation for each diagnosis. Connect patient findings to the supplied candidate phenotype profile and, where available, specific literature claims; explain the clinical interpretation and remaining uncertainty. Do not return only a conclusion such as "supported" or "not supported".
-For every literature-grounded statement, place one or more exact inline markers immediately after the supported statement using the format [[EVIDENCE:EVD-...]]. Use only supplied evidence_id values. Use the same evidence markers in the English and Japanese descriptions. Do not use numeric [1] markers; the serializer will convert the internal markers to reference numbers.
+For every literature-grounded statement, place an inline marker immediately after that specific statement using [[EVIDENCE:EVD-...]]. The cited Evidence claim must directly support the whole statement; a paper merely being about the disease is not enough. Do not cite tool-derived phenotype profiles as if they came from literature. Do not place a marker at the end of an unrelated paragraph. Use only supplied evidence_id values and pair the same markers with semantically equivalent English and Japanese statements. Do not use numeric [1] markers; the serializer will convert internal markers to reference numbers.
 Do not invent absent findings or treat an unreported feature as absent.
 Do not claim a mechanism, inheritance pattern, or phenotype from general model knowledge unless it is present in the supplied Evidence.
 Return at most five diagnoses. The order of the returned items is the final differential order, and their rank fields MUST be exactly 1, 2, ..., N with no gaps or duplicates.

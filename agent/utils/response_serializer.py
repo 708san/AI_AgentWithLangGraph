@@ -203,11 +203,22 @@ def _replace_inline_markers(
     return INLINE_EVIDENCE_MARKER.sub(replace, str(text or "").strip()), used_ids
 
 
+def _cited_evidence_ids(text: Any, evidence_items: list[dict[str, Any]], language: str) -> set[str]:
+    """Return only Evidence explicitly cited or quoted verbatim in the text."""
+    value = str(text or "")
+    by_id = {str(item.get("evidence_id") or ""): item for item in evidence_items}
+    cited = {marker_id for marker_id in INLINE_EVIDENCE_MARKER.findall(value) if marker_id in by_id}
+    claim_key = "claim_en" if language == "en" else "claim_ja"
+    for evidence_id, item in by_id.items():
+        claim = str(item.get(claim_key) or "").strip()
+        if claim and claim in value:
+            cited.add(evidence_id)
+    return cited
+
+
 def _add_citations(text: Any, evidence_items: list[dict[str, Any]], numbers_by_source: dict[str, int], language: str) -> str:
-    """Convert inline markers and backfill citations when a model omitted one."""
-    original = str(text or "").strip()
+    """Convert explicit Evidence markers; repair omission only on an exact claim."""
     result, inline_ids = _replace_inline_markers(text, evidence_items, numbers_by_source)
-    used: set[int] = set()
     for item in evidence_items:
         number = numbers_by_source.get(str(item.get("source_id") or ""))
         if number is None:
@@ -215,16 +226,12 @@ def _add_citations(text: Any, evidence_items: list[dict[str, Any]], numbers_by_s
         marker = f"[{number}]"
         evidence_id = str(item.get("evidence_id") or "")
         if evidence_id in inline_ids:
-            used.add(number)
             continue
         claim = str(item.get("claim_en" if language == "en" else "claim_ja") or "").strip()
         if claim and claim in result:
             end = result.find(claim) + len(claim)
             if marker not in result[end:end + len(marker) + 2]:
                 result = result[:end].rstrip() + f" {marker}" + result[end:]
-        elif number not in used:
-            result = f"{result} {marker}".strip()
-        used.add(number)
     return result
 
 
@@ -264,11 +271,17 @@ def _project_diagnosis(
             for evidence_id in item.get("evidence_ids", []) or []
             if str(evidence_id) in evidence_by_id
         ]
-        numbers = _item_reference_numbers(item, evidence_by_id, number_by_source_id)
-        used_numbers.update(numbers)
+        cited_ids = (
+            _cited_evidence_ids(item.get("description_en"), item_evidence, "en")
+            | _cited_evidence_ids(item.get("description_ja"), item_evidence, "ja")
+        )
         item["description_en"] = _add_citations(item.get("description_en"), item_evidence, number_by_source_id, "en")
         item["description_ja"] = _add_citations(item.get("description_ja"), item_evidence, number_by_source_id, "ja")
         item["description"] = _add_citations(item.get("description"), item_evidence, number_by_source_id, "en")
+        numbers = _item_reference_numbers(
+            {"evidence_ids": sorted(cited_ids)}, evidence_by_id, number_by_source_id
+        )
+        used_numbers.update(numbers)
         item["citation_numbers"] = numbers
         # These fields are useful inside State but are not display data.
         item.pop("evidence_ids", None)
@@ -304,7 +317,13 @@ def _project_reflection(
             for evidence_id in item.get("evidence_ids", []) or []
             if str(evidence_id) in evidence_by_id
         ]
-        numbers = _item_reference_numbers(item, evidence_by_id, number_by_source_id)
+        cited_ids = (
+            _cited_evidence_ids(item.get("diagnosis_analysis_en"), item_evidence, "en")
+            | _cited_evidence_ids(item.get("diagnosis_analysis_ja"), item_evidence, "ja")
+        )
+        numbers = _item_reference_numbers(
+            {"evidence_ids": sorted(cited_ids)}, evidence_by_id, number_by_source_id
+        )
         item["diagnosis_analysis_en"] = _add_citations(
             item.get("diagnosis_analysis_en"), item_evidence, number_by_source_id, "en"
         )

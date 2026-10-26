@@ -36,8 +36,10 @@ from agent.tools.literature_search import (
 )
 from agent.tools.reflection import create_reflection_v2
 from agent.tools.diagnosis import validate_v2_candidate_output
-from agent.tools.finalDiagnosis import createFinalDiagnosisV2
+from agent.tools.finalDiagnosis import _apply_evidence_contract, createFinalDiagnosisV2
+from agent.nodes import evidenceExtractionNode
 from agent.utils.response_serializer import (
+    _add_citations,
     serialize_external_compatibility,
     serialize_node_result,
     serialize_public_state,
@@ -226,6 +228,21 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
         self.assertEqual(source_without_extractable_evidence.literature_status, "insufficient")
         self.assertTrue(source_without_extractable_evidence.correctness)
 
+    def test_reflection_fallback_does_not_default_every_candidate_to_true(self):
+        generic_candidate = self.candidate.model_copy(update={
+            "phenotype_labels": ["Seizures"],
+        })
+        result, _ = create_reflection_v2({
+            "mergedDiseaseCandidates": [generic_candidate],
+            "evidence": [],
+            "sources": [],
+            "hpoDict": {"HP:1": "Hypotonia"},
+            "absentHpoDict": {},
+            "use_absentHPO": False,
+            "llm": None,
+        })
+        self.assertFalse(result.ans[0].correctness)
+
     def test_reflection_prompt_defines_retention_separately_from_retrieval(self):
         candidate = self.candidate.model_copy(update={
             "tool_supports": [CandidateSupport(tool="GestaltMatcher", rank=1, score=0.91)]
@@ -242,9 +259,53 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
             "llm": llm,
         })
         self.assertIn("Missing or weakly retrieved literature is uncertainty", prompt)
-        self.assertIn("correctness=false only for clear phenotype incompatibility", prompt)
+        self.assertIn("Do not mark every candidate true by default", prompt)
+        self.assertIn("A candidate returned by a diagnostic tool is a hypothesis", prompt)
         self.assertIn("GestaltMatcher:rank=1", prompt)
         self.assertIn("PATIENT_ABSENT_FEATURES: Seizures", prompt)
+
+    def test_retry_evidence_extraction_skips_already_resolved_candidates(self):
+        unresolved = self.candidate.model_copy(update={"candidate_id": "OMIM:654321"})
+        unresolved.OMIM_id = "OMIM:654321"
+        llm = Mock()
+        llm.ans = [
+            ReflectionFormatV2(
+                candidate_id=self.candidate.candidate_id,
+                disease_name_en=self.candidate.disease_name,
+                disease_name_ja=self.candidate.disease_name,
+                correctness=True,
+                patient_summary_en="Hypotonia.",
+                patient_summary_ja="筋緊張低下。",
+                diagnosis_analysis_en="Supported.",
+                diagnosis_analysis_ja="支持あり。",
+                literature_status="supported",
+            ),
+            ReflectionFormatV2(
+                candidate_id=unresolved.candidate_id,
+                disease_name_en=unresolved.disease_name,
+                disease_name_ja=unresolved.disease_name,
+                correctness=True,
+                patient_summary_en="Hypotonia.",
+                patient_summary_ja="筋緊張低下。",
+                diagnosis_analysis_en="Insufficient.",
+                diagnosis_analysis_ja="不十分。",
+                literature_status="insufficient",
+            ),
+        ]
+        state = {
+            "flow_iteration": 1,
+            "reflection": ReflectionOutputV2(ans=llm.ans),
+            "mergedDiseaseCandidates": [self.candidate, unresolved],
+            "sources": [],
+            "evidence": [],
+            "hpoDict": {},
+            "absentHpoDict": {},
+            "llm": Mock(),
+        }
+        with patch("agent.nodes.extract_evidence_for_candidates", return_value=[]) as extract:
+            evidenceExtractionNode(state)
+        selected = extract.call_args.kwargs["candidates"]
+        self.assertEqual([item.candidate_id for item in selected], [unresolved.candidate_id])
 
     def test_chunk_selection_reaches_late_full_text(self):
         source = self.source.model_copy(update={
@@ -293,8 +354,8 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
             disease_name_ja="Example syndrome",
             OMIM_id="OMIM:123456",
             rank=1,
-            description_en="The patient finding is consistent with the reported phenotype.",
-            description_ja="患者所見は文献に記載された表現型と整合します。",
+            description_en="The disease is associated with hypotonia. [[EVIDENCE:EVD-1]]",
+            description_ja="この疾患は筋緊張低下と関連します。[[EVIDENCE:EVD-1]]",
             evidence_ids=["EVD-1"],
             literature_status="supported",
         )])
@@ -310,8 +371,8 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
                 disease_name_ja="Example syndrome",
                 OMIM_id="123456",
                 rank=1,
-                description_en="The patient finding is consistent with the reported phenotype.",
-                description_ja="患者所見は文献に記載された表現型と整合します。",
+                description_en="The disease is associated with hypotonia. [[EVIDENCE:EVD-1]]",
+                description_ja="この疾患は筋緊張低下と関連します。[[EVIDENCE:EVD-1]]",
                 evidence_ids=["EVD-1"],
                 literature_status="supported",
             )],
@@ -386,8 +447,8 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
             disease_name_ja="Example syndrome",
             OMIM_id="123456",
             rank=1,
-            description_en="Tentative description.",
-            description_ja="暫定説明です。",
+            description_en="The disease is associated with hypotonia. [[EVIDENCE:EVD-2]]",
+            description_ja="この疾患は筋緊張低下と関連します。[[EVIDENCE:EVD-2]]",
             evidence_ids=["EVD-2"],
             literature_status="supported",
         )])
@@ -397,8 +458,8 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
             disease_name_ja="Example syndrome",
             OMIM_id="123456",
             rank=1,
-            description_en="Final description.",
-            description_ja="最終説明です。",
+            description_en="The disease is associated with hypotonia. [[EVIDENCE:EVD-1]]",
+            description_ja="この疾患は筋緊張低下と関連します。[[EVIDENCE:EVD-1]]",
             evidence_ids=["EVD-1"],
             literature_status="supported",
         )])
@@ -431,6 +492,15 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
         self.assertEqual(reflection_item["citation_numbers"], [2])
         self.assertIn("[2]", reflection_item["diagnosis_analysis_en"])
 
+    def test_serializer_does_not_backfill_a_citation_to_unrelated_prose(self):
+        result = _add_citations(
+            "This candidate remains a broad clinical possibility.",
+            [self.evidence.model_dump()],
+            {self.source.source_id: 1},
+            "en",
+        )
+        self.assertEqual(result, "This candidate remains a broad clinical possibility.")
+
     def test_external_compatibility_keeps_legacy_wrappers_and_structured_trace(self):
         diagnosis = DiagnosisOutputV2(ans=[DiagnosisFormatV2(
             candidate_id="OMIM:123456",
@@ -438,8 +508,8 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
             disease_name_ja="Example syndrome",
             OMIM_id="123456",
             rank=1,
-            description_en="The patient finding is consistent with the reported phenotype.",
-            description_ja="患者所見は文献に記載された表現型と整合します。",
+            description_en="The disease is associated with hypotonia. [[EVIDENCE:EVD-1]]",
+            description_ja="この疾患は筋緊張低下と関連します。[[EVIDENCE:EVD-1]]",
             evidence_ids=["EVD-1"],
             literature_status="supported",
         )])
@@ -513,6 +583,51 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
         self.assertNotIn("[[EVIDENCE:", public_item["description_en"])
         self.assertEqual(public_item["citation_numbers"], [1])
 
+    def test_final_evidence_contract_does_not_attach_unrelated_citations(self):
+        item = DiagnosisFormatV2(
+            candidate_id=self.candidate.candidate_id,
+            disease_name_en=self.candidate.disease_name,
+            disease_name_ja=self.candidate.disease_name,
+            OMIM_id=self.candidate.OMIM_id,
+            rank=1,
+            description_en="The patient has a broad neurodevelopmental presentation.",
+            description_ja="患者には幅広い神経発達上の所見があります。",
+            evidence_ids=[self.evidence.evidence_id],
+            literature_status="supported",
+        )
+        result = _apply_evidence_contract(
+            item,
+            [self.evidence],
+            ["Hypotonia"],
+            [self.source],
+        )
+        self.assertEqual(result.evidence_ids, [])
+        self.assertEqual(result.literature_status, "insufficient")
+        self.assertNotIn("[[EVIDENCE:", result.description_en)
+        self.assertNotIn("[[EVIDENCE:", result.description_ja)
+
+    def test_final_evidence_contract_pairs_exact_bilingual_claim_markers(self):
+        item = DiagnosisFormatV2(
+            candidate_id=self.candidate.candidate_id,
+            disease_name_en=self.candidate.disease_name,
+            disease_name_ja=self.candidate.disease_name,
+            OMIM_id=self.candidate.OMIM_id,
+            rank=1,
+            description_en=self.evidence.claim_en,
+            description_ja=self.evidence.claim_ja,
+            evidence_ids=[self.evidence.evidence_id],
+            literature_status="supported",
+        )
+        result = _apply_evidence_contract(
+            item,
+            [self.evidence],
+            ["Hypotonia"],
+            [self.source],
+        )
+        self.assertEqual(result.evidence_ids, [self.evidence.evidence_id])
+        self.assertIn("[[EVIDENCE:EVD-1]]", result.description_en)
+        self.assertIn("[[EVIDENCE:EVD-1]]", result.description_ja)
+
     def test_final_generation_validates_against_authoritative_candidate_model(self):
         diagnosis = DiagnosisOutputV2(ans=[DiagnosisFormatV2(
             candidate_id="OMIM:123456",
@@ -520,8 +635,8 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
             disease_name_ja="Example syndrome",
             OMIM_id="OMIM:123456",
             rank=1,
-            description_en="The patient finding is consistent with the reported phenotype.",
-            description_ja="患者所見は文献に記載された表現型と整合します。",
+            description_en="The disease is associated with hypotonia. [[EVIDENCE:EVD-1]]",
+            description_ja="この疾患は筋緊張低下と関連します。[[EVIDENCE:EVD-1]]",
             evidence_ids=[],
             literature_status="not_retrieved",
         )])
@@ -532,8 +647,8 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
             disease_name_ja="Example syndrome",
             OMIM_id="OMIM:123456",
             rank=1,
-            description_en="The patient finding is consistent with the reported phenotype.",
-            description_ja="患者所見は文献に記載された表現型と整合します。",
+            description_en="The disease is associated with hypotonia. [[EVIDENCE:EVD-1]]",
+            description_ja="この疾患は筋緊張低下と関連します。[[EVIDENCE:EVD-1]]",
             evidence_ids=["EVD-1"],
             literature_status="supported",
         )])
@@ -626,8 +741,8 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
                     disease_name_ja="Example syndrome",
                     OMIM_id="123456",
                     rank=1,
-                    description_en="Supported by the cited literature.",
-                    description_ja="引用文献により支持されます。",
+                    description_en="The disease is associated with hypotonia. [[EVIDENCE:EVD-1]]",
+                    description_ja="この疾患は筋緊張低下と関連します。[[EVIDENCE:EVD-1]]",
                     evidence_ids=["EVD-1"],
                     literature_status="supported",
                 )],

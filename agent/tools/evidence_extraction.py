@@ -226,6 +226,7 @@ Do not summarize the papers. Extract individual claims that are explicitly suppo
 Every excerpt must be copied verbatim from the supplied CONTENT, without quotation marks added.
 Return English and Japanese claims with the same meaning. Do not invent a gene, inheritance pattern, phenotype, mechanism, or negative finding.
 Use only the supplied SOURCE_ID and CHUNK_ID values. If a required fact is not present in the supplied chunks, do not infer it.
+Prioritize established core clinical phenotypes that directly overlap the patient's present findings, then extract other disease-specific claims when the source explicitly reports them. A report that calls a finding "never described" or unique to one case does not establish that finding as a typical disease feature; do not label that claim as patient-supporting merely because it occurs in a patient with the disease. Keep disease identity/mechanism separate from phenotype overlap, and use support=unknown when the excerpt does not establish relevance to the candidate diagnosis.
 Try to cover disease identity, gene/inheritance, core phenotype, distinctive phenotype, patient overlap, and important limitations when the source provides them.
 Do not create a generic phenotype item when a more specific phenotype or genetic statement is present in the same source.
 For every item, return the SOURCE_ID, CHUNK_ID, and SECTION containing the excerpt.

@@ -359,6 +359,18 @@ def create_reflection_v2(state: State) -> tuple[ReflectionOutputV2, str]:
     present_hpo = ", ".join((state.get("hpoDict", {}) or {}).values())
     llm = state.get("llm")
 
+    def direct_profile_overlap(candidate) -> bool:
+        def normalize(value: str) -> str:
+            return re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).strip()
+
+        patient_terms = {normalize(value) for value in (state.get("hpoDict", {}) or {}).values()}
+        patient_terms.discard("")
+        disease_terms = {
+            normalize(value) for value in (candidate.phenotype_labels or [])
+        }
+        disease_terms.discard("")
+        return bool(patient_terms & disease_terms)
+
     def status_for(candidate):
         items = [item for item in evidence if item.candidate_id == candidate.candidate_id]
         candidate_sources = [
@@ -387,8 +399,12 @@ def create_reflection_v2(state: State) -> tuple[ReflectionOutputV2, str]:
             assessments = [
                 EvidenceAssessment(
                     evidence_id=item.evidence_id,
-                    relevance="high" if item.support == "supports" else "medium",
-                    supports_patient="yes" if item.support == "supports" else "no" if item.support == "contradicts" else "unknown",
+                    relevance="high" if item.evidence_type == "phenotype_overlap" else "low",
+                    supports_patient=(
+                        "yes" if item.evidence_type == "phenotype_overlap" and item.support == "supports"
+                        else "no" if item.evidence_type == "phenotype_mismatch" or item.support == "contradicts"
+                        else "unknown"
+                    ),
                     reason_en=item.claim_en,
                     reason_ja=item.claim_ja,
                 )
@@ -399,7 +415,12 @@ def create_reflection_v2(state: State) -> tuple[ReflectionOutputV2, str]:
                     candidate_id=candidate.candidate_id,
                     disease_name_en=candidate.disease_name,
                     disease_name_ja=candidate.disease_name,
-                    correctness=status != "contradictory",
+                    # Without an LLM judgment, do not turn retrieval/tool
+                    # presence into an automatic positive reflection.
+                    correctness=(
+                        status != "contradictory"
+                        and direct_profile_overlap(candidate)
+                    ),
                     patient_summary_en=f"Patient features supplied to the flow: {present_hpo or 'not provided'}.",
                     patient_summary_ja=f"フローに入力された患者所見: {present_hpo or '未提供'}。",
                     diagnosis_analysis_en=(
@@ -437,16 +458,15 @@ def create_reflection_v2(state: State) -> tuple[ReflectionOutputV2, str]:
     )
     prompt = f"""You are reviewing a rare-disease differential diagnosis.
 Judge whether each candidate should remain plausible in the differential, not whether it is confirmed.
-Set correctness=true when phenotype compatibility and/or diagnostic-tool support make the candidate reasonable to retain.
-Set correctness=false only for clear phenotype incompatibility, decisive contradictory findings, or support limited to nonspecific overlap with no meaningful tool support.
-Missing or weakly retrieved literature is uncertainty, never evidence against a candidate by itself. Do not set correctness=false only because no source or Evidence was retrieved.
+`correctness` is a binary retain-in-the-differential decision, not a literature-retrieval flag and not a claim of confirmed diagnosis. Set it true only when the patient has a meaningful, candidate-specific phenotype match (one distinctive match or multiple matching findings) and no decisive contradiction. Set it false when the profile shows only generic overlap, a clear phenotype mismatch, a decisive contradiction, or tool ranking is the only positive signal. A candidate returned by a diagnostic tool is a hypothesis to assess, not proof of fit. Do not mark every candidate true by default; compare candidates against the same patient findings and distinguish strong, specific matches from broad neurodevelopmental overlap.
+Missing or weakly retrieved literature is uncertainty, never evidence against a candidate by itself. Do not set correctness=false solely because no source or Evidence was retrieved; use the phenotype profile and explicitly supplied absent findings to judge plausibility.
 An explicitly absent finding may count against a candidate only when it is supplied in the absent-phenotype section; unreported findings are unknown.
 Tool rankings, consensus, and database phenotypes are auxiliary candidate-evaluation information, not literature citations.
 For every supplied candidate return ReflectionFormatV2 with English and Japanese fields.
 Do not drop a candidate solely because literature is insufficient; use `insufficient` or `not_retrieved` when appropriate. `not_retrieved` means no candidate-matched source was obtained in this run, not that no literature exists.
 Use only supplied candidate_id and evidence_id values. Keep evidence_ids identical across the bilingual analysis.
-Literature status must be supported only when a literature Evidence item supports the candidate.
-Explain in prose how the patient features relate to the disease claims in the Evidence.
+Literature status must be supported only when a literature Evidence item supports the candidate. For each EvidenceAssessment, `supports_patient=yes` only when the claim describes a phenotype actually present in the patient; a disease-identity statement, mechanism, or a different/unique finding is not a patient match. Use `no` for a clear mismatch and `unknown` when the claim does not permit comparison.
+Explain in prose how the patient features relate to the disease claims in the Evidence. Do not treat an article about the candidate as support for every patient feature or for the candidate's overall fit.
 Do not create a separate match, impact, or limitation object; state uncertainty in the analysis text.
 Do not use a general medical-knowledge statement as if it came from a cited literature source.
 

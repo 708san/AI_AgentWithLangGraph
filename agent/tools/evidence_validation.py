@@ -108,14 +108,24 @@ def validate_v2_output(
         if not item.description_en.strip() or not item.description_ja.strip():
             errors.append(f"Bilingual description is incomplete: {item.candidate_id}")
         candidate_evidence = evidence_by_candidate.get(item.candidate_id, [])
-        if candidate_evidence and not item.evidence_ids:
+        if item.literature_status == "supported" and candidate_evidence and not item.evidence_ids:
             errors.append(
-                f"Candidate {item.candidate_id} has retrieved Evidence but final diagnosis uses none."
+                f"Candidate {item.candidate_id} is marked supported but cites no Evidence."
             )
         marker_ids = set(
             INLINE_EVIDENCE_MARKER.findall(item.description_en)
             + INLINE_EVIDENCE_MARKER.findall(item.description_ja)
         )
+        en_marker_ids = set(INLINE_EVIDENCE_MARKER.findall(item.description_en))
+        ja_marker_ids = set(INLINE_EVIDENCE_MARKER.findall(item.description_ja))
+        if en_marker_ids != ja_marker_ids:
+            errors.append(
+                f"Bilingual descriptions cite different Evidence items: {item.candidate_id}"
+            )
+        if marker_ids != set(item.evidence_ids):
+            errors.append(
+                f"Inline Evidence markers and evidence_ids do not match: {item.candidate_id}"
+            )
         for marker_id in marker_ids:
             marker_evidence = evidence_map.get(marker_id)
             if not marker_evidence:

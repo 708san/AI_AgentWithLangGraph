@@ -398,6 +398,24 @@ def evidenceExtractionNode(state: State):
     """Extract structured Evidence and reject claims without source excerpts."""
     # Extract evidence for every candidate that reached the merged result.
     candidates = enrich_candidates(state.get("mergedDiseaseCandidates", []) or [])
+    if state.get("flow_iteration", 0) > 0:
+        # The retry search only targets candidates Reflection marked
+        # unresolved. Avoid repeating extraction for candidates already
+        # supported in the first pass; it is an expensive LLM call and cannot
+        # improve their unchanged source set.
+        retry_candidate_ids = {
+            item.candidate_id
+            for item in (getattr(state.get("reflection"), "ans", []) or [])
+            if item.literature_status in {"not_retrieved", "insufficient"}
+        }
+        candidates = [
+            candidate for candidate in candidates
+            if candidate.candidate_id in retry_candidate_ids
+        ]
+        print(
+            "[Evidence] retry extraction candidates="
+            f"{len(candidates)} (unresolved candidates only)"
+        )
     extracted = extract_evidence_for_candidates(
         candidates=candidates,
         sources=state.get("sources", []) or [],
