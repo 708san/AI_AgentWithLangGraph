@@ -7,6 +7,12 @@ from openai import AzureOpenAI
 from dotenv import load_dotenv
 from typing import Optional
 from ..state.state_types import State,ZeroShotOutput
+from .candidate_metadata import (
+    canonical_omim_id,
+    known_disease_aliases,
+    known_disease_name,
+    names_compatible,
+)
 
 load_dotenv()
 
@@ -61,6 +67,8 @@ def normalize_pcf_results(state: State) -> list:
     pcf_results = state.get("pubCaseFinder", [])
     for result in pcf_results:
         omim_id_num = extract_omim_number(result.get("omim_id"))
+        if omim_id_num:
+            result["omim_id"] = canonical_omim_id(omim_id_num)
         if omim_id_num and omim_id_num in omim_mapping_by_number:
             result["disease_name"] = omim_mapping_by_number[omim_id_num]
     return pcf_results
@@ -73,6 +81,8 @@ def normalize_gestalt_results(state: State) -> list:
     gestalt_results = state.get("GestaltMatcher", [])
     for result in gestalt_results:
         omim_id_num = extract_omim_number(result.get("omim_id"))
+        if omim_id_num:
+            result["omim_id"] = canonical_omim_id(omim_id_num)
         if omim_id_num and omim_id_num in omim_mapping_by_number:
             # GestaltMatcherの出力キーに合わせて 'syndrome_name' を更新
             result["syndrome_name"] = omim_mapping_by_number[omim_id_num]
@@ -88,22 +98,85 @@ def normalize_zeroshot_results(state: State) -> Optional[ZeroShotOutput]:
 
     unique_omim_ids = set()
     normalized_ans = []
+    validation = []
 
     for diag in zeroshot_output.ans:
+        original_name = diag.disease_name
+        original_omim = diag.OMIM_id
         cleaned_name = diag.disease_name.strip().strip('*')
         cleaned_name = re.sub(r'\s*\(.*\)\s*', '', cleaned_name).strip()
         disease_name_upper = cleaned_name.upper()
-        omim_id, omim_label, sim = disease_normalize(disease_name_upper)
+        supplied_id = canonical_omim_id(original_omim)
+        known_label = known_disease_name(supplied_id)
+        status = "unconfirmed"
+        reason = "No local disease identity could be confirmed."
+        resolved_id = supplied_id
+        resolved_label = cleaned_name
 
-        # 類似度が高い場合のみ採用し、OMIM IDがユニークであることを確認
-        if sim >= 0.70 and omim_id not in unique_omim_ids:
-            diag.OMIM_id = omim_id
-            diag.disease_name = omim_label
-            normalized_ans.append(diag)
-            unique_omim_ids.add(omim_id)
-        else:
-            print(f"Filtered out {diag.disease_name} (OMIM: {omim_id}) due to low similarity ({sim:.2f}) or duplication.")
-    
+        if supplied_id and known_label:
+            if names_compatible(cleaned_name, known_label, known_disease_aliases(supplied_id)):
+                status = "match" if cleaned_name.upper() == known_label.upper() else "normalized"
+                reason = "Disease name and OMIM identifier are compatible."
+                resolved_label = known_label
+            else:
+                status = "mismatch"
+                reason = f"OMIM identifier maps to {known_label!r}, not the generated disease name."
+                # Do not replace an unrelated disease merely because an
+                # embedding happens to return a nearby label.
+                resolved_id = None
+        elif not supplied_id and cleaned_name:
+            try:
+                omim_id, omim_label, sim = disease_normalize(disease_name_upper)
+            except Exception as exc:
+                omim_id, omim_label, sim = None, None, 0.0
+                reason = f"Normalization lookup failed: {type(exc).__name__}."
+            candidate_id = canonical_omim_id(omim_id)
+            if candidate_id and omim_label and names_compatible(
+                cleaned_name,
+                omim_label,
+                known_disease_aliases(candidate_id),
+            ):
+                resolved_id = candidate_id
+                resolved_label = omim_label
+                status = "normalized"
+                reason = f"Unique local normalization match (similarity={sim:.2f})."
+            else:
+                status = "unconfirmed"
+                reason = "No compatible local name/OMIM match was confirmed; candidate retained without an assigned OMIM ID."
+        elif supplied_id:
+            reason = "OMIM identifier is not present in the local database; candidate retained as unconfirmed."
+
+        duplicate_key = resolved_id or cleaned_name.upper()
+        if status != "mismatch" and duplicate_key in unique_omim_ids:
+            validation.append({
+                "disease_name": original_name,
+                "OMIM_id": original_omim,
+                "status": "duplicate",
+                "reason": "The normalized disease identity was already emitted by another candidate.",
+                "excluded": True,
+                "exclusion_status": "excluded",
+            })
+            continue
+
+        excluded = status == "mismatch"
+        validation.append({
+            "disease_name": original_name,
+            "OMIM_id": original_omim,
+            "normalized_disease_name": resolved_label,
+            "normalized_OMIM_id": resolved_id,
+            "status": status,
+            "reason": reason,
+            "excluded": excluded,
+            "exclusion_status": "excluded" if excluded else None,
+        })
+        if excluded:
+            continue
+        diag.disease_name = resolved_label
+        diag.OMIM_id = resolved_id
+        normalized_ans.append(diag)
+        unique_omim_ids.add(duplicate_key)
+
+    state["zeroShotValidation"] = validation
     zeroshot_output.ans = normalized_ans
     return zeroshot_output
 
@@ -136,8 +209,9 @@ def disease_normalize(disease_name: str):
 def diseaseNormalizeForDiagnosis(Diagnosis):
     """
     tentativeDiagnosis: DiagnosisOutput
-    各診断候補にOMIM idと正規化病名を付与し、類似度0.75未満は棄却。
-    既にOMIM IDが付与されている候補は、そのIDを疾患同定の根拠として優先する。
+    病名に互換性のあるOMIM IDと正規化病名を付与する。
+    埋め込み類似度による候補除外は行わず、互換性を確認できない候補は
+    OMIM IDを未確定のまま保持する。既存OMIM IDは優先する。
     """
     filtered_ans = []
     if not hasattr(Diagnosis, "ans"):
@@ -146,7 +220,7 @@ def diseaseNormalizeForDiagnosis(Diagnosis):
     for diag in Diagnosis.ans:
         existing_omim_num = extract_omim_number(getattr(diag, "OMIM_id", None))
         if existing_omim_num:
-            diag.OMIM_id = f"OMIM:{existing_omim_num}"
+            diag.OMIM_id = canonical_omim_id(existing_omim_num)
             diag.disease_name = omim_mapping_by_number.get(
                 existing_omim_num,
                 diag.disease_name.strip().strip("*")
@@ -157,11 +231,21 @@ def diseaseNormalizeForDiagnosis(Diagnosis):
         disease_name_upper = diag.disease_name.upper()
         omim_id, omim_label, sim = disease_normalize(disease_name_upper)
 
-        if sim >= 0.75:
-            diag.OMIM_id = omim_id
+        candidate_id = canonical_omim_id(omim_id)
+        if candidate_id and omim_label and names_compatible(
+            diag.disease_name,
+            omim_label,
+            known_disease_aliases(candidate_id),
+        ):
+            diag.OMIM_id = candidate_id
             diag.disease_name = omim_label
             filtered_ans.append(diag)
         else:
-            print(f"Filtered out {diag.disease_name} due to low similarity ({sim:.2f})")
+            diag.OMIM_id = None
+            filtered_ans.append(diag)
+            print(
+                f"Retained {diag.disease_name} without an OMIM ID: "
+                f"no compatible local name match (embedding similarity={sim:.2f})"
+            )
     Diagnosis.ans = filtered_ans
     return Diagnosis

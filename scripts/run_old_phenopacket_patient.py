@@ -82,8 +82,17 @@ def find_metadata_file(explicit: str | None) -> Path:
     raise FileNotFoundError(f"No metadata TSV found. Checked: {candidates}")
 
 
-def load_patient_row(metadata_path: Path, patient_id: str) -> dict[str, str]:
-    """Load exactly one patient row, accepting the repository's TSV variants."""
+def load_patient_row(
+    metadata_path: Path,
+    patient_id: str,
+    occurrence: int | None = None,
+) -> dict[str, str]:
+    """Load one patient row, optionally selecting a duplicate-row occurrence.
+
+    The default remains strict for the legacy runner.  Batch image-case tests
+    can explicitly select the first row for a patient whose TSV contains
+    multiple images for the same patient ID.
+    """
     with metadata_path.open("r", encoding="utf-8-sig", newline="") as handle:
         reader = csv.DictReader(handle, delimiter="\t")
         if not reader.fieldnames:
@@ -92,6 +101,13 @@ def load_patient_row(metadata_path: Path, patient_id: str) -> dict[str, str]:
 
     if not matches:
         raise LookupError(f"Patient ID {patient_id} was not found in {metadata_path}")
+    if occurrence is not None:
+        if occurrence < 0 or occurrence >= len(matches):
+            raise IndexError(
+                f"Patient ID {patient_id} occurrence {occurrence} is out of range; "
+                f"found {len(matches)} rows in {metadata_path}."
+            )
+        return {key: value or "" for key, value in matches[occurrence].items()}
     if len(matches) > 1:
         raise ValueError(
             f"Patient ID {patient_id} occurs {len(matches)} times in {metadata_path}; "
@@ -285,6 +301,7 @@ def execute(args: argparse.Namespace) -> int:
         "phenopacket_id": phenopacket.get("id"),
         "image_id": _first_nonempty(row, ("image_id", "imageId")),
         "model": args.model,
+        "evidence_mode": args.evidence_mode,
         "dry_run": bool(args.dry_run),
         "started_at_utc": datetime.now(timezone.utc).isoformat(),
         "command": " ".join(sys.argv),
@@ -316,6 +333,7 @@ def execute(args: argparse.Namespace) -> int:
                         output_mode="file",
                         use_phenobrain=args.use_phenobrain,
                         output_dir=str(run_dir),
+                        evidence_mode=args.evidence_mode,
                     )
             except Exception as exc:  # Preserve the traceback in process.log and summary.
                 print(f"execution failed: {exc}", file=sys.stderr)
@@ -354,6 +372,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory under which a timestamped run directory is created.",
     )
     parser.add_argument("--model", default="gpt-4o", choices=["gpt-4o", "gpt-5-1", "gpt-5-2"])
+    parser.add_argument(
+        "--evidence-mode",
+        choices=["legacy", "v2"],
+        default="legacy",
+        help="Diagnosis flow to execute. Defaults to the legacy compatibility flow.",
+    )
     parser.add_argument("--use-phenobrain", action="store_true", help="Enable PhenoBrain explicitly.")
     parser.add_argument("--dry-run", action="store_true", help="Prepare and validate artifacts without calling the agent.")
     parser.add_argument("--no-copy-image", action="store_true", help="Use the source image in place instead of copying it into the run.")

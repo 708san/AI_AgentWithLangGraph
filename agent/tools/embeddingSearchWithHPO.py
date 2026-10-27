@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 from typing import List, Optional
 
 from ..state.state_types import State, PhenotypeSearchFormat, OMIMEntry
+from .candidate_metadata import canonical_omim_id
 
 # --- Initialization ---
 # This block runs only once when the module is first imported.
@@ -105,6 +106,8 @@ def embedding_search_with_hpo(state: State) -> Optional[List[PhenotypeSearchForm
             disease_data = phenotype_mapping[idx]
             
             # Convert to Pydantic models
+            disease_data = dict(disease_data)
+            disease_data["OMIM_id"] = canonical_omim_id(disease_data.get("OMIM_id")) or disease_data.get("OMIM_id")
             omim_entry = OMIMEntry(**disease_data)
             
             result_format = PhenotypeSearchFormat(

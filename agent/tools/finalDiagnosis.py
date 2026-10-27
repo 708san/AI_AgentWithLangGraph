@@ -1,12 +1,163 @@
 import os
+import re
 import time
+import traceback
 from langchain.schema import HumanMessage
 from typing_extensions import Optional
-from ..state.state_types import State, DiagnosisOutput
+from ..state.state_types import (
+    State,
+    DiagnosisOutput,
+    DiagnosisOutputV2,
+    DiagnosisFormatV2,
+    EvidenceItem,
+    FinalDiagnosisGenerationOutput,
+    ReflectionOutputV2,
+)
 from ..llm.prompt import prompt_dict, build_prompt
 from ..llm.llm_wrapper import is_content_filter_error
 from ..utils.response_serializer import omim_number
 from .diagnosis import attach_diagnosis_references
+from .candidate_metadata import canonical_omim_id, enrich_candidates
+from .evidence_validation import validate_v2_identity_fields
+
+
+INLINE_EVIDENCE_MARKER = re.compile(r"\[\[EVIDENCE:([^\]]+)\]\]")
+
+
+def _candidate_evidence(candidate_id: str, evidence: list[EvidenceItem]) -> list[EvidenceItem]:
+    return [item for item in evidence if item.candidate_id == candidate_id]
+
+
+def _evidence_status(items: list[EvidenceItem], candidate_sources=()) -> str:
+    if any(item.support == "supports" for item in items):
+        return "supported"
+    if any(item.support == "contradicts" for item in items):
+        return "contradictory"
+    # No usable claim after retrieving a candidate-matched source is different
+    # from retrieving no source in this run. Neither status is a negative
+    # clinical finding.
+    return "insufficient" if items or list(candidate_sources) else "not_retrieved"
+
+
+def _fallback_description(
+    disease_name: str,
+    patient_features: list[str],
+    evidence: list[EvidenceItem],
+) -> tuple[str, str]:
+    """Build an auditable long-form fallback when final generation fails."""
+    feature_text = ", ".join(patient_features[:8]) or "the supplied phenotype"
+    evidence_en = []
+    evidence_ja = []
+    for item in evidence[:5]:
+        marker = f"[[EVIDENCE:{item.evidence_id}]]"
+        evidence_en.append(f"{item.claim_en} {marker}")
+        evidence_ja.append(f"{item.claim_ja} {marker}")
+
+    if evidence_en:
+        joined_en = " ".join(evidence_en)
+        joined_ja = " ".join(evidence_ja)
+        description_en = (
+            f"The patient presents with {feature_text}. The retrieved literature for "
+            f"{disease_name} reports the following disease-specific findings: {joined_en} "
+            "These findings provide literature-based support for phenotypic similarity, "
+            "but they do not by themselves establish a molecular diagnosis or prove that "
+            "all disease features are present in this patient."
+        )
+        description_ja = (
+            f"患者には{feature_text}が認められます。{disease_name}について取得された文献では、"
+            f"次の疾患特異的所見が報告されています。{joined_ja} "
+            "これらは表現型の類似性を文献に基づいて支持しますが、これだけで分子診断を確定したり、"
+            "疾患の全所見が患者に存在すると判断したりすることはできません。"
+        )
+        return description_en, description_ja
+
+    return (
+        f"No validated literature Evidence is available for {disease_name} in this run. "
+        "This does not establish that no relevant literature exists; the candidate remains a differential hypothesis based on the supplied phenotype and diagnostic-tool signals.",
+        f"この実行では{disease_name}について検証済みの文献Evidenceを確認できませんでした。"
+        "これは関連文献が存在しないことを意味しません。候補は、提供された表現型と診断ツールの情報に基づく鑑別仮説として扱います。",
+    )
+
+
+def _apply_evidence_contract(
+    item: DiagnosisFormatV2,
+    evidence: list[EvidenceItem],
+    patient_features: list[str],
+    sources=(),
+) -> DiagnosisFormatV2:
+    """Keep final descriptions, Evidence IDs, and inline markers consistent."""
+    candidate_items = _candidate_evidence(item.candidate_id, evidence)
+    candidate_sources = [
+        source for source in sources
+        if source.source_type == "literature"
+        and item.candidate_id in (source.candidate_ids or [])
+    ]
+    allowed = {evidence_item.evidence_id for evidence_item in candidate_items}
+
+    def keep_valid_markers(text: str) -> str:
+        return INLINE_EVIDENCE_MARKER.sub(
+            lambda match: match.group(0) if match.group(1) in allowed else "",
+            text or "",
+        )
+
+    item.description_en = keep_valid_markers(item.description_en)
+    item.description_ja = keep_valid_markers(item.description_ja)
+    marker_ids = {
+        marker_id
+        for text in (item.description_en, item.description_ja)
+        for marker_id in INLINE_EVIDENCE_MARKER.findall(text or "")
+        if marker_id in allowed
+    }
+    requested_ids = list(dict.fromkeys(
+        evidence_id for evidence_id in item.evidence_ids if evidence_id in allowed
+    ))
+
+    # Never attach a citation to the end of an unrelated explanation. If the
+    # model selected an Evidence ID but omitted its marker, repair it only
+    # when that Evidence's exact bilingual claim occurs in both descriptions.
+    evidence_by_id = {entry.evidence_id: entry for entry in candidate_items}
+    for evidence_id in dict.fromkeys(requested_ids + sorted(marker_ids)):
+        evidence_item = evidence_by_id.get(evidence_id)
+        if evidence_item is None:
+            continue
+        marker = f"[[EVIDENCE:{evidence_id}]]"
+        claim_en = evidence_item.claim_en.strip()
+        claim_ja = evidence_item.claim_ja.strip()
+        if claim_en and claim_en in item.description_en and marker not in item.description_en:
+            item.description_en = item.description_en.replace(
+                claim_en, f"{claim_en} {marker}", 1
+            )
+        if claim_ja and claim_ja in item.description_ja and marker not in item.description_ja:
+            item.description_ja = item.description_ja.replace(
+                claim_ja, f"{claim_ja} {marker}", 1
+            )
+
+    # Keep the bilingual descriptions and trace list in lockstep. Markers
+    # present in only one language are not a valid public citation pair.
+    en_markers = set(INLINE_EVIDENCE_MARKER.findall(item.description_en))
+    ja_markers = set(INLINE_EVIDENCE_MARKER.findall(item.description_ja))
+    paired_markers = en_markers & ja_markers & allowed
+    for evidence_id in (en_markers | ja_markers) - paired_markers:
+        marker = f"[[EVIDENCE:{evidence_id}]]"
+        item.description_en = item.description_en.replace(marker, "")
+        item.description_ja = item.description_ja.replace(marker, "")
+    evidence_ids = [
+        evidence_item.evidence_id
+        for evidence_item in candidate_items
+        if evidence_item.evidence_id in paired_markers
+    ]
+
+    if evidence_ids:
+        selected_items = [evidence_by_id[value] for value in evidence_ids]
+        item.literature_status = _evidence_status(
+            selected_items,
+            candidate_sources,
+        )
+    else:
+        item.literature_status = _evidence_status([], candidate_sources)
+
+    item.evidence_ids = evidence_ids
+    return item
 
 
 def _is_content_filter_error(error: Exception) -> bool:
@@ -248,3 +399,141 @@ def createFinalDiagnosis(state: State) -> Optional[DiagnosisOutput]:
             raise
 
     return None, last_prompt
+
+
+def createFinalDiagnosisV2(state: State) -> tuple[DiagnosisOutputV2 | None, str]:
+    """Generate the final bilingual diagnosis from tentative output and Evidence."""
+    tentative = state.get("tentativeDiagnosis")
+    reflection = state.get("reflection")
+    evidence = list(state.get("evidence", []) or [])
+    sources = list(state.get("sources", []) or [])
+    llm = state.get("llm")
+    if tentative is None or not hasattr(tentative, "ans"):
+        return DiagnosisOutputV2(ans=[], evidence=evidence), ""
+
+    tentative_items = [item for item in tentative.ans if isinstance(item, DiagnosisFormatV2)]
+    if not tentative_items:
+        return DiagnosisOutputV2(ans=[], evidence=evidence), ""
+
+    patient_features = list((state.get("hpoDict", {}) or {}).values())
+
+    def fallback() -> DiagnosisOutputV2:
+        answers = []
+        # The internal tentative differential may now contain every merged
+        # candidate; the public final differential remains capped at five.
+        for original in tentative_items[:5]:
+            item = original.model_copy(deep=True)
+            candidate_items = _candidate_evidence(item.candidate_id, evidence)
+            item.description_en, item.description_ja = _fallback_description(
+                item.disease_name_en,
+                patient_features,
+                candidate_items,
+            )
+            item = _apply_evidence_contract(item, evidence, patient_features, sources)
+            answers.append(item)
+        return DiagnosisOutputV2(ans=answers, evidence=evidence)
+
+    if not llm:
+        return fallback(), ""
+
+    evidence_text = "\n".join(
+        f"{item.evidence_id} | candidate={item.candidate_id} | "
+        f"source={next((source.identifier or source.title for source in sources if source.source_id == item.source_id), 'unknown')} | "
+        f"support={item.support} | "
+        f"confidence={item.confidence} | EN={item.claim_en} | JA={item.claim_ja} | "
+        f"excerpt={item.excerpt}"
+        for item in evidence
+    ) or "No validated Evidence"
+    reflection_text = "\n".join(
+        f"{item.candidate_id} | correctness={item.correctness} | status={item.literature_status} | "
+        f"EN={item.diagnosis_analysis_en} | JA={item.diagnosis_analysis_ja} | "
+        f"evidence={item.evidence_ids} | assessments="
+        f"{[(assessment.evidence_id, assessment.relevance, assessment.supports_patient) for assessment in item.evidence_assessments]}"
+        for item in (getattr(reflection, "ans", []) or [])
+        if isinstance(item, object)
+    ) or "No Reflection output"
+    tentative_text = "\n".join(
+        f"initial_tentative_order={index} | {item.candidate_id} | {item.disease_name_en}"
+        for index, item in enumerate(tentative_items, 1)
+    )
+    merged_candidates = enrich_candidates(state.get("mergedDiseaseCandidates", []) or [])
+    candidates_by_id = {candidate.candidate_id: candidate for candidate in merged_candidates}
+    tool_support_text = "\n".join(
+        f"{item.candidate_id} | consensus_count={getattr(candidates_by_id.get(item.candidate_id), 'consensus_count', 0)} | "
+        f"best_tool_rank={getattr(candidates_by_id.get(item.candidate_id), 'best_rank', 'unknown')} | "
+        f"tools={', '.join(f'{support.tool}:rank={support.rank},score={support.score}' for support in getattr(candidates_by_id.get(item.candidate_id), 'tool_supports', [])) or 'none'} | "
+        f"candidate_phenotypes={', '.join(getattr(candidates_by_id.get(item.candidate_id), 'phenotype_labels', [])[:20]) or 'none'}"
+        for item in tentative_items
+    )
+    prompt = f"""You are the final clinical-genetics reviewer.
+Produce a bilingual final differential diagnosis by integrating patient phenotype fit, the diagnostic-tool signals, Reflection, and validated literature Evidence.
+Rank candidates primarily by the specificity and overall compatibility of the supplied patient findings with the candidate phenotype profile; use diagnostic-tool rank and cross-tool consensus as supporting prioritization signals, then use Reflection to resolve inclusion or uncertainty. A tool returning a candidate is not itself evidence of clinical fit. Prefer candidates with multiple matching findings or one genuinely distinctive match over candidates matching only generic neurodevelopmental findings.
+Literature retrieval success or the number of retrieved papers must not determine candidate rank. Missing or weakly retrieved literature is neutral, not evidence against a candidate. A candidate with correctness=true remains eligible for the top five even when literature_status is not_retrieved; exclude or strongly deprioritize it only for a stated clinical incompatibility or decisive, identity-matched contradictory Evidence.
+Every diagnosis must use an existing candidate_id and only existing evidence_ids. Do not introduce disease-specific claims unsupported by the supplied Evidence or candidate phenotype profile.
+A candidate may be described as literature-supported only when a validated literature Evidence item supports it. Tool rankings are not citations.
+If no usable literature Evidence was retrieved, say that no candidate-matched literature Evidence was available in this run; do not imply that no literature exists. Explain the candidate's phenotype/tool rationale without presenting it as a literature claim.
+Keep the English and Japanese descriptions semantically aligned and use the same evidence_ids.
+Explain the concrete patient features in relation to the supplied literature claims and identify important uncertainty.
+Write a substantive multi-sentence explanation for each diagnosis. Connect patient findings to the supplied candidate phenotype profile and, where available, specific literature claims; explain the clinical interpretation and remaining uncertainty. Do not return only a conclusion such as "supported" or "not supported".
+For every literature-grounded statement, place an inline marker immediately after that specific statement using [[EVIDENCE:EVD-...]]. The cited Evidence claim must directly support the whole statement; a paper merely being about the disease is not enough. Do not cite tool-derived phenotype profiles as if they came from literature. Do not place a marker at the end of an unrelated paragraph. Use only supplied evidence_id values and pair the same markers with semantically equivalent English and Japanese statements. Do not use numeric [1] markers; the serializer will convert internal markers to reference numbers.
+Do not invent absent findings or treat an unreported feature as absent.
+Do not claim a mechanism, inheritance pattern, or phenotype from general model knowledge unless it is present in the supplied Evidence.
+Return at most five diagnoses. The order of the returned items is the final differential order, and their rank fields MUST be exactly 1, 2, ..., N with no gaps or duplicates.
+Rank 1 is the most likely final diagnosis. Do not copy any rank from a diagnostic tool or from an earlier provisional output; tool/provisional ranks are not final ranks.
+Use tentative order as one prioritization signal, together with phenotype compatibility and tool support. Do not change order merely because one candidate has more literature than another.
+
+PATIENT_HPO: {', '.join((state.get('hpoDict', {}) or {}).values())}
+PATIENT_ABSENT_HPO: {', '.join((state.get('absentHpoDict', {}) or {}).values()) if state.get('use_absentHPO') else 'N/A'}
+The tentative order is the initial phenotype/tool differential created before literature retrieval; its order is useful, but it is not evidence of literature coverage.
+TENTATIVE:\n{tentative_text}
+TOOL_AND_CANDIDATE_PHENOTYPE_SUPPORT:\n{tool_support_text}
+REFLECTION:\n{reflection_text}
+EVIDENCE:\n{evidence_text}"""
+    try:
+        result = llm.get_structured_llm(FinalDiagnosisGenerationOutput).invoke(
+            [HumanMessage(content=prompt)]
+        )
+        # Validate the generated identity against the authoritative merged
+        # candidates, not against DiagnosisFormatV2.  The latter uses
+        # ``disease_name_en`` while the validator intentionally expects the
+        # canonical candidate's ``disease_name``.
+        authoritative_candidates = {
+            candidate.candidate_id: candidate
+            for candidate in enrich_candidates(
+                state.get("mergedDiseaseCandidates", []) or []
+            )
+        }
+        for item in tentative_items:
+            authoritative_candidates.setdefault(
+                item.candidate_id,
+                enrich_candidates([{
+                    "candidate_id": item.candidate_id,
+                    "disease_name": item.disease_name_en,
+                    "OMIM_id": item.OMIM_id,
+                }])[0],
+            )
+        identity_errors = validate_v2_identity_fields(
+            result, list(authoritative_candidates.values())
+        )
+        if len(getattr(result, "ans", []) or []) > 5:
+            identity_errors.append("Final diagnosis returned more than five candidates.")
+        if identity_errors:
+            safe = fallback()
+            safe.validation_status = "partial"
+            safe.validation_errors = [
+                "Final diagnosis generation failed identity validation.",
+                *identity_errors,
+            ]
+            print(f"[FinalDiagnosisV2] identity validation failed: {identity_errors}")
+            return safe, prompt
+        answers = result.model_copy(deep=True).ans
+        for item in answers:
+            item.OMIM_id = canonical_omim_id(
+                authoritative_candidates[item.candidate_id].OMIM_id
+            )
+            item = _apply_evidence_contract(item, evidence, patient_features, sources)
+        return DiagnosisOutputV2(ans=answers, evidence=evidence), prompt
+    except Exception as exc:
+        print(f"[FinalDiagnosisV2] structured generation failed: {exc}")
+        traceback.print_exc()
+        return fallback(), prompt

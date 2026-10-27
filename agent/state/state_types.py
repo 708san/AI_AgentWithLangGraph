@@ -1,3 +1,4 @@
+from typing import Any, Literal, Union
 from typing_extensions import List, TypedDict, Optional
 from pydantic import BaseModel, Field
 from ..llm.llm_wrapper import AzureOpenAIWrapper
@@ -36,8 +37,184 @@ class MergedDiseaseCandidate(TypedDict):
     best_rank: int
     tool_rankings: List[ToolRankingItem]
 
+
+class CandidateSupport(BaseModel):
+    """A diagnostic-tool signal, deliberately kept separate from citations."""
+
+    tool: Literal[
+        "PubCaseFinder",
+        "GestaltMatcher",
+        "ZeroShot",
+        "PhenoBrain",
+        "PhenotypeSearch",
+    ]
+    rank: Optional[int] = None
+    score: Optional[float] = None
+    rank_source: Optional[Literal["api", "agent_enumeration", "model", "search"]] = None
+    raw_distance: Optional[float] = None
+    matched_hpo_id: Optional[str] = None
+    note: Optional[str] = None
+    citation_allowed: bool = False
+
+
+class MergedDiseaseCandidateV2(BaseModel):
+    candidate_id: str
+    disease_name: str
+    OMIM_id: Optional[str] = None
+    gene_symbols: List[str] = Field(default_factory=list)
+    synonyms: List[str] = Field(default_factory=list)
+    phenotype_labels: List[str] = Field(default_factory=list)
+    consensus_count: int = 0
+    best_rank: int = 9999
+    tool_supports: List[CandidateSupport] = Field(default_factory=list)
+
+
+class SourceRecord(BaseModel):
+    source_id: str
+    source_type: Literal["literature", "database", "diagnostic_tool", "web_search"]
+    source_name: str
+    title: str
+    url: Optional[str] = None
+    identifier: Optional[str] = None
+    pmid: Optional[str] = None
+    pmcid: Optional[str] = None
+    doi: Optional[str] = None
+    authors: List[str] = Field(default_factory=list)
+    journal: Optional[str] = None
+    publication_year: Optional[str] = None
+    candidate_ids: List[str] = Field(default_factory=list)
+    disease_name: Optional[str] = None
+    OMIM_id: Optional[str] = None
+    gene_symbols: List[str] = Field(default_factory=list)
+    content_type: Literal[
+        "abstract", "full_text", "database_record", "tool_result", "search_snippet"
+    ]
+    raw_content: str = ""
+    search_query: Optional[str] = None
+    retrieved_at: Optional[str] = None
+    citation_allowed: bool = False
+
+
+class EvidenceItem(BaseModel):
+    evidence_id: str
+    candidate_id: str
+    source_id: str
+    evidence_type: Literal[
+        "disease_identity",
+        "gene_and_inheritance",
+        "core_phenotype",
+        "distinctive_phenotype",
+        "negative_finding",
+        "phenotype_overlap",
+        "phenotype_mismatch",
+        "disease_mechanism",
+    ]
+    claim_en: str
+    claim_ja: str
+    excerpt: str
+    support: Literal["supports", "contradicts", "unknown"]
+    confidence: Literal["high", "medium", "low"]
+    source_chunk_id: Optional[str] = None
+    source_section: Optional[str] = None
+    source_start: Optional[int] = None
+    source_end: Optional[int] = None
+    reference_number: Optional[int] = None
+
+
+class EvidenceAssessment(BaseModel):
+    evidence_id: str
+    relevance: Literal["high", "medium", "low"]
+    supports_patient: Literal["yes", "no", "unknown"]
+    reason_en: str
+    reason_ja: str
+
+
+class DiagnosisFormatV2(BaseModel):
+    candidate_id: str
+    disease_name_en: str
+    disease_name_ja: str
+    OMIM_id: Optional[str] = None
+    rank: int
+    description_en: str
+    description_ja: str
+    evidence_ids: List[str] = Field(default_factory=list)
+    literature_status: Literal[
+        "supported", "insufficient", "contradictory", "not_retrieved"
+    ]
+
+
+class ReferenceRecord(SourceRecord):
+    evidence_ids: List[str] = Field(default_factory=list)
+
+
+class DiagnosisOutputV2(BaseModel):
+    ans: List[DiagnosisFormatV2] = Field(default_factory=list)
+    references: List[ReferenceRecord] = Field(default_factory=list)
+    evidence: List[EvidenceItem] = Field(default_factory=list)
+    validation_status: Literal["passed", "failed", "partial"] = "passed"
+    validation_errors: List[str] = Field(default_factory=list)
+    reference: Optional[str] = None
+
+
+class FinalDiagnosisGenerationOutput(BaseModel):
+    """LLM-only schema for final prose generation.
+
+    References and Evidence are authoritative State data, not fields the
+    final-diagnosis model should regenerate. Keeping this schema narrow also
+    prevents the structured-output parser from mixing source records with
+    diagnosis items.
+    """
+
+    ans: List[DiagnosisFormatV2] = Field(default_factory=list)
+
+
+class ReflectionFormatV2(BaseModel):
+    candidate_id: str
+    disease_name_en: str
+    disease_name_ja: str
+    correctness: bool
+    patient_summary_en: str
+    patient_summary_ja: str
+    diagnosis_analysis_en: str
+    diagnosis_analysis_ja: str
+    evidence_assessments: List[EvidenceAssessment] = Field(default_factory=list)
+    evidence_ids: List[str] = Field(default_factory=list)
+    literature_status: Literal[
+        "supported", "insufficient", "contradictory", "not_retrieved"
+    ]
+
+
+class ReflectionOutputV2(BaseModel):
+    ans: List[ReflectionFormatV2] = Field(default_factory=list)
+
+
+class EvidenceDraft(BaseModel):
+    source_id: str
+    evidence_type: Literal[
+        "disease_identity",
+        "gene_and_inheritance",
+        "core_phenotype",
+        "distinctive_phenotype",
+        "negative_finding",
+        "phenotype_overlap",
+        "phenotype_mismatch",
+        "disease_mechanism",
+    ]
+    claim_en: str
+    claim_ja: str
+    excerpt: str
+    support: Literal["supports", "contradicts", "unknown"]
+    confidence: Literal["high", "medium", "low"]
+    source_chunk_id: Optional[str] = None
+    source_section: Optional[str] = None
+
+
+class EvidenceExtractionOutput(BaseModel):
+    evidence: List[EvidenceDraft] = Field(default_factory=list)
+
 class State(TypedDict):
     depth: int
+    evidence_mode: Literal["legacy", "v2"]
     imagePath: Optional[str]
     clinicalText: Optional[str]
     hpoList: List[str]
@@ -51,27 +228,61 @@ class State(TypedDict):
     phenoBrain: List[PhenoBrainResult]
     GestaltMatcher: List['GestaltMatcherFormat']
     phenotypeSearchResult: Optional[List['PhenotypeSearchFormat']]
-    mergedDiseaseCandidates: List[MergedDiseaseCandidate]
+    mergedDiseaseCandidates: List[Union[MergedDiseaseCandidate, MergedDiseaseCandidateV2]]
     webresources: List['webresource']
     # evidence are stored in memory
     memory: List['InformationItem']
+    sources: List[SourceRecord]
+    evidence: List[EvidenceItem]
+    validation_status: Literal["not_run", "passed", "failed", "partial"]
+    validation_errors: List[str]
+    flow_iteration: int
+    max_flow_iterations: int
     zeroShotResult: Optional['ZeroShotOutput']
-    tentativeDiagnosis: Optional['DiagnosisOutput']
-    reflection: Optional['ReflectionOutput']
-    finalDiagnosis: Optional['DiagnosisOutput']
+    zeroShotRaw: Optional['ZeroShotOutput']
+    zeroShotValidation: Optional[List[dict[str, Any]]]
+    tentativeRaw: Optional[Union['DiagnosisOutput', DiagnosisOutputV2]]
+    tentativeValidation: Optional[dict[str, Any]]
+    tentativeDiagnosis: Optional[Union['DiagnosisOutput', DiagnosisOutputV2]]
+    reflection: Optional[Union['ReflectionOutput', ReflectionOutputV2]]
+    finalDiagnosis: Optional[Union['DiagnosisOutput', DiagnosisOutputV2]]
     onset: Optional[str]
     sex: Optional[str]
     patient_id: Optional[str]
     llm: Optional[AzureOpenAIWrapper]
+    # Operational runners may provide already-materialized GestaltMatcher
+    # results (for example, results persisted by a worker service).  This is
+    # an execution-only callback and is excluded from serialized outputs.
+    gestalt_matcher_result_loader: Optional[Any]
     
 # --- Pydantic Model for Zero-Shot Diagnosis Output ---
 class ZeroShotFormat(BaseModel):
-    disease_name: str = Field(..., description="The formal name of the most likely rare disease, based solely on the patient's HPO terms.")
+    disease_name: str = Field(..., description=(
+        "The disease name in OMIM entry-title format, preserving capitalization, punctuation, "
+        "and subtype numbers. Use plain text without explanations or Markdown."
+    ))
     rank: int = Field(..., description="The rank of the disease in the differential diagnosis list, where 1 is the most likely.")
-    OMIM_id: Optional[str] = Field(None, description="The OMIM identifier for the disease, if available.")
+    OMIM_id: Optional[str] = Field(None, description=(
+        "The disease's OMIM identifier as a six-digit string without the OMIM prefix. "
+        "Use JSON null when it is unknown; never invent a disease or gene identifier."
+    ))
 
 class ZeroShotOutput(BaseModel):
     ans: List[ZeroShotFormat]
+
+
+class ZeroShotReasonedCandidate(ZeroShotFormat):
+    selection_reason: str = Field(..., min_length=1, description=(
+        "A concise explanation, at most two sentences, of why this candidate was selected. "
+        "Use supplied patient findings only; mention an explicit contradiction or uncertainty "
+        "when relevant. This field is for logging and evaluation only."
+    ))
+
+
+class ZeroShotReasonedOutput(BaseModel):
+    """LLM-only output; selection_reason must never enter downstream State."""
+
+    ans: List[ZeroShotReasonedCandidate]
 
 
 # --- Pydantic Models for Tentative Diagnosis Output ---

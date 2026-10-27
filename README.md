@@ -35,6 +35,13 @@ if __name__ == "__main__":
 ・image_path: Path to the patient image (optional, can be None)
 ・enable_log=True: Enables logging of all node results and prompts
 
+The pipeline uses the evidence-grounded v2 flow by default. The legacy flow is
+still available when compatibility testing requires it:
+
+```python
+result = pipeline.run(input_hpo_list, image_path, evidence_mode="legacy")
+```
+
 ---
 ## 2. Running From a PhenoPacket
 You can also run the pipeline through the helper script:

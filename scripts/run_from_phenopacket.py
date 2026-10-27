@@ -8,7 +8,7 @@ import time
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from agent.agent_pipeline import RareDiseaseDiagnosisPipeline
-from agent.utils.response_serializer import omim_curie, omim_number
+from agent.utils.response_serializer import omim_curie
 
 def parse_phenopacket(file_path: str) -> dict:
     """
@@ -54,9 +54,11 @@ def format_final_diagnosis(final_diagnosis_obj) -> dict:
     if isinstance(final_diagnosis_obj, dict):
         raw_ans = final_diagnosis_obj.get("ans", [])
         top_level_reference = final_diagnosis_obj.get("reference", "")
+        result = dict(final_diagnosis_obj)
     elif hasattr(final_diagnosis_obj, "ans"):
         raw_ans = final_diagnosis_obj.ans
         top_level_reference = getattr(final_diagnosis_obj, "reference", "")
+        result = final_diagnosis_obj.model_dump() if hasattr(final_diagnosis_obj, "model_dump") else {}
     else:
         return {"ans": [], "reference": ""}
     
@@ -64,16 +66,36 @@ def format_final_diagnosis(final_diagnosis_obj) -> dict:
     for diag in raw_ans:
         get_value = diag.get if isinstance(diag, dict) else getattr
         original_omim_id = get_value("OMIM_id", get_value("omim_id", "N/A"))
-        ans_list.append({
+        item = {
             "rank": get_value("rank", "N/A"),
             "disease_name": get_value("disease_name", "Unknown"),
-            "omim_id": omim_number(original_omim_id),
+            "OMIM_id": omim_curie(original_omim_id),
+            "omim_id": omim_curie(original_omim_id),
             "omim_id_curie": omim_curie(original_omim_id),
             "description": get_value("description", ""),
             "reference": get_value("reference", get_value("references", [])) or [],
-        })
+        }
+        # Preserve the structured V2 fields when this helper is used by the
+        # Phenopacket command, while retaining the old display aliases above.
+        if isinstance(diag, dict):
+            for key in (
+                "candidate_id",
+                "disease_name_en",
+                "disease_name_ja",
+                "description_en",
+                "description_ja",
+                "evidence_ids",
+                "literature_status",
+                "reference_numbers",
+                "reference_records",
+            ):
+                if key in diag:
+                    item[key] = diag[key]
+        ans_list.append(item)
     
-    return {"ans": ans_list, "reference": top_level_reference}
+    result["ans"] = ans_list
+    result["reference"] = top_level_reference
+    return result
 
 def run_pipeline_from_phenopacket(
     phenopacket_path: str,
@@ -82,6 +104,7 @@ def run_pipeline_from_phenopacket(
     output_mode: str = 'file',
     use_phenobrain: bool = False,
     output_dir: str = None,
+    evidence_mode: str = "v2",
 ):
     """
     指定されたPhenopacketファイルから情報を読み込み、診断パイプラインを実行する。
@@ -147,6 +170,7 @@ def run_pipeline_from_phenopacket(
         use_phenobrain=use_phenobrain,
         verbose=False,
         public_response=True,
+        evidence_mode=evidence_mode,
     )
 
     public_state = final_state
@@ -195,6 +219,12 @@ if __name__ == "__main__":
     parser.add_argument("--output_mode", type=str, default="file", choices=["file", "print", "return"], help="Output mode: 'file' to save JSON, 'print' to print to stdout.")
     parser.add_argument("--use_phenobrain", action="store_true", help="Enable PhenoBrain explicitly (default: disabled).")
     parser.add_argument("--output_dir", type=str, default=None, help="Directory for the final result, logs, and node responses.")
+    parser.add_argument(
+        "--evidence-mode",
+        choices=["v2", "legacy"],
+        default="v2",
+        help="Diagnosis flow to execute. Defaults to the evidence-grounded v2 flow; use legacy explicitly for the old route.",
+    )
     
     args = parser.parse_args()
     
@@ -205,4 +235,5 @@ if __name__ == "__main__":
         output_mode=args.output_mode,
         use_phenobrain=args.use_phenobrain,
         output_dir=args.output_dir,
+        evidence_mode=args.evidence_mode,
     )
