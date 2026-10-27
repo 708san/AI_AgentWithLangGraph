@@ -1,7 +1,9 @@
 import inspect
 import io
+import tempfile
 import unittest
 from contextlib import redirect_stdout
+from pathlib import Path
 from unittest.mock import patch
 from unittest.mock import Mock
 
@@ -47,6 +49,26 @@ from agent.utils.response_serializer import (
 
 
 class TestEvidenceGroundedFlow(unittest.TestCase):
+    def test_flow_log_diagram_matches_selected_evidence_mode(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pipeline = RareDiseaseDiagnosisPipeline.__new__(RareDiseaseDiagnosisPipeline)
+            pipeline.logfile_path = str(Path(tmp) / "agent.log")
+            pipeline.graph = Mock()
+            pipeline.graph.get_graph.return_value.draw_ascii.return_value = "LEGACY GRAPH"
+            pipeline.v2_graph = Mock()
+            pipeline.v2_graph.get_graph.return_value.draw_ascii.return_value = "V2 GRAPH"
+
+            pipeline._write_graph_ascii_to_log("legacy")
+            legacy_log = Path(pipeline.logfile_path).read_text(encoding="utf-8")
+            self.assertIn("evidence_mode=legacy", legacy_log)
+            self.assertIn("LEGACY GRAPH", legacy_log)
+            self.assertNotIn("V2 GRAPH", legacy_log)
+
+            pipeline._write_graph_ascii_to_log("v2")
+            v2_log = Path(pipeline.logfile_path).read_text(encoding="utf-8")
+            self.assertIn("evidence_mode=v2", v2_log)
+            self.assertIn("V2 GRAPH", v2_log)
+
     def setUp(self):
         self.candidate = MergedDiseaseCandidateV2(
             candidate_id="OMIM:123456",

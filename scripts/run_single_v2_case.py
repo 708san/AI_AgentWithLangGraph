@@ -266,7 +266,10 @@ def main() -> int:
         # Import after the artifact path is ready so node save_result decorators
         # use this run's isolated result directory.
         from agent.agent_pipeline import RareDiseaseDiagnosisPipeline
-        from agent.utils.response_serializer import serialize_public_state
+        from agent.utils.response_serializer import (
+            serialize_external_compatibility,
+            serialize_public_state,
+        )
         from agent.utils.profiler import profiler
 
         profiler.reset()
@@ -301,6 +304,10 @@ def main() -> int:
 
         _write_json(output_dir / "state.json", result)
         _write_json(output_dir / "public_response.json", serialize_public_state(result))
+        _write_json(
+            output_dir / "external_response.json",
+            serialize_external_compatibility(result),
+        )
 
         summary = {
             "status": "completed",

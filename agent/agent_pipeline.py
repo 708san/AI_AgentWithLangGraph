@@ -83,7 +83,6 @@ class RareDiseaseDiagnosisPipeline:
         self.v2_graph = self._build_graph("v2")
         if self.enable_log:
             self.logfile_path = self._get_logfile_path()
-            self._write_graph_ascii_to_log()
         
         self.llm = get_llm_instance(model_name)
             
@@ -95,14 +94,15 @@ class RareDiseaseDiagnosisPipeline:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         return os.path.join(log_dir, f"agent_log_{timestamp}.log")
     
-    def _write_graph_ascii_to_log(self):
-        # エージェントフロー図をASCIIでlogファイルの先頭に出力
+    def _write_graph_ascii_to_log(self, evidence_mode: str):
+        # 実際に実行するモードのフロー図をログ先頭に出力する。
         try:
-            ascii_graph = self.v2_graph.get_graph().draw_ascii()
+            graph = self.v2_graph if evidence_mode == "v2" else self.graph
+            ascii_graph = graph.get_graph().draw_ascii()
         except Exception as e:
             ascii_graph = f"[Failed to draw graph: {e}]"
         with open(self.logfile_path, "w", encoding="utf-8") as f:
-            f.write("=== Agent Flow Graph ===\n")
+            f.write(f"=== Agent Flow Graph (evidence_mode={evidence_mode}) ===\n")
             f.write(ascii_graph)
             f.write("\n\n")
 
@@ -319,6 +319,8 @@ class RareDiseaseDiagnosisPipeline:
             max_flow_iterations=max_flow_iterations,
         )
         graph = self.v2_graph if evidence_mode == "v2" else self.graph
+        if self.enable_log:
+            self._write_graph_ascii_to_log(evidence_mode)
         result = graph.invoke(initial_state)
         if verbose:
             self.pretty_print(result)

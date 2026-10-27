@@ -12,7 +12,9 @@ Usage::
 
 Completed cases are skipped when their input fingerprint and execution
 configuration match the existing ``run_config.json`` and the output contract
-passed.  Failed or incomplete cases are retried in the same patient folder.
+passed. Failed or incomplete cases have prior generated artifacts cleared
+before retrying in the same patient folder. An interrupted batch can be
+started again with the same command; completed patients are skipped.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -127,6 +130,77 @@ def _case_is_complete(case_dir: Path, expected_config: dict[str, Any]) -> bool:
     )
 
 
+def _case_is_managed(case_dir: Path, patient_id: str) -> bool:
+    config = _read_json(case_dir / "run_config.json")
+    summary = _read_json(case_dir / "execution_summary.json")
+    return bool(
+        (config and config.get("runner") == "phenopacket_image_case_v2"
+         and str(config.get("patient_id")) == str(patient_id))
+        or (summary and str(summary.get("patient_id")) == str(patient_id))
+    )
+
+
+def _prepare_case_for_run(
+    case_dir: Path,
+    *,
+    output_root: Path,
+    patient_id: str,
+    expected_config: dict[str, Any],
+) -> None:
+    """Clear this runner's known artifacts before starting a fresh attempt.
+
+    Refuse to clean an unrecognized non-empty directory. This guards against a
+    typo in ``--output-root`` or a user-created ``patient_<id>`` directory.
+    """
+    resolved_root = output_root.resolve()
+    resolved_case = case_dir.resolve()
+    if resolved_case.parent != resolved_root or case_dir.name != f"patient_{patient_id}":
+        raise ValueError(f"Refusing to reset case directory outside output root: {case_dir}")
+
+    if case_dir.exists():
+        if not case_dir.is_dir() or case_dir.is_symlink():
+            raise ValueError(f"Case output path is not a regular directory: {case_dir}")
+        if any(case_dir.iterdir()) and not _case_is_managed(case_dir, patient_id):
+            raise ValueError(
+                f"Refusing to reset unrecognized non-empty case directory: {case_dir}"
+            )
+
+        for name in ("input", "logs", "results", "node_results"):
+            artifact_dir = case_dir / name
+            if artifact_dir.is_symlink():
+                raise ValueError(f"Refusing to reset symlinked artifact directory: {artifact_dir}")
+            if artifact_dir.is_dir():
+                shutil.rmtree(artifact_dir)
+            elif artifact_dir.exists():
+                raise ValueError(f"Expected an artifact directory at: {artifact_dir}")
+
+        for name in (
+            "run_info.json",
+            "run_config.json",
+            "execution_summary.json",
+            "launcher.log",
+        ):
+            artifact_file = case_dir / name
+            if artifact_file.is_symlink():
+                raise ValueError(f"Refusing to reset symlinked artifact file: {artifact_file}")
+            if artifact_file.is_file():
+                artifact_file.unlink()
+            elif artifact_file.exists():
+                raise ValueError(f"Expected a regular artifact file at: {artifact_file}")
+
+    case_dir.mkdir(parents=True, exist_ok=True)
+    _write_json(case_dir / "run_config.json", expected_config)
+    _write_json(
+        case_dir / "execution_summary.json",
+        {
+            "status": "running",
+            "patient_id": str(patient_id),
+            "run_dir": str(case_dir),
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Run all unique Phenopacket patients sequentially with stable output folders."
@@ -208,14 +282,25 @@ def _run_one_case(
         command.append("--use-absent-hpo")
 
     with launcher_log.open("w", encoding="utf-8") as handle:
-        completed = subprocess.run(
+        process = subprocess.Popen(
             command,
             cwd=PROJECT_ROOT,
             stdout=handle,
             stderr=subprocess.STDOUT,
-            check=False,
         )
-    return completed.returncode
+        try:
+            return process.wait()
+        except KeyboardInterrupt:
+            try:
+                process.terminate()
+            except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+            raise
 
 
 def main() -> int:
@@ -241,6 +326,7 @@ def main() -> int:
     started = time.monotonic()
     started_at = datetime.now(timezone.utc).isoformat()
     records: list[dict[str, Any]] = []
+    interrupted = False
 
     for index, patient_id in enumerate(patient_order, 1):
         case_dir = output_root / f"patient_{patient_id}"
@@ -266,6 +352,12 @@ def main() -> int:
                 records.append(record)
                 print("  skipped: matching completed result exists")
             else:
+                _prepare_case_for_run(
+                    case_dir,
+                    output_root=output_root,
+                    patient_id=patient_id,
+                    expected_config=expected_config,
+                )
                 return_code = _run_one_case(
                     patient_id=patient_id,
                     case_dir=case_dir,
@@ -285,15 +377,45 @@ def main() -> int:
                 print(f"  {status}: {record['duration_seconds']:.3f}s")
                 if status == "failed" and args.stop_on_error:
                     break
+        except KeyboardInterrupt:
+            interrupted = True
+            _write_json(
+                case_dir / "execution_summary.json",
+                {
+                    "status": "interrupted",
+                    "patient_id": str(patient_id),
+                    "run_dir": str(case_dir),
+                    "interrupted_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            records.append({
+                "patient_id": patient_id,
+                "status": "interrupted",
+                "run_dir": str(case_dir),
+                "duration_seconds": round(time.monotonic() - case_started, 3),
+            })
+            print(f"  interrupted: patient={patient_id}")
         except Exception as exc:
-            case_dir.mkdir(parents=True, exist_ok=True)
             error = {
                 "status": "failed",
                 "patient_id": patient_id,
                 "error_type": type(exc).__name__,
                 "error": str(exc),
             }
-            _write_json(case_dir / "execution_summary.json", error)
+            safe_case_path = (
+                not case_dir.is_symlink()
+                and case_dir.resolve().parent == output_root
+                and case_dir.name == f"patient_{patient_id}"
+            )
+            if safe_case_path and (
+                not case_dir.exists()
+                or not any(case_dir.iterdir())
+                or _case_is_managed(case_dir, patient_id)
+            ):
+                case_dir.mkdir(parents=True, exist_ok=True)
+                _write_json(case_dir / "execution_summary.json", error)
+            else:
+                print(f"  preserving unrecognized case directory: {case_dir}")
             record = {
                 "patient_id": patient_id,
                 "status": "failed",
@@ -309,7 +431,7 @@ def main() -> int:
         _write_json(
             output_root / "summary.json",
             {
-                "status": "running",
+                "status": "interrupted" if interrupted else "running",
                 "started_at": started_at,
                 "updated_at": datetime.now(timezone.utc).isoformat(),
                 "metadata": str(metadata_path),
@@ -319,10 +441,16 @@ def main() -> int:
                 "records": records,
             },
         )
+        if interrupted:
+            break
 
     failed = sum(record["status"] == "failed" for record in records)
     final_summary = {
-        "status": "completed" if failed == 0 and len(records) == len(patient_order) else "failed",
+        "status": (
+            "interrupted" if interrupted
+            else "completed" if failed == 0 and len(records) == len(patient_order)
+            else "failed"
+        ),
         "started_at": started_at,
         "finished_at": datetime.now(timezone.utc).isoformat(),
         "duration_seconds": round(time.monotonic() - started, 3),
@@ -334,10 +462,13 @@ def main() -> int:
         "completed_count": sum(record["status"] == "completed" for record in records),
         "skipped_count": sum(record["status"] == "skipped" for record in records),
         "failed_count": failed,
+        "interrupted_count": sum(record["status"] == "interrupted" for record in records),
         "records": records,
     }
     _write_json(output_root / "summary.json", final_summary)
     print(json.dumps(final_summary, ensure_ascii=False, indent=2))
+    if interrupted:
+        return 130
     return 1 if failed or len(records) != len(patient_order) else 0
 
 
