@@ -17,6 +17,7 @@ from pydantic import BaseModel
 INLINE_EVIDENCE_MARKER = re.compile(r"\[\[EVIDENCE:([^\]]+)\]\]")
 PUBLIC_PRIVATE_KEYS = {"prompt"}
 IMAGE_PATH_KEYS = {"imagePath", "image_path"}
+EXECUTION_ONLY_KEYS = {"llm", "gestalt_matcher_result_loader"}
 
 
 def omim_number(value: Any) -> Any:
@@ -317,10 +318,22 @@ def _project_reflection(
             for evidence_id in item.get("evidence_ids", []) or []
             if str(evidence_id) in evidence_by_id
         ]
-        cited_ids = (
-            _cited_evidence_ids(item.get("diagnosis_analysis_en"), item_evidence, "en")
-            | _cited_evidence_ids(item.get("diagnosis_analysis_ja"), item_evidence, "ja")
-        )
+        # Reflection's structured ``evidence_ids`` is the authoritative
+        # selection for this candidate.  Unlike free-form prose, it remains
+        # available even when the LLM returns a concise fallback sentence
+        # without inline Evidence markers.  Keep only evidence that has a
+        # public citation number; non-citable/internal evidence must not leak
+        # into the external Reference list.
+        selected_ids = {
+            str(evidence_id)
+            for evidence_id in item.get("evidence_ids", []) or []
+            if str(evidence_id) in evidence_by_id
+        }
+        cited_ids = {
+            evidence_id
+            for evidence_id in selected_ids
+            if str(evidence_by_id[evidence_id].get("source_id")) in number_by_source_id
+        }
         numbers = _item_reference_numbers(
             {"evidence_ids": sorted(cited_ids)}, evidence_by_id, number_by_source_id
         )
@@ -373,7 +386,7 @@ def serialize_public_state(state: dict) -> dict:
     # These are internal audit/evaluation snapshots. They must not alter the
     # established public_response.json contract.
     internal_only = {
-        "llm",
+        *EXECUTION_ONLY_KEYS,
         "zeroShotRaw",
         "zeroShotValidation",
         "tentativeRaw",
@@ -477,7 +490,7 @@ def serialize_external_compatibility(state: dict) -> dict[str, Any]:
     raw = _to_public_value({
         key: value
         for key, value in state.items()
-        if key not in {"llm", "zeroShotRaw", "zeroShotValidation", "tentativeRaw", "tentativeValidation"}
+        if key not in EXECUTION_ONLY_KEYS | {"zeroShotRaw", "zeroShotValidation", "tentativeRaw", "tentativeValidation"}
     })
     if not isinstance(raw, dict) or raw.get("evidence_mode") != "v2":
         return raw

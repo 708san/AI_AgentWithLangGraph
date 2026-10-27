@@ -119,11 +119,23 @@ def GestaltMatcherNode(state: State):
     print("GestaltMatcherNode called")
     image_path = state.get("imagePath", None)
     depth = state.get("depth", 0)
-    if not image_path:
+    result_loader = state.get("gestalt_matcher_result_loader")
+    if not image_path and not result_loader:
         print("No image path provided.")
         return {"GestaltMatcher": []}
     try:
-        gestalt_results = call_gestalt_matcher_api(image_path, depth)
+        gestalt_results = (
+            result_loader()
+            if result_loader
+            else call_gestalt_matcher_api(image_path, depth)
+        )
+        if isinstance(gestalt_results, dict):
+            gestalt_results = (
+                gestalt_results.get("GestaltMatcher")
+                or gestalt_results.get("results")
+                or gestalt_results.get("data")
+                or []
+            )
         syndrome_list = []
         for rank, res in enumerate(gestalt_results, 1):
             api_rank = res.get("rank")

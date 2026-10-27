@@ -434,7 +434,18 @@ def create_reflection_v2(state: State) -> tuple[ReflectionOutputV2, str]:
                         else "この候補は現時点では文献支持済みとは判断できません。"
                     ),
                     evidence_assessments=assessments,
-                    evidence_ids=[item.evidence_id for item in items],
+                    # Only attach evidence that can support or contradict the
+                    # reflection and that comes from a citable literature
+                    # source.  Unknown retrieval snippets remain available in
+                    # evidence_assessments, but are not exposed as references.
+                    evidence_ids=[
+                        item.evidence_id
+                        for item in items
+                        if item.support in {"supports", "contradicts"}
+                        and sources.get(item.source_id)
+                        and sources[item.source_id].source_type == "literature"
+                        and sources[item.source_id].citation_allowed
+                    ],
                     literature_status=status,
                 )
             )

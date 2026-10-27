@@ -250,6 +250,10 @@ class State(TypedDict):
     sex: Optional[str]
     patient_id: Optional[str]
     llm: Optional[AzureOpenAIWrapper]
+    # Operational runners may provide already-materialized GestaltMatcher
+    # results (for example, results persisted by a worker service).  This is
+    # an execution-only callback and is excluded from serialized outputs.
+    gestalt_matcher_result_loader: Optional[Any]
     
 # --- Pydantic Model for Zero-Shot Diagnosis Output ---
 class ZeroShotFormat(BaseModel):

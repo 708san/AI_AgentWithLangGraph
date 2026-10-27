@@ -301,6 +301,7 @@ def execute(args: argparse.Namespace) -> int:
         "phenopacket_id": phenopacket.get("id"),
         "image_id": _first_nonempty(row, ("image_id", "imageId")),
         "model": args.model,
+        "evidence_mode": args.evidence_mode,
         "dry_run": bool(args.dry_run),
         "started_at_utc": datetime.now(timezone.utc).isoformat(),
         "command": " ".join(sys.argv),
@@ -332,6 +333,7 @@ def execute(args: argparse.Namespace) -> int:
                         output_mode="file",
                         use_phenobrain=args.use_phenobrain,
                         output_dir=str(run_dir),
+                        evidence_mode=args.evidence_mode,
                     )
             except Exception as exc:  # Preserve the traceback in process.log and summary.
                 print(f"execution failed: {exc}", file=sys.stderr)
@@ -370,6 +372,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory under which a timestamped run directory is created.",
     )
     parser.add_argument("--model", default="gpt-4o", choices=["gpt-4o", "gpt-5-1", "gpt-5-2"])
+    parser.add_argument(
+        "--evidence-mode",
+        choices=["legacy", "v2"],
+        default="legacy",
+        help="Diagnosis flow to execute. Defaults to the legacy compatibility flow.",
+    )
     parser.add_argument("--use-phenobrain", action="store_true", help="Enable PhenoBrain explicitly.")
     parser.add_argument("--dry-run", action="store_true", help="Prepare and validate artifacts without calling the agent.")
     parser.add_argument("--no-copy-image", action="store_true", help="Use the source image in place instead of copying it into the run.")

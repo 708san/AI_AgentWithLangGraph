@@ -256,7 +256,7 @@ class RareDiseaseDiagnosisPipeline:
         
         return graph_builder.compile()
 
-    def _build_initial_state(self, hpo_list, image_path=None, absent_hpo_list=None, onset=None, sex=None, patient_id=None, use_absentHPO=False, filter_impotance=False, use_phenobrain=False, evidence_mode=DEFAULT_EVIDENCE_MODE, max_flow_iterations=1):
+    def _build_initial_state(self, hpo_list, image_path=None, absent_hpo_list=None, onset=None, sex=None, patient_id=None, use_absentHPO=False, filter_impotance=False, use_phenobrain=False, evidence_mode=DEFAULT_EVIDENCE_MODE, max_flow_iterations=1, gestalt_matcher_result_loader=None):
         if filter_impotance:
             hpo_list = filter_hpo_by_importance(hpo_list)
             absent_hpo_list = filter_hpo_by_importance(absent_hpo_list or [])
@@ -298,6 +298,7 @@ class RareDiseaseDiagnosisPipeline:
             "sex": sex if sex else "Unknown",
             "patient_id": patient_id if patient_id else "unknown",
             "llm": self.llm,
+            "gestalt_matcher_result_loader": gestalt_matcher_result_loader,
         }
 
     def run(self, hpo_list, image_path=None, verbose=False, absent_hpo_list=None, onset=None, sex=None, patient_id=None, use_absentHPO=False, filter_impotance=False, use_phenobrain=False, public_response=True, evidence_mode=DEFAULT_EVIDENCE_MODE, max_flow_iterations=1):
@@ -325,6 +326,64 @@ class RareDiseaseDiagnosisPipeline:
         if verbose:
             self.pretty_print(result)
         return serialize_public_state(result) if public_response else result
+
+    def stream(
+        self,
+        hpo_list,
+        image_path=None,
+        verbose=False,
+        absent_hpo_list=None,
+        onset=None,
+        sex=None,
+        patient_id=None,
+        use_absentHPO=False,
+        filter_impotance=False,
+        use_phenobrain=False,
+        evidence_mode=DEFAULT_EVIDENCE_MODE,
+        max_flow_iterations=1,
+        gestalt_matcher_result_loader=None,
+    ):
+        """Yield ``(node_name, node_update)`` as each graph node completes.
+
+        ``run`` remains the compatibility entry point for local tests and
+        scripts.  This method exposes the same graph execution through
+        LangGraph's update stream for operational adapters.
+        """
+        if evidence_mode not in {"legacy", "v2"}:
+            raise ValueError("evidence_mode must be 'legacy' or 'v2'")
+        if max_flow_iterations < 0:
+            raise ValueError("max_flow_iterations must be non-negative")
+
+        initial_state = self._build_initial_state(
+            hpo_list=hpo_list,
+            image_path=image_path,
+            absent_hpo_list=absent_hpo_list,
+            onset=onset,
+            sex=sex,
+            patient_id=patient_id,
+            use_absentHPO=use_absentHPO,
+            filter_impotance=filter_impotance,
+            use_phenobrain=use_phenobrain,
+            evidence_mode=evidence_mode,
+            max_flow_iterations=max_flow_iterations,
+            gestalt_matcher_result_loader=gestalt_matcher_result_loader,
+        )
+        graph = self.v2_graph if evidence_mode == "v2" else self.graph
+        if self.enable_log:
+            self._write_graph_ascii_to_log(evidence_mode)
+
+        accumulated_state = dict(initial_state)
+        for chunk in graph.stream(initial_state, stream_mode="updates"):
+            if not isinstance(chunk, dict):
+                continue
+            for node_name, node_update in chunk.items():
+                if not isinstance(node_update, dict):
+                    continue
+                accumulated_state.update(node_update)
+                yield node_name, node_update
+
+        if verbose:
+            self.pretty_print(accumulated_state)
 
     def pretty_print(self, result):
         print("=== result of reflection ===")

@@ -70,11 +70,11 @@ def save_node_result(node_name: str, result_data: Any, state: dict[str, Any]) ->
                 # baseline, then let the persisted cumulative node results win.
                 accumulated_state = {
                     key: value for key, value in state.items()
-                    if key not in {"node_results", "llm"}
+                    if key not in {"node_results", "llm", "gestalt_matcher_result_loader"}
                 }
                 accumulated_state.update({
                     key: value for key, value in data_for_saving.items()
-                    if key not in {"node_results", "llm"}
+                    if key not in {"node_results", "llm", "gestalt_matcher_result_loader"}
                 })
                 if state.get("evidence_mode"):
                     accumulated_state["evidence_mode"] = state["evidence_mode"]
