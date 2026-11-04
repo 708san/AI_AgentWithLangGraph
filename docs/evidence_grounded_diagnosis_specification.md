@@ -387,7 +387,7 @@ class State(TypedDict):
 
 `memory`は旧経路との互換用に残すが、新しい`createDiagnosisNode`、`reflectionNode`、`finalDiagnosisNode`は`evidence`と`sources`を使う。
 
-Zero-shotのLLM応答は、`selection_reason`を含むログ専用の一時モデルとして受け取り、理由を除いた`ZeroShotOutput`だけをStateへ渡す。正規化前の候補は`zeroShotRaw`、正規化結果は`zeroShotResult`として評価用に独立保存し、`selection_reason`や検証メタデータは公開レスポンスへ出さない。疾患名・OMIM IDの検証状態は`match`、`normalized`、`mismatch`、`unconfirmed`、`duplicate`、`excluded`を区別して記録する。
+Zero-shotのLLM応答は、`selection_reason`を含むログ専用の一時モデルとして受け取り、理由を除いた`ZeroShotOutput`だけをStateへ渡す。正規化前の候補は`zeroShotRaw`、正規化結果は`zeroShotResult`として評価用に独立保存し、`selection_reason`や検証メタデータは公開レスポンスへ出さない。ローカルOMIMレコードで解決できるOMIM IDを病名同定の正本とし、病名はそのレコードのcanonical labelに揃える。不一致の元病名は検証ログに残し、候補自体は除外しない。ローカルレコードがないOMIM IDは原病名・IDを保持して`unconfirmed`とする。OMIM IDがない場合は、病名との互換性を確認できたときだけIDを付与し、それ以外は病名を残して`unconfirmed`とする。Zero-shotの全候補を保持し、表示rankは応答順で1から振り直し、モデルrankは検証ログに記録する。検証statusは`match`、`normalized`、`mismatch`、`unconfirmed`を記録し、重複と除外の有無は別のフラグで表す。
 
 暫定診断は全統合候補を候補IDごとに一度ずつ含める。候補外ID、候補欠落、重複ID、順位の不整合、候補IDとOMIM IDの不一致、明らかな病名不一致を検出する。問題があれば検証内容を記録した上で1回だけ再生成し、再生成後も不正なら全入力候補を含む安全な代替出力を作る。候補外の候補を黙って削除して成功扱いにはしない。
 

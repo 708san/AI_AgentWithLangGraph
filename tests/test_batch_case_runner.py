@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from testCode.phenopacket_image_case.run_all_cases import (
     _case_is_complete,
+    _case_entries,
     _load_rows,
     _prepare_case_for_run,
     _run_one_case,
@@ -28,6 +29,22 @@ class BatchCaseRunnerTests(unittest.TestCase):
             order, rows = _load_rows(metadata)
             self.assertEqual(order, ["2", "1"])
             self.assertEqual([row["image_id"] for row in rows["2"]], ["img-2a", "img-2b"])
+
+    def test_duplicate_patient_rows_get_separate_image_qualified_cases(self):
+        order = ["2"]
+        rows = {
+            "2": [
+                {"patient_id": "2", "image_id": "img-2a"},
+                {"patient_id": "2", "image_id": "img-2b"},
+            ]
+        }
+        entries = _case_entries(order, rows)
+        self.assertEqual([entry["patient_id"] for entry in entries], ["2", "2"])
+        self.assertEqual([entry["metadata_occurrence"] for entry in entries], [0, 1])
+        self.assertEqual(
+            [entry["case_key"] for entry in entries],
+            ["patient_2__image_img-2a", "patient_2__image_img-2b"],
+        )
 
     def test_case_is_complete_requires_matching_config_and_contract(self):
         with tempfile.TemporaryDirectory() as tmp:

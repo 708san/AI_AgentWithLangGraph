@@ -73,6 +73,50 @@ Each run saves `input/phenopacket.json`, `input/metadata_row.json`, a copy of
 the face image, `process.log`, `logs/`, `node_results/`, the final JSON result,
 and `execution_summary.json` under `run_outputs/legacy_phenopacket/`.
 
+### Running the current v2 route on all 74 old cases
+
+The reusable batch runner defaults to `Data/OldData/browser_input_74_cases.tsv`
+and `Data/OldData/test_images/`:
+
+```bash
+python testCode/phenopacket_image_case/run_all_cases.py \
+  --model gpt-5-2 \
+  --max-parallel-cases 2 \
+  --pubmed-max-workers 2 \
+  --evidence-max-workers 2
+```
+
+`--max-parallel-cases` controls how many patient/image cases run at once. It
+defaults to 2; increase it gradually because each case also makes concurrent
+PubMed and Evidence requests.
+
+PhenoBrainはデフォルトで無効です。使用する場合だけ
+`--use-phenobrain` を指定してください。
+
+Completed run folders can be summarized with the existing artifacts, without
+calling the diagnosis APIs again:
+
+```bash
+.venv/bin/python scripts/analyze_old74_v2_results.py
+```
+
+The tables and graphs are written to
+`testCode/phenopacket_image_case/runs/all_test/analysis/`.
+
+Each patient is written to a stable folder under
+`testCode/phenopacket_image_case/runs/all_test/`.
+`results/phase_results.json` contains the tool phases, normalized and raw
+Zero-shot output, `tentativeDiagnosis`, reflection, evidence, and
+`finalDiagnosis`; `node_results/<patient_id>/<node>.json` contains one snapshot
+per graph node, and `logs/agent.log` contains the prompts and formatted node
+results. The batch is resumable: press Ctrl-C and rerun the same command; cases
+whose completed output and input/configuration fingerprints match are skipped,
+while the interrupted case is safely retried with its partial artifacts
+preserved until that retry starts. Duplicate patient IDs with different face
+images are executed separately under image-qualified case folders, while
+`case_manifest.json` and `summary.json` retain `patient_id` for optional later
+aggregation. Use `--force` to rebuild completed cases.
+
 ---
 ## Log
 If you set enable_log=True when creating the pipeline, all node results and prompts will be saved in a human-readable log file under the log/ directory.

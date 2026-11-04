@@ -55,12 +55,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-DEFAULT_METADATA = (
-    PROJECT_ROOT
-    / "Data/NewData/phenopacket_v1.0.27_New"
-    / "phenopacket_test_metadata_v0.1.27_GM_v1.1.5_with_phenopacket_data.tsv"
-)
-DEFAULT_IMAGE_DIR = PROJECT_ROOT / "Data/NewData/phenopacket_v1.0.27_New/test_images"
+# The operational batch target is the checked-in legacy 74-case set.  The
+# paths remain overridable for the newer Phenopacket image set.
+DEFAULT_METADATA = PROJECT_ROOT / "Data/OldData/browser_input_74_cases.tsv"
+DEFAULT_IMAGE_DIR = PROJECT_ROOT / "Data/OldData/test_images"
 DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "testCode/phenopacket_image_case/runs"
 EVIDENCE_MODE = "v2"
 
@@ -89,6 +87,17 @@ def _write_json(path: Path, value: Any) -> None:
         json.dumps(_jsonable(value), ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+
+
+def _mark_phase_status(results_dir: Path, status: str, **extra: Any) -> None:
+    """Update the incremental phase artifact without hiding partial output."""
+    path = results_dir / "phase_results.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
+    except (OSError, json.JSONDecodeError):
+        payload = {}
+    payload.update({"status": status, **extra})
+    _write_json(path, payload)
 
 
 def _positive_int(value: str) -> int:
@@ -263,7 +272,12 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Select a zero-based duplicate-row occurrence for batch runs.",
     )
-    parser.add_argument("--model", default="gpt-4o")
+    parser.add_argument(
+        "--case-key",
+        default=None,
+        help="Stable output key; use an image-qualified key for duplicate patient IDs.",
+    )
+    parser.add_argument("--model", default="gpt-5-2")
     parser.add_argument("--max-flow-iterations", type=int, default=1)
     parser.add_argument("--use-phenobrain", action="store_true")
     parser.add_argument("--use-absent-hpo", action="store_true")
@@ -284,6 +298,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _build_parser().parse_args()
+    case_key = args.case_key or f"patient_{args.patient_id}"
     started = time.monotonic()
     started_at = datetime.now(timezone.utc)
     run_dir: Path | None = None
@@ -336,6 +351,7 @@ def main() -> int:
         shutil.copy2(source_image, copied_image)
 
         run_info = {
+            "case_key": case_key,
             "patient_id": str(args.patient_id),
             "phenopacket_id": phenopacket.get("id"),
             "metadata_occurrence": args.metadata_occurrence,
@@ -357,6 +373,7 @@ def main() -> int:
 
         run_config = {
             "runner": "phenopacket_image_case_v2",
+            "case_key": case_key,
             "patient_id": str(args.patient_id),
             "metadata_source": str(metadata_path),
             "metadata_sha256": run_info["metadata_sha256"],
@@ -477,8 +494,10 @@ def main() -> int:
                 + "; ".join(output_contract["errors"])
             )
 
+        _mark_phase_status(results_dir, "completed", finished_at=datetime.now(timezone.utc).isoformat())
         summary = {
             "status": "completed",
+            "case_key": case_key,
             "patient_id": str(args.patient_id),
             "model": args.model,
             "evidence_mode": EVIDENCE_MODE,
@@ -499,22 +518,64 @@ def main() -> int:
                 "runtime_log": str(runtime_log_path),
                 "state": str(node_results_dir / f"{args.patient_id}.json"),
                 "public_response": str(public_response_path),
+                "phase_results": str(results_dir / "phase_results.json"),
                 "external_response": str(external_response_path),
                 "relevant_results": str(results_dir / "relevant_results.json"),
                 "final_diagnosis": str(results_dir / "finalDiagnosis.json"),
                 "output_contract": str(results_dir / "output_contract.json"),
                 "timing_summary": str(results_dir / "timing_summary.json"),
                 "node_results": str(node_results_dir),
+                "per_node_results": str(node_results_dir / str(args.patient_id)),
             },
         }
         _write_json(run_dir / "execution_summary.json", summary)
         _print_timing_summary(timing)
         print(json.dumps(summary, ensure_ascii=False, indent=2))
         return 0
+    except KeyboardInterrupt as exc:
+        # Preserve the node/phase snapshots already emitted by the pipeline.
+        _mark_phase_status(
+            (run_dir / "results") if run_dir else Path(args.output_root),
+            "interrupted",
+            interrupted_at=datetime.now(timezone.utc).isoformat(),
+        )
+        if run_dir is None:
+            run_dir = Path(args.output_root).expanduser().resolve() / f"interrupted_{int(time.time())}"
+            run_dir.mkdir(parents=True, exist_ok=True)
+        _write_json(
+            run_dir / "results" / "partial_results.json",
+            {
+                "execution_status": "interrupted",
+                "case_key": case_key,
+                "patient_id": str(args.patient_id),
+                "phase_results": str(run_dir / "results" / "phase_results.json"),
+                "node_results": str(run_dir / "node_results" / f"{args.patient_id}.json"),
+            },
+        )
+        _write_json(
+            run_dir / "execution_summary.json",
+            {
+                "status": "interrupted",
+                "case_key": case_key,
+                "patient_id": str(args.patient_id),
+                "run_dir": str(run_dir),
+                "interrupted_at": datetime.now(timezone.utc).isoformat(),
+                "phase_results": str(run_dir / "results" / "phase_results.json"),
+                "node_results": str(run_dir / "node_results" / f"{args.patient_id}.json"),
+            },
+        )
+        raise
     except Exception as exc:
         if run_dir is None:
             run_dir = Path(args.output_root).expanduser().resolve() / f"failed_{int(time.time())}"
             run_dir.mkdir(parents=True, exist_ok=True)
+        _mark_phase_status(
+            run_dir / "results",
+            "failed",
+            failed_at=datetime.now(timezone.utc).isoformat(),
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
         partial_node_results: dict[str, Any] = {}
         node_result_path = run_dir / "node_results" / f"{args.patient_id}.json"
         if node_result_path.is_file():
@@ -526,8 +587,10 @@ def main() -> int:
             run_dir / "results" / "partial_results.json",
             {
                 "execution_status": "failed",
+                "case_key": case_key,
                 "patient_id": str(args.patient_id),
                 "partial_node_results": partial_node_results,
+                "phase_results": str(run_dir / "results" / "phase_results.json"),
             },
         )
         error_log = run_dir / "logs" / "runtime.log"
@@ -536,6 +599,7 @@ def main() -> int:
             traceback.print_exc(file=handle)
         summary = {
             "status": "failed",
+            "case_key": case_key,
             "patient_id": str(args.patient_id),
             "error_type": type(exc).__name__,
             "error": str(exc),
@@ -543,6 +607,7 @@ def main() -> int:
             "duration_seconds": round(time.monotonic() - started, 3),
             "runtime_log": str(error_log),
             "partial_results": str(run_dir / "results" / "partial_results.json"),
+            "phase_results": str(run_dir / "results" / "phase_results.json"),
             "node_results": str(node_result_path),
         }
         _write_json(run_dir / "execution_summary.json", summary)

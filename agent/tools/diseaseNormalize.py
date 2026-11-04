@@ -90,19 +90,20 @@ def normalize_gestalt_results(state: State) -> list:
 
 def normalize_zeroshot_results(state: State) -> Optional[ZeroShotOutput]:
     """
-    Stateを受け取り、その中のZeroShotOutputを正規化し、OMIM IDを付与し、重複を排除する。
+    State内のZero-shot病名を正規化する。照合不一致や重複でも候補は保持する。
     """
     zeroshot_output = state.get("zeroShotResult")
     if not zeroshot_output or not zeroshot_output.ans:
         return zeroshot_output
 
-    unique_omim_ids = set()
+    seen_candidate_keys = set()
     normalized_ans = []
     validation = []
 
     for diag in zeroshot_output.ans:
         original_name = diag.disease_name
         original_omim = diag.OMIM_id
+        model_rank = diag.rank
         cleaned_name = diag.disease_name.strip().strip('*')
         cleaned_name = re.sub(r'\s*\(.*\)\s*', '', cleaned_name).strip()
         disease_name_upper = cleaned_name.upper()
@@ -117,13 +118,17 @@ def normalize_zeroshot_results(state: State) -> Optional[ZeroShotOutput]:
             if names_compatible(cleaned_name, known_label, known_disease_aliases(supplied_id)):
                 status = "match" if cleaned_name.upper() == known_label.upper() else "normalized"
                 reason = "Disease name and OMIM identifier are compatible."
-                resolved_label = known_label
             else:
                 status = "mismatch"
-                reason = f"OMIM identifier maps to {known_label!r}, not the generated disease name."
-                # Do not replace an unrelated disease merely because an
-                # embedding happens to return a nearby label.
-                resolved_id = None
+                reason = (
+                    f"OMIM ID is authoritative; generated disease name was replaced "
+                    f"with its local canonical label {known_label!r}."
+                )
+            # A known OMIM record is the identity source of truth. Keep the
+            # generated label in zeroShotValidation for audit, canonicalize
+            # the public label, and retain the original rank and candidate.
+            resolved_id = supplied_id
+            resolved_label = known_label
         elif not supplied_id and cleaned_name:
             try:
                 omim_id, omim_label, sim = disease_normalize(disease_name_upper)
@@ -146,35 +151,35 @@ def normalize_zeroshot_results(state: State) -> Optional[ZeroShotOutput]:
         elif supplied_id:
             reason = "OMIM identifier is not present in the local database; candidate retained as unconfirmed."
 
+        # Keep every generated Zero-shot row. Record the model rank for audit,
+        # and use response order for a gap-free display rank.
         duplicate_key = resolved_id or cleaned_name.upper()
-        if status != "mismatch" and duplicate_key in unique_omim_ids:
-            validation.append({
-                "disease_name": original_name,
-                "OMIM_id": original_omim,
-                "status": "duplicate",
-                "reason": "The normalized disease identity was already emitted by another candidate.",
-                "excluded": True,
-                "exclusion_status": "excluded",
-            })
-            continue
-
-        excluded = status == "mismatch"
-        validation.append({
+        duplicate = duplicate_key in seen_candidate_keys
+        display_rank = len(normalized_ans) + 1
+        validation_item = {
             "disease_name": original_name,
             "OMIM_id": original_omim,
+            "rank": model_rank,
+            "display_rank": display_rank,
             "normalized_disease_name": resolved_label,
             "normalized_OMIM_id": resolved_id,
             "status": status,
             "reason": reason,
-            "excluded": excluded,
-            "exclusion_status": "excluded" if excluded else None,
-        })
-        if excluded:
-            continue
+            "duplicate": duplicate,
+            "excluded": False,
+            "exclusion_status": None,
+        }
+        if duplicate:
+            validation_item["duplicate_reason"] = (
+                "The normalized disease identity was already emitted by another candidate; "
+                "this row is retained to preserve the Zero-shot rank list."
+            )
+        validation.append(validation_item)
         diag.disease_name = resolved_label
         diag.OMIM_id = resolved_id
+        diag.rank = display_rank
         normalized_ans.append(diag)
-        unique_omim_ids.add(duplicate_key)
+        seen_candidate_keys.add(duplicate_key)
 
     state["zeroShotValidation"] = validation
     zeroshot_output.ans = normalized_ans
@@ -202,7 +207,12 @@ def disease_normalize(disease_name: str):
     
     # omim_mapping.jsonから正式病名を取得
     omim_id_num = extract_omim_number(omim_id_from_index)
-    omim_label = omim_mapping_by_number.get(omim_id_num, label_from_index)
+    canonical_id = canonical_omim_id(omim_id_from_index)
+    omim_label = (
+        known_disease_name(canonical_id)
+        or omim_mapping_by_number.get(omim_id_num)
+        or label_from_index
+    )
     
     return omim_id_from_index, omim_label, sim
 
@@ -221,9 +231,12 @@ def diseaseNormalizeForDiagnosis(Diagnosis):
         existing_omim_num = extract_omim_number(getattr(diag, "OMIM_id", None))
         if existing_omim_num:
             diag.OMIM_id = canonical_omim_id(existing_omim_num)
-            diag.disease_name = omim_mapping_by_number.get(
-                existing_omim_num,
-                diag.disease_name.strip().strip("*")
+            diag.disease_name = (
+                known_disease_name(diag.OMIM_id)
+                or omim_mapping_by_number.get(
+                    existing_omim_num,
+                    diag.disease_name.strip().strip("*"),
+                )
             )
             filtered_ans.append(diag)
             continue

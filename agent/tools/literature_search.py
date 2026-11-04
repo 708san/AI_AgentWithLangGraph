@@ -268,9 +268,12 @@ def matches_candidate_identity(article: dict[str, Any], candidate: MergedDisease
 
     Generic papers about a disease family remain eligible.  A paper that says
     CDLS4/type 4, however, must not be attached to the CDLS1 candidate merely
-    because both contain the broad phrase "Cornelia de Lange syndrome".
+    because both contain the broad phrase "Cornelia de Lange syndrome". Short
+    all-caps aliases are matched case-sensitively: BOFS must not match BOFs,
+    which is a common abbreviation for bioorganic fertilizers.
     """
-    haystack = f"{article.get('title', '')} {article.get('abstract', '')}".casefold()
+    raw_haystack = f"{article.get('title', '')} {article.get('abstract', '')}"
+    haystack = raw_haystack.casefold()
     disease_name = _clean_term(_candidate_value(candidate, "disease_name", ""))
     candidate_numbers = _subtype_numbers(disease_name)
     if not candidate_numbers:
@@ -282,15 +285,33 @@ def matches_candidate_identity(article: dict[str, Any], candidate: MergedDisease
     if candidate_numbers and article_numbers and candidate_numbers.isdisjoint(article_numbers):
         if family_terms and all(term in haystack for term in family_terms[:3]):
             return False
+    synonyms = [
+        _clean_term(value)
+        for value in (_candidate_value(candidate, "synonyms", []) or [])
+        if _clean_term(value)
+    ]
+    abbreviations = [
+        synonym for synonym in synonyms
+        if re.fullmatch(r"[A-Z][A-Z0-9-]{2,7}", synonym)
+    ]
     terms = [
         disease_name,
         " ".join(family_terms),
         re.sub(r"^omim:", "", _clean_term(_candidate_value(candidate, "OMIM_id", "")), flags=re.IGNORECASE),
-        *(_candidate_value(candidate, "synonyms", []) or []),
+        *(synonym for synonym in synonyms if synonym not in abbreviations),
         *(_candidate_value(candidate, "gene_symbols", []) or []),
     ]
     terms = [_clean_term(term).casefold() for term in terms if _clean_term(term)]
-    return any(len(term) >= 4 and term in haystack for term in terms)
+    if any(len(term) >= 4 and term in haystack for term in terms):
+        return True
+
+    return any(
+        re.search(
+            rf"(?<![A-Za-z0-9]){re.escape(alias)}(?![A-Za-z0-9])",
+            raw_haystack,
+        )
+        for alias in abbreviations
+    )
 
 
 def _matches_candidate(article: dict[str, Any], candidate: MergedDiseaseCandidateV2) -> bool:

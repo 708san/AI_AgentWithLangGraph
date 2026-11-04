@@ -477,6 +477,7 @@ For every supplied candidate return ReflectionFormatV2 with English and Japanese
 Do not drop a candidate solely because literature is insufficient; use `insufficient` or `not_retrieved` when appropriate. `not_retrieved` means no candidate-matched source was obtained in this run, not that no literature exists.
 Use only supplied candidate_id and evidence_id values. Keep evidence_ids identical across the bilingual analysis.
 Literature status must be supported only when a literature Evidence item supports the candidate. For each EvidenceAssessment, `supports_patient=yes` only when the claim describes a phenotype actually present in the patient; a disease-identity statement, mechanism, or a different/unique finding is not a patient match. Use `no` for a clear mismatch and `unknown` when the claim does not permit comparison.
+An Evidence claim that only says its source or excerpt is unrelated to the candidate is not a clinical contradiction. Do not set `correctness=false` or `literature_status=contradictory` for source-relevance failures.
 Explain in prose how the patient features relate to the disease claims in the Evidence. Do not treat an article about the candidate as support for every patient feature or for the candidate's overall fit.
 Do not create a separate match, impact, or limitation object; state uncertainty in the analysis text.
 Do not use a general medical-knowledge statement as if it came from a cited literature source.

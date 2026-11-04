@@ -89,7 +89,7 @@ Evidence抽出・原文抜粋検証
 - `State`に`sources`、`evidence`、`flow_iteration`、`max_flow_iterations`、validation情報を追加する。
 - State初期値に`evidence_mode="v2"`、`sources=[]`、`evidence=[]`を追加する。legacyは明示指定時だけ使用する。
 - OMIM正規化関数を共通化し、すべての入力境界で`OMIM:数字`にする。
-- Zero-shotは理由付き一時モデルをログ専用で使用し、理由を除いた候補だけをStateへ渡す。正規化前後と、match/normalized/mismatch/unconfirmed/duplicate/excludedの判定を評価用に保存する。
+- Zero-shotは理由付き一時モデルをログ専用で使用し、理由を除いた候補だけをStateへ渡す。既知のOMIM IDを疾患同定の正本とし、病名をローカルcanonical labelに揃える。元病名との不一致は検証ログに残すが候補を除外しない。IDがないときは名前の互換性を確認できた場合だけIDを付与し、候補は常に保持する。表示rankは応答順に1..Nへ振り、モデルrankは検証用に保存する。
 - 暫定診断は全統合候補を候補IDごとに一度ずつ含め、候補ID・OMIM・病名・順位を検証する。不整合や候補欠落時は1回だけ再生成し、再生成後も不正なら全候補を含む安全なフォールバックと検証メタデータを残す。
 
 重要な実装方針:

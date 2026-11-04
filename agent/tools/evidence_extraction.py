@@ -43,6 +43,32 @@ def _exact_excerpt_span(raw_content: str, excerpt: str) -> tuple[int, int] | Non
     return start, start + len(excerpt.strip())
 
 
+def _is_off_topic_rejection_claim(claim: str) -> bool:
+    """Detect a source-relevance disclaimer misreported as clinical evidence."""
+    text = _normalized_text(claim)
+    document_markers = (
+        "provided source content",
+        "provided chunk content",
+        "provided source",
+        "provided chunk",
+        "this paper focuses on",
+        "the paper focuses on",
+        "source content uses the abbreviation",
+    )
+    rejection_markers = (
+        " not ",
+        "does not contain",
+        "does not discuss",
+        "does not report any information about",
+        "does not provide",
+        "doesn't contain",
+        "doesn't discuss",
+    )
+    return any(marker in text for marker in document_markers) and any(
+        marker in text for marker in rejection_markers
+    )
+
+
 CHUNK_MAX_CHARS = int(os.getenv("EVIDENCE_CHUNK_MAX_CHARS", "3500"))
 MAX_CHUNKS_PER_SOURCE = int(os.getenv("EVIDENCE_MAX_CHUNKS_PER_SOURCE", "2"))
 MAX_CHUNKS_PER_CANDIDATE = int(os.getenv("EVIDENCE_MAX_CHUNKS_PER_CANDIDATE", "10"))
@@ -227,6 +253,7 @@ Every excerpt must be copied verbatim from the supplied CONTENT, without quotati
 Return English and Japanese claims with the same meaning. Do not invent a gene, inheritance pattern, phenotype, mechanism, or negative finding.
 Use only the supplied SOURCE_ID and CHUNK_ID values. If a required fact is not present in the supplied chunks, do not infer it.
 Prioritize established core clinical phenotypes that directly overlap the patient's present findings, then extract other disease-specific claims when the source explicitly reports them. A report that calls a finding "never described" or unique to one case does not establish that finding as a typical disease feature; do not label that claim as patient-supporting merely because it occurs in a patient with the disease. Keep disease identity/mechanism separate from phenotype overlap, and use support=unknown when the excerpt does not establish relevance to the candidate diagnosis.
+Do not report that a source/chunk is "not about" the candidate as a phenotype_mismatch or support=contradicts item. Source relevance is not clinical evidence; omit such a draft entirely.
 Try to cover disease identity, gene/inheritance, core phenotype, distinctive phenotype, patient overlap, and important limitations when the source provides them.
 Do not create a generic phenotype item when a more specific phenotype or genetic statement is present in the same source.
 For every item, return the SOURCE_ID, CHUNK_ID, and SECTION containing the excerpt.
@@ -290,6 +317,15 @@ def _extract_evidence_for_candidate(
         claim_en = str(_value(draft, "claim_en", "") or "").strip()
         claim_ja = str(_value(draft, "claim_ja", "") or "").strip()
         if not source or not excerpt or not claim_en or not claim_ja:
+            continue
+        if (
+            _value(draft, "support", "unknown") == "contradicts"
+            and _is_off_topic_rejection_claim(claim_en)
+        ):
+            print(
+                f"[Evidence] rejected off-topic source-relevance claim "
+                f"for {candidate.candidate_id} from {source_id}"
+            )
             continue
         if not _contains_excerpt(source.raw_content, excerpt):
             print(f"[Evidence] rejected non-verbatim excerpt from {source_id}")

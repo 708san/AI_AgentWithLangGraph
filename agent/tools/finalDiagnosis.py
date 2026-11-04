@@ -416,12 +416,24 @@ def createFinalDiagnosisV2(state: State) -> tuple[DiagnosisOutputV2 | None, str]
         return DiagnosisOutputV2(ans=[], evidence=evidence), ""
 
     patient_features = list((state.get("hpoDict", {}) or {}).values())
+    reflection_by_id = {
+        item.candidate_id: item
+        for item in (getattr(reflection, "ans", []) or [])
+    }
 
     def fallback() -> DiagnosisOutputV2:
         answers = []
         # The internal tentative differential may now contain every merged
         # candidate; the public final differential remains capped at five.
-        for original in tentative_items[:5]:
+        reflection_positive = [
+            item for item in tentative_items
+            if getattr(reflection_by_id.get(item.candidate_id), "correctness", False)
+        ][:5]
+        retained_ids = {item.candidate_id for item in reflection_positive}
+        fallback_items = reflection_positive + [
+            item for item in tentative_items if item.candidate_id not in retained_ids
+        ][: max(0, 5 - len(reflection_positive))]
+        for original in fallback_items:
             item = original.model_copy(deep=True)
             candidate_items = _candidate_evidence(item.candidate_id, evidence)
             item.description_en, item.description_ja = _fallback_description(
@@ -479,6 +491,7 @@ For every literature-grounded statement, place an inline marker immediately afte
 Do not invent absent findings or treat an unreported feature as absent.
 Do not claim a mechanism, inheritance pattern, or phenotype from general model knowledge unless it is present in the supplied Evidence.
 Return at most five diagnoses. The order of the returned items is the final differential order, and their rank fields MUST be exactly 1, 2, ..., N with no gaps or duplicates.
+Preserve every candidate with Reflection correctness=true in the final five whenever there are five or fewer such candidates. If more than five candidates have correctness=true, retain the five earliest in tentative order. Do not omit one of these retained candidates just because another candidate has more literature or a more polished description. If a retained candidate is missing from your generated answer, it will be restored from its tentative entry by the application.
 Rank 1 is the most likely final diagnosis. Do not copy any rank from a diagnostic tool or from an earlier provisional output; tool/provisional ranks are not final ranks.
 Use tentative order as one prioritization signal, together with phenotype compatibility and tool support. Do not change order merely because one candidate has more literature than another.
 
@@ -527,6 +540,37 @@ EVIDENCE:\n{evidence_text}"""
             print(f"[FinalDiagnosisV2] identity validation failed: {identity_errors}")
             return safe, prompt
         answers = result.model_copy(deep=True).ans
+        # Keep Reflection's retain-in-the-differential decision effective at
+        # the final selection boundary. Reflection still sees the full
+        # tentative list; the public final differential remains capped at 5.
+        positive_reflections = [
+            item for item in tentative_items
+            if getattr(reflection_by_id.get(item.candidate_id), "correctness", False)
+        ][:5]
+        generated_by_id = {item.candidate_id: item for item in answers}
+        retained_ids = {item.candidate_id for item in positive_reflections}
+        retained_answers = []
+        for tentative_item in positive_reflections:
+            final_item = generated_by_id.get(tentative_item.candidate_id)
+            if final_item is None:
+                final_item = tentative_item.model_copy(deep=True)
+                candidate_items = _candidate_evidence(final_item.candidate_id, evidence)
+                final_item.description_en, final_item.description_ja = _fallback_description(
+                    final_item.disease_name_en,
+                    patient_features,
+                    candidate_items,
+                )
+                print(
+                    f"[FinalDiagnosisV2] restored Reflection-positive candidate "
+                    f"{final_item.candidate_id} from tentative output"
+                )
+            retained_answers.append(final_item)
+        answers = retained_answers + [
+            item for item in answers
+            if item.candidate_id not in retained_ids
+        ][: max(0, 5 - len(retained_answers))]
+        for rank, item in enumerate(answers, 1):
+            item.rank = rank
         for item in answers:
             item.OMIM_id = canonical_omim_id(
                 authoritative_candidates[item.candidate_id].OMIM_id
