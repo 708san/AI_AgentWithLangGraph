@@ -1,10 +1,12 @@
 import os
 import json
 import fcntl  # 追加: 排他制御用
+import re
 from functools import wraps
 from pydantic import BaseModel
 import copy
 from typing import Any
+from datetime import datetime, timezone
 from agent.utils.response_serializer import (
     serialize_external_compatibility,
     serialize_node_result,
@@ -25,6 +27,162 @@ def _convert_pydantic_objects(obj):
     else:
         return obj
 
+
+def _safe_path_component(value: Any) -> str:
+    """Return a filesystem-safe component for per-node audit artifacts."""
+    component = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "unknown"))
+    return component.strip("._") or "unknown"
+
+
+def _record_node_status(
+    node_name: str,
+    status: str,
+    *,
+    error: Exception | None = None,
+    retry_count: int = 0,
+) -> None:
+    """Persist node lifecycle state without interfering with graph execution."""
+    result_dir = os.environ.get("AGENT_RESULT_DIR")
+    if not result_dir:
+        return
+    try:
+        os.makedirs(result_dir, exist_ok=True)
+        status_path = os.path.join(result_dir, "node_status.json")
+        lock_path = f"{status_path}.lock"
+        with open(lock_path, "a+", encoding="utf-8") as lock_handle:
+            fcntl.flock(lock_handle, fcntl.LOCK_EX)
+            try:
+                if os.path.exists(status_path):
+                    try:
+                        with open(status_path, encoding="utf-8") as status_handle:
+                            payload = json.load(status_handle)
+                    except (OSError, json.JSONDecodeError):
+                        payload = {}
+                else:
+                    payload = {}
+                nodes = payload.setdefault("nodes", {})
+                entry = nodes.setdefault(node_name, {"node": node_name})
+                now = datetime.now(timezone.utc).isoformat()
+                if status == "started":
+                    entry.update({
+                        "status": "running",
+                        "started_at": now,
+                        "finished_at": None,
+                        "retry_count": retry_count,
+                        "error_type": None,
+                        "error_message": None,
+                    })
+                else:
+                    entry.update({
+                        "status": status,
+                        "finished_at": now,
+                        "retry_count": retry_count,
+                    })
+                    if error is not None:
+                        entry.update({
+                            "error_type": type(error).__name__,
+                            "error_message": str(error),
+                        })
+                payload["updated_at"] = now
+                _write_json(status_path, payload)
+            finally:
+                fcntl.flock(lock_handle, fcntl.LOCK_UN)
+    except Exception as exc:
+        # Lifecycle bookkeeping must never turn a successful graph node into
+        # a failed node. The main artifacts remain authoritative.
+        print(f"[WARNING] Could not record status for node '{node_name}': {exc}")
+
+
+def _build_phase_results(
+    *,
+    patient_id: Any,
+    state: dict[str, Any],
+    data_for_saving: dict[str, Any],
+    public_state: dict[str, Any],
+    status: str = "in_progress",
+) -> dict[str, Any]:
+    """Build a compact, human/machine-readable view of every flow phase.
+
+    ``public_response.json`` is intentionally a frontend projection and hides
+    raw intermediate fields.  This separate artifact is for evaluation and
+    debugging, so it keeps the raw/normalized zero-shot and tentative stages,
+    each tool result, evidence, reflection, and final diagnosis together.
+    It is refreshed after every node, which makes partial runs inspectable.
+    """
+    node_results = data_for_saving.get("node_results", {})
+    if not isinstance(node_results, dict):
+        node_results = {}
+
+    accumulated = dict(state)
+    accumulated.update({
+        key: value
+        for key, value in data_for_saving.items()
+        if key not in {"node_results", "llm", "zero_shot_llm", "gestalt_matcher_result_loader"}
+    })
+
+    def pick(*keys: str) -> dict[str, Any]:
+        return {key: accumulated.get(key) for key in keys}
+
+    return _convert_pydantic_objects({
+        "schema_version": 1,
+        "status": status,
+        "patient_id": str(patient_id),
+        "evidence_mode": accumulated.get("evidence_mode"),
+        "completed_nodes": list(node_results.keys()),
+        "nodes": node_results,
+        "tool_results": pick(
+            "pubCaseFinder",
+            "PhenoBrain",
+            "phenoBrain",
+            "GestaltMatcher",
+            "hpoDict",
+            "absentHpoDict",
+            "zeroShotRaw",
+            "zeroShotResult",
+            "zeroShotValidation",
+            "webresources",
+            "phenotypeSearchResult",
+            "mergedDiseaseCandidates",
+        ),
+        "diagnosis_results": pick(
+            "tentativeRaw",
+            "tentativeDiagnosis",
+            "tentativeValidation",
+            "reflection",
+            "finalDiagnosis",
+        ),
+        "evidence_results": pick(
+            "sources",
+            "evidence",
+            "references",
+            "validation_status",
+            "validation_errors",
+            "flow_iteration",
+        ),
+        "public_response": public_state,
+    })
+
+
+def _write_phase_artifacts(
+    *,
+    result_dir: str,
+    node_result_dir: str,
+    patient_id: Any,
+    node_name: str,
+    node_snapshot: dict[str, Any],
+    phase_results: dict[str, Any],
+) -> None:
+    """Write atomic per-node and cumulative phase artifacts."""
+    patient_component = _safe_path_component(patient_id)
+    node_component = _safe_path_component(node_name)
+    per_node_dir = os.path.join(node_result_dir, patient_component)
+    os.makedirs(per_node_dir, exist_ok=True)
+    _write_json(
+        os.path.join(per_node_dir, f"{node_component}.json"),
+        node_snapshot,
+    )
+    _write_json(os.path.join(result_dir, "phase_results.json"), phase_results)
+
 def save_node_result(node_name: str, result_data: Any, state: dict[str, Any]) -> None:
     """Persist node output and refresh accumulated, externally consumable JSONs."""
     if not result_data or not isinstance(result_data, dict):
@@ -35,7 +193,10 @@ def save_node_result(node_name: str, result_data: Any, state: dict[str, Any]) ->
         node_result_dir = os.environ.get("AGENT_NODE_RESULT_DIR", res_dir)
         os.makedirs(res_dir, exist_ok=True)
         os.makedirs(node_result_dir, exist_ok=True)
-        out_path = os.path.join(node_result_dir, f"{patient_id}.json")
+        out_path = os.path.join(
+            node_result_dir,
+            f"{_safe_path_component(patient_id)}.json",
+        )
 
         if not os.path.exists(out_path):
             with open(out_path, "w", encoding="utf-8") as f:
@@ -70,16 +231,23 @@ def save_node_result(node_name: str, result_data: Any, state: dict[str, Any]) ->
                 # baseline, then let the persisted cumulative node results win.
                 accumulated_state = {
                     key: value for key, value in state.items()
-                    if key not in {"node_results", "llm", "gestalt_matcher_result_loader"}
+                    if key not in {"node_results", "llm", "zero_shot_llm", "gestalt_matcher_result_loader"}
                 }
                 accumulated_state.update({
                     key: value for key, value in data_for_saving.items()
-                    if key not in {"node_results", "llm", "gestalt_matcher_result_loader"}
+                    if key not in {"node_results", "llm", "zero_shot_llm", "gestalt_matcher_result_loader"}
                 })
                 if state.get("evidence_mode"):
                     accumulated_state["evidence_mode"] = state["evidence_mode"]
                 public_state = serialize_public_state(accumulated_state)
                 external_outputs = serialize_external_compatibility(accumulated_state)
+                node_snapshot = node_results[node_name]
+                phase_results = _build_phase_results(
+                    patient_id=patient_id,
+                    state=state,
+                    data_for_saving=data_for_saving,
+                    public_state=public_state,
+                )
 
                 serializable_data = _convert_pydantic_objects(data_for_saving)
                 f.seek(0)
@@ -97,6 +265,14 @@ def save_node_result(node_name: str, result_data: Any, state: dict[str, Any]) ->
                     else:
                         filename = f"{artifact_name}.json"
                     _write_json(os.path.join(res_dir, filename), artifact)
+                _write_phase_artifacts(
+                    result_dir=res_dir,
+                    node_result_dir=node_result_dir,
+                    patient_id=patient_id,
+                    node_name=node_name,
+                    node_snapshot=node_snapshot,
+                    phase_results=phase_results,
+                )
             finally:
                 fcntl.flock(f, fcntl.LOCK_UN)
     except Exception as e:
@@ -117,7 +293,13 @@ def save_result(node_name):
     def decorator(func):
         @wraps(func)
         def wrapper(state):
-            result_data = func(state)
+            _record_node_status(node_name, "started")
+            try:
+                result_data = func(state)
+            except Exception as exc:
+                _record_node_status(node_name, "failed", error=exc)
+                raise
+            _record_node_status(node_name, "completed")
             save_node_result(node_name, result_data, state)
             return result_data
         wrapper._saves_result = True

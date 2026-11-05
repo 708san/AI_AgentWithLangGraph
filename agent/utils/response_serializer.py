@@ -17,7 +17,7 @@ from pydantic import BaseModel
 INLINE_EVIDENCE_MARKER = re.compile(r"\[\[EVIDENCE:([^\]]+)\]\]")
 PUBLIC_PRIVATE_KEYS = {"prompt"}
 IMAGE_PATH_KEYS = {"imagePath", "image_path"}
-EXECUTION_ONLY_KEYS = {"llm", "gestalt_matcher_result_loader"}
+EXECUTION_ONLY_KEYS = {"llm", "zero_shot_llm", "gestalt_matcher_result_loader"}
 
 
 def omim_number(value: Any) -> Any:
@@ -125,6 +125,20 @@ def _reference_record(
     }
 
 
+def _bibliographic_reference(reference: dict[str, Any]) -> dict[str, Any]:
+    """Project a Reference without embedding Evidence rows."""
+    return {
+        "number": reference.get("number"),
+        "source_name": reference.get("source_name"),
+        "title": reference.get("title"),
+        "identifier": reference.get("identifier"),
+        "url": reference.get("url"),
+        "authors": reference.get("authors", []),
+        "journal": reference.get("journal"),
+        "publication_year": reference.get("publication_year"),
+    }
+
+
 def _build_references(
     sources: list[dict[str, Any]],
     evidence: list[dict[str, Any]],
@@ -174,6 +188,85 @@ def _item_reference_numbers(
         if number is not None and number not in numbers:
             numbers.append(number)
     return numbers
+
+
+def _traceable_evidence(
+    evidence_ids: list[str],
+    evidence_by_id: dict[str, dict[str, Any]],
+    number_by_source_id: dict[str, int],
+) -> list[dict[str, Any]]:
+    """Project the Evidence used by one result with its public Reference number."""
+    rows = []
+    for evidence_id in evidence_ids:
+        item = evidence_by_id.get(str(evidence_id))
+        if not item:
+            continue
+        source_id = str(item.get("source_id") or "")
+        reference_number = number_by_source_id.get(source_id)
+        if reference_number is None:
+            continue
+        rows.append({
+            "evidence_id": item.get("evidence_id"),
+            "source_id": item.get("source_id"),
+            "candidate_id": item.get("candidate_id"),
+            "claim_en": item.get("claim_en"),
+            "claim_ja": item.get("claim_ja"),
+            "excerpt": item.get("excerpt"),
+            "support": item.get("support"),
+            "confidence": item.get("confidence"),
+            "source_section": item.get("source_section"),
+            "source_start": item.get("source_start"),
+            "source_end": item.get("source_end"),
+            "reference_number": reference_number,
+        })
+    return rows
+
+
+def _reference_details(
+    references: list[dict[str, Any]],
+    evidence_ids: list[str],
+    evidence_by_id: dict[str, dict[str, Any]],
+    number_by_source_id: dict[str, int],
+) -> list[dict[str, Any]]:
+    """Return only References and Evidence used by one projected result."""
+    evidence_rows = _traceable_evidence(evidence_ids, evidence_by_id, number_by_source_id)
+    rows_by_number: dict[int, list[dict[str, Any]]] = {}
+    for row in evidence_rows:
+        rows_by_number.setdefault(int(row["reference_number"]), []).append(row)
+    details = []
+    for reference in references:
+        number = reference.get("number")
+        if number not in rows_by_number:
+            continue
+        detail = dict(reference)
+        detail["evidence"] = rows_by_number[number]
+        details.append(detail)
+    return details
+
+
+def _reference_subset(
+    references: list[dict[str, Any]],
+    evidence_ids: list[str],
+    evidence_by_id: dict[str, dict[str, Any]],
+    number_by_source_id: dict[str, int],
+) -> list[dict[str, Any]]:
+    """Filter a public Reference list to the claims used by a result."""
+    details = _reference_details(
+        references, evidence_ids, evidence_by_id, number_by_source_id
+    )
+    subset = []
+    for reference in details:
+        record = dict(reference)
+        record["evidence"] = [
+            {
+                "claim_en": item.get("claim_en"),
+                "claim_ja": item.get("claim_ja"),
+                "excerpt": item.get("excerpt"),
+            }
+            for item in reference.get("evidence", [])
+        ]
+        subset.append(record)
+    return subset
 
 
 def _replace_inline_markers(
@@ -261,6 +354,7 @@ def _project_diagnosis(
     if not isinstance(output, dict) or "ans" not in output:
         return output
     used_numbers: set[int] = set()
+    used_evidence_ids: list[str] = []
     for item in output.get("ans", []) or []:
         if not isinstance(item, dict):
             continue
@@ -272,26 +366,50 @@ def _project_diagnosis(
             for evidence_id in item.get("evidence_ids", []) or []
             if str(evidence_id) in evidence_by_id
         ]
-        cited_ids = (
-            _cited_evidence_ids(item.get("description_en"), item_evidence, "en")
-            | _cited_evidence_ids(item.get("description_ja"), item_evidence, "ja")
-        )
+        # The structured evidence_ids field is authoritative for the
+        # candidate-to-literature relationship. Inline markers are still
+        # converted in the descriptions, but must not be the only way to
+        # expose the Evidence used by this diagnosis.
+        selected_ids = [
+            str(evidence_id)
+            for evidence_id in item.get("evidence_ids", []) or []
+            if str(evidence_id) in evidence_by_id
+        ]
+        used_evidence_ids.extend(selected_ids)
         item["description_en"] = _add_citations(item.get("description_en"), item_evidence, number_by_source_id, "en")
         item["description_ja"] = _add_citations(item.get("description_ja"), item_evidence, number_by_source_id, "ja")
         item["description"] = _add_citations(item.get("description"), item_evidence, number_by_source_id, "en")
         numbers = _item_reference_numbers(
-            {"evidence_ids": sorted(cited_ids)}, evidence_by_id, number_by_source_id
+            {"evidence_ids": selected_ids}, evidence_by_id, number_by_source_id
         )
         used_numbers.update(numbers)
         item["citation_numbers"] = numbers
+        item["reference_numbers"] = numbers
+        item["evidence"] = _traceable_evidence(
+            selected_ids, evidence_by_id, number_by_source_id
+        )
+        item["reference_details"] = _reference_details(
+            references, selected_ids, evidence_by_id, number_by_source_id
+        )
         # These fields are useful inside State but are not display data.
         item.pop("evidence_ids", None)
         item.pop("reasoning", None)
         item.pop("citations", None)
     # All citation numbers share the top-level Reference namespace. Diagnosis
     # blocks contain only the subset they use, retaining the original numbers.
-    used_references = [item for item in references if item["number"] in used_numbers]
+    used_references = _reference_subset(
+        references,
+        list(dict.fromkeys(used_evidence_ids)),
+        evidence_by_id,
+        number_by_source_id,
+    )
     output["references"] = used_references
+    output["reference_details"] = _reference_details(
+        references,
+        list(dict.fromkeys(used_evidence_ids)),
+        evidence_by_id,
+        number_by_source_id,
+    )
     output["reference"] = "\n".join(
         f"[{item['number']}] {_reference_label(item)}" for item in used_references
     ) or None
@@ -304,6 +422,7 @@ def _project_reflection(
     value: Any,
     evidence_by_id: dict[str, dict[str, Any]],
     number_by_source_id: dict[str, int],
+    references: list[dict[str, Any]] | None = None,
 ) -> Any:
     if value is None:
         return None
@@ -344,6 +463,16 @@ def _project_reflection(
             item.get("diagnosis_analysis_ja"), item_evidence, number_by_source_id, "ja"
         )
         item["citation_numbers"] = numbers
+        item["reference_numbers"] = numbers
+        item["evidence"] = _traceable_evidence(
+            sorted(cited_ids), evidence_by_id, number_by_source_id
+        )
+        item["reference_details"] = _reference_details(
+            references or [],
+            sorted(cited_ids),
+            evidence_by_id,
+            number_by_source_id,
+        )
         item.pop("evidence_ids", None)
         item.pop("reasoning", None)
         item.pop("citations", None)
@@ -370,7 +499,7 @@ def _project_v2(response: dict[str, Any]) -> dict[str, Any]:
             number_by_source_id, evidence_by_id,
         )
     response["reflection"] = _project_reflection(
-        response.get("reflection"), evidence_by_id, number_by_source_id
+        response.get("reflection"), evidence_by_id, number_by_source_id, references
     )
     candidates = response.get("mergedDiseaseCandidates")
     if isinstance(candidates, list):
@@ -415,8 +544,19 @@ def _compatibility_diagnosis_item(item: dict[str, Any]) -> dict[str, Any]:
         "disease_name_ja": item.get("disease_name_ja"),
         "description_en": item.get("description_en"),
         "description_ja": item.get("description_ja"),
+        "literature_basis_en": item.get("literature_basis_en", ""),
+        "literature_basis_ja": item.get("literature_basis_ja", ""),
+        "tool_considerations_en": item.get("tool_considerations_en", ""),
+        "tool_considerations_ja": item.get("tool_considerations_ja", ""),
+        "model_inference_en": item.get("model_inference_en", ""),
+        "model_inference_ja": item.get("model_inference_ja", ""),
+        "uncertainty_en": item.get("uncertainty_en", ""),
+        "uncertainty_ja": item.get("uncertainty_ja", ""),
         "literature_status": item.get("literature_status"),
         "citation_numbers": item.get("citation_numbers", []),
+        "reference_numbers": item.get("reference_numbers", item.get("citation_numbers", [])),
+        "evidence": item.get("evidence", []),
+        "reference_details": item.get("reference_details", []),
     }
 
 
@@ -431,6 +571,7 @@ def _compatibility_diagnosis_block(value: Any) -> dict[str, Any] | None:
         ],
         "reference": value.get("reference"),
         "references": value.get("references", []),
+        "reference_details": value.get("reference_details", []),
         "validation_status": value.get("validation_status"),
         "validation_errors": value.get("validation_errors", []),
     }
@@ -452,14 +593,18 @@ def _compatibility_reflection_block(
             for number in item.get("citation_numbers", []) or []
             if str(number).isdigit() and int(number) in references_by_number
         ]
-        legacy_references = [
-            f"[{number}] {_reference_label(references_by_number[number])}"
+        # Reflection needs the same bibliographic projection as Final, but its
+        # public References deliberately do not carry nested Evidence. The
+        # reflection answer may still expose its separate ``evidence`` field;
+        # it is not embedded in or joined to these Reference records.
+        reflection_references = [
+            _bibliographic_reference(references_by_number[number])
             for number in numbers
         ]
         answers.append(
             {
                 # Established reflection keys.
-                "references": legacy_references,
+                "references": reflection_references,
                 "Correctness": item.get("correctness"),
                 "disease_name": item.get("disease_name", item.get("disease_name_en", "")),
                 "PatientSummary": item.get("patient_summary_en", ""),
@@ -472,11 +617,34 @@ def _compatibility_reflection_block(
                 "patient_summary_ja": item.get("patient_summary_ja"),
                 "diagnosis_analysis_en": item.get("diagnosis_analysis_en"),
                 "diagnosis_analysis_ja": item.get("diagnosis_analysis_ja"),
+                "literature_basis_en": item.get("literature_basis_en", ""),
+                "literature_basis_ja": item.get("literature_basis_ja", ""),
+                "tool_considerations_en": item.get("tool_considerations_en", ""),
+                "tool_considerations_ja": item.get("tool_considerations_ja", ""),
+                "model_inference_en": item.get("model_inference_en", ""),
+                "model_inference_ja": item.get("model_inference_ja", ""),
+                "uncertainty_en": item.get("uncertainty_en", ""),
+                "uncertainty_ja": item.get("uncertainty_ja", ""),
                 "literature_status": item.get("literature_status"),
                 "citation_numbers": numbers,
+                "reference_numbers": numbers,
+                "evidence": item.get("evidence", []),
+                "reference_details": reflection_references,
             }
         )
-    return {"ans": answers}
+    used_numbers = []
+    for item in answers:
+        for number in item.get("reference_numbers", []):
+            if number not in used_numbers:
+                used_numbers.append(number)
+    return {
+        "ans": answers,
+        "references": [
+            _bibliographic_reference(references_by_number[number])
+            for number in used_numbers
+            if number in references_by_number
+        ],
+    }
 
 
 def serialize_external_compatibility(state: dict) -> dict[str, Any]:

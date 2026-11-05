@@ -69,7 +69,9 @@ def _metadata_for(omim_id: str | None, disease_name: str) -> dict[str, Any]:
     synonyms = [item.strip() for item in str(record.get("synonym") or "").split(",") if item.strip()]
     phenotype_labels = [item.strip() for item in (record.get("phenotype") or []) if str(item).strip()]
     return {
-        "disease_name": disease_name or record.get("disease_name") or "Unknown disease",
+        # A known OMIM ID is the canonical identity; use its local title even
+        # when an upstream tool supplied a different label.
+        "disease_name": record.get("disease_name") or disease_name or "Unknown disease",
         "synonyms": list(dict.fromkeys(synonyms)),
         "phenotype_labels": list(dict.fromkeys(phenotype_labels)),
         "gene_symbols": [],
@@ -98,26 +100,21 @@ def known_disease_aliases(omim_id: Any) -> list[str]:
 
 
 def names_compatible(observed: Any, expected: Any, synonyms: Iterable[Any] = ()) -> bool:
-    """Conservative compatibility check for aliases and subtype formatting.
+    """Compare normalized disease labels against the canonical name and aliases.
 
-    This is deliberately not a fuzzy disease replacer. It accepts exact names,
-    contained OMIM-style titles, and substantial token overlap, but does not
-    turn an unrelated name into the expected disease merely because an ID exists.
+    This deliberately uses one deterministic rule: exact or contained matches
+    after presentation normalization. Candidate retention is handled by the
+    caller; a failed identity match must not itself remove a candidate.
     """
     observed_norm = normalize_disease_name(observed)
     expected_norm = normalize_disease_name(expected)
     if not observed_norm or not expected_norm:
         return False
     alternatives = [expected_norm] + [normalize_disease_name(item) for item in synonyms]
-    observed_tokens = set(observed_norm.split())
     for alternative in alternatives:
         if not alternative:
             continue
         if observed_norm == alternative or observed_norm in alternative or alternative in observed_norm:
-            return True
-        alternative_tokens = set(alternative.split())
-        overlap = len(observed_tokens & alternative_tokens) / max(len(observed_tokens | alternative_tokens), 1)
-        if overlap >= 0.6:
             return True
     return False
 
@@ -144,6 +141,7 @@ def to_v2_candidate(candidate: MergedDiseaseCandidate | dict[str, Any]) -> Merge
     omim_id = canonical_omim_id(data.get("OMIM_id") or data.get("omim_id"))
     disease_name = str(data.get("disease_name") or "Unknown disease").strip()
     metadata = _metadata_for(omim_id, disease_name)
+    disease_name = metadata["disease_name"]
     supports = data.get("tool_supports")
     if supports is None:
         supports = data.get("tool_rankings", [])

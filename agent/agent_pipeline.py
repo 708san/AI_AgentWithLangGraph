@@ -3,7 +3,7 @@ import datetime
 from langgraph.graph import StateGraph, START, END
 from agent.state.state_types import State
 from agent.utils.logger import log_node_result
-from agent.utils.result_saver import save_node_result
+from agent.utils.result_saver import _record_node_status, save_node_result
 from agent.utils.hpo_importance_filter import filter_hpo_by_importance
 from agent.llm.azure_llm_instance import get_llm_instance
 from agent.utils.response_serializer import serialize_public_state
@@ -19,6 +19,12 @@ from agent.nodes import (
     diagnosisOutputValidationNode,
 )
 from agent.state.state_types import ReflectionOutputV2
+
+
+DEFAULT_MODEL_NAME = "gpt-5-2"
+DEFAULT_REASONING_EFFORT = "medium"
+DEFAULT_ZERO_SHOT_REASONING_EFFORT = "medium"
+DEFAULT_MAX_FLOW_ITERATIONS = 0
 
 
 NODE_DEFINITIONS = [
@@ -74,7 +80,15 @@ def _has_any_correct_reflection(reflection) -> bool:
 class RareDiseaseDiagnosisPipeline:
     DEFAULT_EVIDENCE_MODE = "v2"
 
-    def __init__(self, model_name: str = 'gpt-4o', enable_log=False, log_filename=None, log_dir=None):
+    def __init__(
+        self,
+        model_name: str = DEFAULT_MODEL_NAME,
+        enable_log=False,
+        log_filename=None,
+        log_dir=None,
+        reasoning_effort: str | None = DEFAULT_REASONING_EFFORT,
+        zero_shot_reasoning_effort: str | None = None,
+    ):
         self.enable_log = enable_log
         self.logfile_path = None
         self.log_filename = log_filename
@@ -84,7 +98,23 @@ class RareDiseaseDiagnosisPipeline:
         if self.enable_log:
             self.logfile_path = self._get_logfile_path()
         
-        self.llm = get_llm_instance(model_name)
+        self.llm = get_llm_instance(model_name, reasoning_effort=reasoning_effort)
+        # Zero-shot is intentionally more deliberate than the other calls by
+        # default.  Passing the literal string "none" remains an explicit
+        # opt-out; omitting the option uses medium reasoning.
+        resolved_zero_shot_reasoning_effort = (
+            zero_shot_reasoning_effort
+            if zero_shot_reasoning_effort is not None
+            else DEFAULT_ZERO_SHOT_REASONING_EFFORT
+        )
+        self.zero_shot_llm = (
+            get_llm_instance(
+                model_name,
+                reasoning_effort=resolved_zero_shot_reasoning_effort,
+            )
+            if resolved_zero_shot_reasoning_effort != reasoning_effort
+            else self.llm
+        )
             
     def _get_logfile_path(self):
         log_dir = self.log_dir or os.path.join(os.getcwd(), "log")
@@ -116,7 +146,17 @@ class RareDiseaseDiagnosisPipeline:
         # ラップして各ノードの結果をログに記録
         def wrap_node(node_func, node_name):
             def wrapped(state):
-                result = node_func(state)
+                decorated = getattr(node_func, "_saves_result", False)
+                if decorated:
+                    result = node_func(state)
+                else:
+                    _record_node_status(node_name, "started")
+                    try:
+                        result = node_func(state)
+                    except Exception as exc:
+                        _record_node_status(node_name, "failed", error=exc)
+                        raise
+                    _record_node_status(node_name, "completed")
                 self._log(node_name, result, state)
                 # Decorated nodes already persist themselves. Persist only
                 # nodes without the legacy decorator so graph execution still
@@ -176,7 +216,7 @@ class RareDiseaseDiagnosisPipeline:
             def after_v2_reflection_edge(state: State):
                 reflection = state.get("reflection")
                 iteration = state.get("flow_iteration", 0)
-                maximum = state.get("max_flow_iterations", 1)
+                maximum = state.get("max_flow_iterations", DEFAULT_MAX_FLOW_ITERATIONS)
                 if not isinstance(reflection, ReflectionOutputV2) or not reflection.ans:
                     return "ProceedToFinalDiagnosisNode"
                 # Retry only candidates whose retrieval/Evidence remains
@@ -256,7 +296,7 @@ class RareDiseaseDiagnosisPipeline:
         
         return graph_builder.compile()
 
-    def _build_initial_state(self, hpo_list, image_path=None, absent_hpo_list=None, onset=None, sex=None, patient_id=None, use_absentHPO=False, filter_impotance=False, use_phenobrain=False, evidence_mode=DEFAULT_EVIDENCE_MODE, max_flow_iterations=1, gestalt_matcher_result_loader=None):
+    def _build_initial_state(self, hpo_list, image_path=None, absent_hpo_list=None, onset=None, sex=None, patient_id=None, use_absentHPO=False, filter_impotance=False, use_phenobrain=False, evidence_mode=DEFAULT_EVIDENCE_MODE, max_flow_iterations=DEFAULT_MAX_FLOW_ITERATIONS, gestalt_matcher_result_loader=None):
         if filter_impotance:
             hpo_list = filter_hpo_by_importance(hpo_list)
             absent_hpo_list = filter_hpo_by_importance(absent_hpo_list or [])
@@ -298,10 +338,11 @@ class RareDiseaseDiagnosisPipeline:
             "sex": sex if sex else "Unknown",
             "patient_id": patient_id if patient_id else "unknown",
             "llm": self.llm,
+            "zero_shot_llm": self.zero_shot_llm,
             "gestalt_matcher_result_loader": gestalt_matcher_result_loader,
         }
 
-    def run(self, hpo_list, image_path=None, verbose=False, absent_hpo_list=None, onset=None, sex=None, patient_id=None, use_absentHPO=False, filter_impotance=False, use_phenobrain=False, public_response=True, evidence_mode=DEFAULT_EVIDENCE_MODE, max_flow_iterations=1):
+    def run(self, hpo_list, image_path=None, verbose=False, absent_hpo_list=None, onset=None, sex=None, patient_id=None, use_absentHPO=False, filter_impotance=False, use_phenobrain=False, public_response=True, evidence_mode=DEFAULT_EVIDENCE_MODE, max_flow_iterations=DEFAULT_MAX_FLOW_ITERATIONS):
         if evidence_mode not in {"legacy", "v2"}:
             raise ValueError("evidence_mode must be 'legacy' or 'v2'")
         if max_flow_iterations < 0:
@@ -340,7 +381,7 @@ class RareDiseaseDiagnosisPipeline:
         filter_impotance=False,
         use_phenobrain=False,
         evidence_mode=DEFAULT_EVIDENCE_MODE,
-        max_flow_iterations=1,
+        max_flow_iterations=DEFAULT_MAX_FLOW_ITERATIONS,
         gestalt_matcher_result_loader=None,
     ):
         """Yield ``(node_name, node_update)`` as each graph node completes.

@@ -17,7 +17,7 @@ from ..llm.prompt import prompt_dict, build_prompt
 from ..llm.llm_wrapper import is_content_filter_error
 from ..utils.response_serializer import omim_number
 from .diagnosis import attach_diagnosis_references
-from .candidate_metadata import canonical_omim_id, enrich_candidates
+from .candidate_metadata import canonical_omim_id, enrich_candidates, names_compatible
 from .evidence_validation import validate_v2_identity_fields
 
 
@@ -77,6 +77,52 @@ def _fallback_description(
         f"この実行では{disease_name}について検証済みの文献Evidenceを確認できませんでした。"
         "これは関連文献が存在しないことを意味しません。候補は、提供された表現型と診断ツールの情報に基づく鑑別仮説として扱います。",
     )
+
+
+def _fill_fallback_provenance(
+    item: DiagnosisFormatV2,
+    candidate,
+    evidence: list[EvidenceItem],
+) -> DiagnosisFormatV2:
+    """Keep fallback output explicit about evidence, tools, inference, and uncertainty."""
+    candidate_items = _candidate_evidence(item.candidate_id, evidence)
+    claims_en = [entry.claim_en for entry in candidate_items if entry.support in {"supports", "contradicts"}]
+    claims_ja = [entry.claim_ja for entry in candidate_items if entry.support in {"supports", "contradicts"}]
+    supports = getattr(candidate, "tool_supports", []) if candidate is not None else []
+    tool_summary = ", ".join(
+        f"{support.tool} rank={support.rank}"
+        for support in supports
+        if support.rank is not None
+    ) or "no diagnostic-tool ranking was available"
+    if not item.literature_basis_en:
+        item.literature_basis_en = " ".join(claims_en) if claims_en else (
+            "No candidate-matched literature claim was validated in this run."
+        )
+    if not item.literature_basis_ja:
+        item.literature_basis_ja = " ".join(claims_ja) if claims_ja else (
+            "この実行では候補に対応する文献主張を検証できませんでした。"
+        )
+    if not item.tool_considerations_en:
+        item.tool_considerations_en = f"Diagnostic-tool signals considered: {tool_summary}."
+    if not item.tool_considerations_ja:
+        item.tool_considerations_ja = f"考慮した診断ツールの情報: {tool_summary}。"
+    if not item.model_inference_en:
+        item.model_inference_en = (
+            "Model inference: the final ranking combines the supplied phenotype, tool signals, and validated Evidence; it is not itself a literature fact."
+        )
+    if not item.model_inference_ja:
+        item.model_inference_ja = (
+            "モデル推論: 最終順位は提供された表現型、ツール情報、検証済みEvidenceを統合した推論であり、それ自体が文献事実ではありません。"
+        )
+    if not item.uncertainty_en:
+        item.uncertainty_en = (
+            "Uncertainty: this fallback does not establish a molecular diagnosis, and retrieval or patient-data limitations may remain."
+        )
+    if not item.uncertainty_ja:
+        item.uncertainty_ja = (
+            "不確実性: このフォールバック結果は分子診断を確定するものではなく、文献取得または患者情報の不足が残る可能性があります。"
+        )
+    return item
 
 
 def _apply_evidence_contract(
@@ -158,6 +204,92 @@ def _apply_evidence_contract(
 
     item.evidence_ids = evidence_ids
     return item
+
+
+def _repair_final_generation(
+    result: FinalDiagnosisGenerationOutput,
+    authoritative_candidates: dict[str, object],
+    evidence: list[EvidenceItem],
+) -> tuple[FinalDiagnosisGenerationOutput | None, list[str], list[str]]:
+    """Repair safe structured-output drift before resorting to fallback.
+
+    The model is allowed to write prose, but candidate identity belongs to the
+    application.  Rank gaps, stale disease labels/OMIM formatting, and
+    candidate-mismatched Evidence IDs are deterministic normalization issues;
+    they should not discard an otherwise usable Final result.  Unknown or
+    duplicate candidate IDs are different: there is no safe way to infer which
+    candidate the model intended, so those cases remain fallback conditions.
+    """
+    items = list(getattr(result, "ans", []) or [])
+    if not items:
+        return None, [], ["Final diagnosis returned no candidates."]
+    if len(items) > 5:
+        return None, [], ["Final diagnosis returned more than five candidates."]
+
+    candidate_ids = [getattr(item, "candidate_id", None) for item in items]
+    unknown = sorted({candidate_id for candidate_id in candidate_ids if candidate_id not in authoritative_candidates})
+    duplicates = sorted({candidate_id for candidate_id in candidate_ids if candidate_ids.count(candidate_id) > 1})
+    fatal_errors = []
+    if unknown:
+        fatal_errors.append(f"Unknown candidate_id: {unknown}")
+    if duplicates:
+        fatal_errors.append(f"Duplicate candidate_id values: {duplicates}")
+    if fatal_errors:
+        return None, [], fatal_errors
+
+    repaired = result.model_copy(deep=True)
+    notes: list[str] = []
+    evidence_by_candidate: dict[str, set[str]] = {}
+    for evidence_item in evidence:
+        evidence_by_candidate.setdefault(evidence_item.candidate_id, set()).add(
+            evidence_item.evidence_id
+        )
+
+    for item in repaired.ans:
+        candidate = authoritative_candidates[item.candidate_id]
+        expected_omim = canonical_omim_id(getattr(candidate, "OMIM_id", None))
+        actual_omim = canonical_omim_id(item.OMIM_id)
+        if actual_omim != expected_omim:
+            notes.append(f"canonicalized OMIM_id for {item.candidate_id}")
+            item.OMIM_id = expected_omim
+        else:
+            # Also normalize presentation such as a bare six-digit OMIM value.
+            item.OMIM_id = expected_omim
+
+        expected_name = str(getattr(candidate, "disease_name", "") or "").strip()
+        # The post-repair validator intentionally checks the canonical
+        # candidate title, not aliases.  Normalize aliases such as
+        # ``STUVE-WIEDEMANN SYNDROME`` to the authoritative title here so a
+        # harmless model naming variant cannot force fallback.
+        if expected_name and not names_compatible(item.disease_name_en, expected_name):
+            notes.append(f"canonicalized disease_name_en for {item.candidate_id}")
+            item.disease_name_en = expected_name
+        if not str(item.disease_name_ja or "").strip():
+            item.disease_name_ja = expected_name or item.disease_name_en
+
+        allowed_evidence = evidence_by_candidate.get(item.candidate_id, set())
+        filtered_evidence_ids = [
+            evidence_id
+            for evidence_id in item.evidence_ids
+            if evidence_id in allowed_evidence
+        ]
+        if filtered_evidence_ids != list(item.evidence_ids):
+            notes.append(f"filtered invalid evidence_ids for {item.candidate_id}")
+            item.evidence_ids = filtered_evidence_ids
+
+    original_ranks = [item.rank for item in repaired.ans]
+    normalized_ranks = list(range(1, len(repaired.ans) + 1))
+    if original_ranks != normalized_ranks:
+        notes.append("renumbered Final diagnosis ranks")
+    for rank, item in enumerate(repaired.ans, 1):
+        item.rank = rank
+
+    remaining_errors = validate_v2_identity_fields(
+        repaired, list(authoritative_candidates.values())
+    )
+    if remaining_errors:
+        return None, notes, remaining_errors
+    return repaired, notes, []
 
 
 def _is_content_filter_error(error: Exception) -> bool:
@@ -416,13 +548,43 @@ def createFinalDiagnosisV2(state: State) -> tuple[DiagnosisOutputV2 | None, str]
         return DiagnosisOutputV2(ans=[], evidence=evidence), ""
 
     patient_features = list((state.get("hpoDict", {}) or {}).values())
+    reflection_by_id = {
+        item.candidate_id: item
+        for item in (getattr(reflection, "ans", []) or [])
+    }
 
     def fallback() -> DiagnosisOutputV2:
         answers = []
         # The internal tentative differential may now contain every merged
         # candidate; the public final differential remains capped at five.
-        for original in tentative_items[:5]:
+        reflection_positive = [
+            item for item in tentative_items
+            if getattr(reflection_by_id.get(item.candidate_id), "correctness", False)
+        ][:5]
+        retained_ids = {item.candidate_id for item in reflection_positive}
+        fallback_items = reflection_positive + [
+            item for item in tentative_items if item.candidate_id not in retained_ids
+        ][: max(0, 5 - len(reflection_positive))]
+        for original in fallback_items:
             item = original.model_copy(deep=True)
+            candidate = next(
+                (
+                    candidate
+                    for candidate in enrich_candidates(state.get("mergedDiseaseCandidates", []) or [])
+                    if candidate.candidate_id == item.candidate_id
+                ),
+                None,
+            )
+            if candidate is not None:
+                item.OMIM_id = canonical_omim_id(candidate.OMIM_id)
+                if not names_compatible(
+                    item.disease_name_en,
+                    candidate.disease_name,
+                    getattr(candidate, "synonyms", []) or [],
+                ):
+                    item.disease_name_en = candidate.disease_name
+                if not str(item.disease_name_ja or "").strip():
+                    item.disease_name_ja = candidate.disease_name
             candidate_items = _candidate_evidence(item.candidate_id, evidence)
             item.description_en, item.description_ja = _fallback_description(
                 item.disease_name_en,
@@ -430,7 +592,10 @@ def createFinalDiagnosisV2(state: State) -> tuple[DiagnosisOutputV2 | None, str]
                 candidate_items,
             )
             item = _apply_evidence_contract(item, evidence, patient_features, sources)
+            item = _fill_fallback_provenance(item, candidate, evidence)
             answers.append(item)
+        for rank, item in enumerate(answers, 1):
+            item.rank = rank
         return DiagnosisOutputV2(ans=answers, evidence=evidence)
 
     if not llm:
@@ -461,24 +626,29 @@ def createFinalDiagnosisV2(state: State) -> tuple[DiagnosisOutputV2 | None, str]
     tool_support_text = "\n".join(
         f"{item.candidate_id} | consensus_count={getattr(candidates_by_id.get(item.candidate_id), 'consensus_count', 0)} | "
         f"best_tool_rank={getattr(candidates_by_id.get(item.candidate_id), 'best_rank', 'unknown')} | "
-        f"tools={', '.join(f'{support.tool}:rank={support.rank},score={support.score}' for support in getattr(candidates_by_id.get(item.candidate_id), 'tool_supports', [])) or 'none'} | "
-        f"candidate_phenotypes={', '.join(getattr(candidates_by_id.get(item.candidate_id), 'phenotype_labels', [])[:20]) or 'none'}"
+        f"tools={', '.join(f'{support.tool}:rank={support.rank},score={support.score}' for support in getattr(candidates_by_id.get(item.candidate_id), 'tool_supports', [])) or 'none'}"
         for item in tentative_items
     )
     prompt = f"""You are the final clinical-genetics reviewer.
 Produce a bilingual final differential diagnosis by integrating patient phenotype fit, the diagnostic-tool signals, Reflection, and validated literature Evidence.
-Rank candidates primarily by the specificity and overall compatibility of the supplied patient findings with the candidate phenotype profile; use diagnostic-tool rank and cross-tool consensus as supporting prioritization signals, then use Reflection to resolve inclusion or uncertainty. A tool returning a candidate is not itself evidence of clinical fit. Prefer candidates with multiple matching findings or one genuinely distinctive match over candidates matching only generic neurodevelopmental findings.
+Rank candidates primarily by the specificity and overall compatibility of the supplied patient findings, validated literature Evidence, Reflection, and clearly labeled model inference; use diagnostic-tool rank and cross-tool consensus as supporting prioritization signals. A tool returning a candidate is not itself evidence of clinical fit. Prefer candidates with multiple matching findings or one genuinely distinctive match over candidates matching only generic neurodevelopmental findings.
 Literature retrieval success or the number of retrieved papers must not determine candidate rank. Missing or weakly retrieved literature is neutral, not evidence against a candidate. A candidate with correctness=true remains eligible for the top five even when literature_status is not_retrieved; exclude or strongly deprioritize it only for a stated clinical incompatibility or decisive, identity-matched contradictory Evidence.
-Every diagnosis must use an existing candidate_id and only existing evidence_ids. Do not introduce disease-specific claims unsupported by the supplied Evidence or candidate phenotype profile.
+Every diagnosis must use an existing candidate_id and only existing evidence_ids. Do not introduce disease-specific claims unsupported by the supplied Evidence, patient findings, tool signals, or clearly labeled model inference.
 A candidate may be described as literature-supported only when a validated literature Evidence item supports it. Tool rankings are not citations.
-If no usable literature Evidence was retrieved, say that no candidate-matched literature Evidence was available in this run; do not imply that no literature exists. Explain the candidate's phenotype/tool rationale without presenting it as a literature claim.
+If no usable literature Evidence was retrieved, say that no candidate-matched literature Evidence was available in this run; do not imply that no literature exists. Explain the patient's clinical findings and tool rationale without presenting either as a literature claim.
 Keep the English and Japanese descriptions semantically aligned and use the same evidence_ids.
 Explain the concrete patient features in relation to the supplied literature claims and identify important uncertainty.
-Write a substantive multi-sentence explanation for each diagnosis. Connect patient findings to the supplied candidate phenotype profile and, where available, specific literature claims; explain the clinical interpretation and remaining uncertainty. Do not return only a conclusion such as "supported" or "not supported".
+Write a substantive multi-sentence explanation for each diagnosis. Connect patient findings to the supplied Evidence and tool signals, and use general medical knowledge only as clearly labeled model inference; explain the clinical interpretation and remaining uncertainty. Do not return only a conclusion such as "supported" or "not supported".
 For every literature-grounded statement, place an inline marker immediately after that specific statement using [[EVIDENCE:EVD-...]]. The cited Evidence claim must directly support the whole statement; a paper merely being about the disease is not enough. Do not cite tool-derived phenotype profiles as if they came from literature. Do not place a marker at the end of an unrelated paragraph. Use only supplied evidence_id values and pair the same markers with semantically equivalent English and Japanese statements. Do not use numeric [1] markers; the serializer will convert internal markers to reference numbers.
 Do not invent absent findings or treat an unreported feature as absent.
-Do not claim a mechanism, inheritance pattern, or phenotype from general model knowledge unless it is present in the supplied Evidence.
+Do not present a mechanism, inheritance pattern, or phenotype from general model knowledge as a literature-supported fact unless it is present in the supplied Evidence. If such knowledge informs the ranking, put it only in the clearly labeled model_inference fields.
+Populate literature_basis_en/ja with a concise summary of the supplied literature Evidence only.
+Populate tool_considerations_en/ja with the relevant diagnostic-tool signals only; tool signals are not citations.
+Populate model_inference_en/ja with clearly labeled clinical interpretation that combines the supplied phenotype, tool signals, and literature. General model knowledge may be used here only as inference, never as a literature claim or Evidence.
+Populate uncertainty_en/ja with missing data, conflicting findings, retrieval limitations, and differential uncertainty.
+Do not put [[EVIDENCE:...]] markers in these four provenance fields; use the description fields for inline literature citations.
 Return at most five diagnoses. The order of the returned items is the final differential order, and their rank fields MUST be exactly 1, 2, ..., N with no gaps or duplicates.
+Preserve every candidate with Reflection correctness=true in the final five whenever there are five or fewer such candidates. If more than five candidates have correctness=true, retain the five earliest in tentative order. Do not omit one of these retained candidates just because another candidate has more literature or a more polished description. If a retained candidate is missing from your generated answer, it will be restored from its tentative entry by the application.
 Rank 1 is the most likely final diagnosis. Do not copy any rank from a diagnostic tool or from an earlier provisional output; tool/provisional ranks are not final ranks.
 Use tentative order as one prioritization signal, together with phenotype compatibility and tool support. Do not change order merely because one candidate has more literature than another.
 
@@ -486,7 +656,7 @@ PATIENT_HPO: {', '.join((state.get('hpoDict', {}) or {}).values())}
 PATIENT_ABSENT_HPO: {', '.join((state.get('absentHpoDict', {}) or {}).values()) if state.get('use_absentHPO') else 'N/A'}
 The tentative order is the initial phenotype/tool differential created before literature retrieval; its order is useful, but it is not evidence of literature coverage.
 TENTATIVE:\n{tentative_text}
-TOOL_AND_CANDIDATE_PHENOTYPE_SUPPORT:\n{tool_support_text}
+TOOL_SUPPORT:\n{tool_support_text}
 REFLECTION:\n{reflection_text}
 EVIDENCE:\n{evidence_text}"""
     try:
@@ -512,26 +682,64 @@ EVIDENCE:\n{evidence_text}"""
                     "OMIM_id": item.OMIM_id,
                 }])[0],
             )
-        identity_errors = validate_v2_identity_fields(
-            result, list(authoritative_candidates.values())
+        repaired_result, repair_notes, repair_errors = _repair_final_generation(
+            result,
+            authoritative_candidates,
+            evidence,
         )
-        if len(getattr(result, "ans", []) or []) > 5:
-            identity_errors.append("Final diagnosis returned more than five candidates.")
-        if identity_errors:
+        if repaired_result is None:
             safe = fallback()
             safe.validation_status = "partial"
             safe.validation_errors = [
-                "Final diagnosis generation failed identity validation.",
-                *identity_errors,
+                "Final diagnosis generation could not be safely repaired; fallback was used.",
+                *repair_errors,
             ]
-            print(f"[FinalDiagnosisV2] identity validation failed: {identity_errors}")
+            print(f"[FinalDiagnosisV2] fallback required after repair failure: {repair_errors}")
             return safe, prompt
-        answers = result.model_copy(deep=True).ans
+        if repair_notes:
+            print(f"[FinalDiagnosisV2] repaired structured output: {repair_notes}")
+        answers = repaired_result.ans
+        # Keep Reflection's retain-in-the-differential decision effective at
+        # the final selection boundary. Reflection still sees the full
+        # tentative list; the public final differential remains capped at 5.
+        positive_reflections = [
+            item for item in tentative_items
+            if getattr(reflection_by_id.get(item.candidate_id), "correctness", False)
+        ][:5]
+        generated_by_id = {item.candidate_id: item for item in answers}
+        retained_ids = {item.candidate_id for item in positive_reflections}
+        retained_answers = []
+        for tentative_item in positive_reflections:
+            final_item = generated_by_id.get(tentative_item.candidate_id)
+            if final_item is None:
+                final_item = tentative_item.model_copy(deep=True)
+                candidate_items = _candidate_evidence(final_item.candidate_id, evidence)
+                final_item.description_en, final_item.description_ja = _fallback_description(
+                    final_item.disease_name_en,
+                    patient_features,
+                    candidate_items,
+                )
+                print(
+                    f"[FinalDiagnosisV2] restored Reflection-positive candidate "
+                    f"{final_item.candidate_id} from tentative output"
+                )
+            retained_answers.append(final_item)
+        answers = retained_answers + [
+            item for item in answers
+            if item.candidate_id not in retained_ids
+        ][: max(0, 5 - len(retained_answers))]
+        for rank, item in enumerate(answers, 1):
+            item.rank = rank
         for item in answers:
             item.OMIM_id = canonical_omim_id(
                 authoritative_candidates[item.candidate_id].OMIM_id
             )
             item = _apply_evidence_contract(item, evidence, patient_features, sources)
+            item = _fill_fallback_provenance(
+                item,
+                authoritative_candidates.get(item.candidate_id),
+                evidence,
+            )
         return DiagnosisOutputV2(ans=answers, evidence=evidence), prompt
     except Exception as exc:
         print(f"[FinalDiagnosisV2] structured generation failed: {exc}")

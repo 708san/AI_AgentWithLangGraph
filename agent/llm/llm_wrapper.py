@@ -19,13 +19,22 @@ def is_content_filter_error(error: Exception) -> bool:
 
 
 class AzureOpenAIWrapper:
-    def __init__(self, model_name, azure_endpoint, api_key, deployment_name, api_version):
+    def __init__(
+        self,
+        model_name,
+        azure_endpoint,
+        api_key,
+        deployment_name,
+        api_version,
+        reasoning_effort=None,
+    ):
         # 設定を保持（再構築時に使用）
         self.model_name = model_name
         self.azure_endpoint = azure_endpoint
         self.api_key = api_key
         self.deployment_name = deployment_name
         self.api_version = api_version
+        self.reasoning_effort = reasoning_effort
         
         # デフォルトのトークン数
         self.default_max_tokens = 8192 if model_name == 'gpt-4o' else 15000
@@ -70,8 +79,20 @@ class AzureOpenAIWrapper:
             llm_params['extra_body'] = {
                 "max_completion_tokens": max_completion_tokens,
                 "verbosity": "medium",
-                "reasoning_effort": "none"
+                "reasoning_effort": self.reasoning_effort or "none",
             }
+        elif self.model_name == 'gpt-5-4':
+            # GPT-5.4 is called through the Responses API.  AzureChatOpenAI
+            # exposes the Responses request fields as native LangChain
+            # parameters; this keeps reasoning effort separate from the
+            # older Chat Completions extra_body path above.
+            llm_params.update({
+                "use_responses_api": True,
+                "output_version": "responses/v1",
+                "reasoning": {"effort": self.reasoning_effort or "none"},
+                "max_tokens": max_completion_tokens,
+                "verbosity": "medium",
+            })
         
         return AzureChatOpenAI(**llm_params)
     

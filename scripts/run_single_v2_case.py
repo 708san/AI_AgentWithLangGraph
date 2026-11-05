@@ -46,7 +46,11 @@ def _jsonable(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return _jsonable(value.model_dump())
     if isinstance(value, dict):
-        return {str(key): _jsonable(item) for key, item in value.items() if key != "llm"}
+        return {
+            str(key): _jsonable(item)
+            for key, item in value.items()
+            if key not in {"llm", "zero_shot_llm"}
+        }
     if isinstance(value, (list, tuple)):
         return [_jsonable(item) for item in value]
     if isinstance(value, (str, int, float, bool)) or value is None:
@@ -176,7 +180,19 @@ def _build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         help="Artifact directory. Defaults to local_artifacts/single_case_runs/<timestamp>.",
     )
-    parser.add_argument("--model", default="gpt-4o", help="LLM model/deployment name.")
+    parser.add_argument("--model", default="gpt-5-2", help="LLM model/deployment name.")
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=("none", "low", "medium", "high", "xhigh"),
+        default="medium",
+        help="Reasoning effort for GPT-5 models. Defaults to medium.",
+    )
+    parser.add_argument(
+        "--zero-shot-reasoning-effort",
+        choices=("none", "low", "medium", "high", "xhigh"),
+        default="medium",
+        help="Separate reasoning effort for Zero-shot. Defaults to medium.",
+    )
     parser.add_argument(
         "--evidence-mode",
         choices=("v2", "legacy"),
@@ -186,7 +202,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-flow-iterations",
         type=int,
-        default=1,
+        default=0,
         help="Maximum literature retry iterations after Reflection.",
     )
     parser.add_argument(
@@ -212,8 +228,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--evidence-max-workers",
         type=_positive_int,
-        default=2,
-        help="Maximum concurrent candidate Evidence extractions. Defaults to 2.",
+        default=3,
+        help="Maximum concurrent candidate Evidence extractions. Defaults to 3.",
     )
     return parser
 
@@ -276,6 +292,8 @@ def main() -> int:
 
         pipeline = RareDiseaseDiagnosisPipeline(
             model_name=args.model,
+            reasoning_effort=args.reasoning_effort,
+            zero_shot_reasoning_effort=args.zero_shot_reasoning_effort,
             enable_log=True,
             log_filename="agent.log",
             log_dir=str(log_dir),

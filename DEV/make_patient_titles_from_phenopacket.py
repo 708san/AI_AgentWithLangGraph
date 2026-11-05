@@ -158,7 +158,7 @@ def main() -> int:
     parser.add_argument("--phenopacket_dir", required=True, help="Root dir that contains Phenopacket JSON files.")
     parser.add_argument("--image_dir", default=None, help="Dir that contains patient images (optional).")
     parser.add_argument("--out_tsv", required=True, help="Output TSV path.")
-    parser.add_argument("--model", type=str, default="gpt-4o", choices=["gpt-4o", "gpt-5-1", "gpt-5-2"], help="Azure OpenAI model name.")
+    parser.add_argument("--model", type=str, default="gpt-5-2", choices=["gpt-4o", "gpt-5-1", "gpt-5-2"], help="Azure OpenAI model name.")
     parser.add_argument("--max_features", type=int, default=12, help="Max number of present/absent features to show to the LLM.")
     parser.add_argument("--dry_run", action="store_true", help="Do not call LLM; output rule-based title instead.")
     args = parser.parse_args()

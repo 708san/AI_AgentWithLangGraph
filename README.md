@@ -73,6 +73,50 @@ Each run saves `input/phenopacket.json`, `input/metadata_row.json`, a copy of
 the face image, `process.log`, `logs/`, `node_results/`, the final JSON result,
 and `execution_summary.json` under `run_outputs/legacy_phenopacket/`.
 
+### Running the current v2 route on all 74 old cases
+
+The reusable batch runner defaults to `Data/OldData/browser_input_74_cases.tsv`
+and `Data/OldData/test_images/`:
+
+```bash
+python testCode/phenopacket_image_case/run_all_cases.py \
+  --model gpt-5-2 \
+  --max-parallel-cases 2 \
+  --pubmed-max-workers 1 \
+  --evidence-max-workers 2
+```
+
+`--max-parallel-cases` controls how many patient/image cases run at once. It
+defaults to 2; increase it gradually because each case also makes concurrent
+PubMed and Evidence requests.
+
+PhenoBrainはデフォルトで無効です。使用する場合だけ
+`--use-phenobrain` を指定してください。
+
+Completed run folders can be summarized with the existing artifacts, without
+calling the diagnosis APIs again:
+
+```bash
+.venv/bin/python scripts/analyze_old74_v2_results.py
+```
+
+The tables and graphs are written to
+`testCode/phenopacket_image_case/runs/all_test/analysis/`.
+
+Each patient is written to a stable folder under
+`testCode/phenopacket_image_case/runs/all_test/`.
+`results/phase_results.json` contains the tool phases, normalized and raw
+Zero-shot output, `tentativeDiagnosis`, reflection, evidence, and
+`finalDiagnosis`; `node_results/<patient_id>/<node>.json` contains one snapshot
+per graph node, and `logs/agent.log` contains the prompts and formatted node
+results. The batch is resumable: press Ctrl-C and rerun the same command; cases
+whose completed output and input/configuration fingerprints match are skipped,
+while the interrupted case is safely retried with its partial artifacts
+preserved until that retry starts. Duplicate patient IDs with different face
+images are executed separately under image-qualified case folders, while
+`case_manifest.json` and `summary.json` retain `patient_id` for optional later
+aggregation. Use `--force` to rebuild completed cases.
+
 ---
 ## Log
 If you set enable_log=True when creating the pipeline, all node results and prompts will be saved in a human-readable log file under the log/ directory.
@@ -86,6 +130,31 @@ You must set the following in your .env file (project root):
 ```
 GESTALT_API_USER=your_username
 GESTALT_API_PASS=your_password
+```
+
+For the GPT-5.4 execution route, also configure the Azure deployment used by
+the repository and choose the reasoning effort explicitly when running a case:
+
+```dotenv
+AZURE_OPENAI_5-4_ENDPOINT=your_endpoint
+AZURE_OPENAI_5-4_API_KEY=your_api_key
+AZURE_OPENAI_5-4_DEPLOYMENT_NAME=your_deployment
+AZURE_OPENAI_5-4_API_VERSION=your_api_version
+AZURE_LLM_REASONING_EFFORT=medium
+```
+
+The single-case runner accepts `--model gpt-5-4`,
+`--reasoning-effort {none,low,medium,high,xhigh}`, and the optional
+`--zero-shot-reasoning-effort` override. The default reasoning effort for the
+main flow is `AZURE_LLM_REASONING_EFFORT` or `none`; Zero-shot defaults to
+`medium`. For example, to explicitly use medium reasoning only for Zero-shot:
+
+```bash
+python testCode/phenopacket_image_case/run_one_case.py \
+  --patient-id 272 \
+  --model gpt-5-4 \
+  --reasoning-effort none \
+  --zero-shot-reasoning-effort medium
 ```
 
 ---

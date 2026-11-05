@@ -387,11 +387,11 @@ class State(TypedDict):
 
 `memory`は旧経路との互換用に残すが、新しい`createDiagnosisNode`、`reflectionNode`、`finalDiagnosisNode`は`evidence`と`sources`を使う。
 
-Zero-shotのLLM応答は、`selection_reason`を含むログ専用の一時モデルとして受け取り、理由を除いた`ZeroShotOutput`だけをStateへ渡す。正規化前の候補は`zeroShotRaw`、正規化結果は`zeroShotResult`として評価用に独立保存し、`selection_reason`や検証メタデータは公開レスポンスへ出さない。疾患名・OMIM IDの検証状態は`match`、`normalized`、`mismatch`、`unconfirmed`、`duplicate`、`excluded`を区別して記録する。
+Zero-shotのLLM応答は、`selection_reason`を含むログ専用の一時モデルとして受け取り、理由を除いた`ZeroShotOutput`だけをStateへ渡す。正規化前の候補は`zeroShotRaw`、正規化結果は`zeroShotResult`として評価用に独立保存し、`selection_reason`や検証メタデータは公開レスポンスへ出さない。ローカルOMIMレコードで解決できるOMIM IDを病名同定の正本とし、病名はそのレコードのcanonical labelに揃える。不一致の元病名は検証ログに残し、既知のOMIMレコードがある候補はcanonical labelへ統一して公開候補に残す。ローカルレコードがないOMIM IDは`unconfirmed`として監査情報に残す。OMIM IDがない場合は、病名との互換性を確認できたときだけIDを付与し、病名・OMIMの両方を確定できない候補は`unconfirmed_identity`として公開Zero-shot候補から除外する。除外後の表示rankは1から連番で振り直し、元のモデルrankと除外理由は検証ログに記録する。検証statusは`match`、`normalized`、`mismatch`、`unconfirmed`を記録し、重複と除外の有無は別のフラグで表す。
 
 暫定診断は全統合候補を候補IDごとに一度ずつ含める。候補外ID、候補欠落、重複ID、順位の不整合、候補IDとOMIM IDの不一致、明らかな病名不一致を検出する。問題があれば検証内容を記録した上で1回だけ再生成し、再生成後も不正なら全入力候補を含む安全な代替出力を作る。候補外の候補を黙って削除して成功扱いにはしない。
 
-初期Stateでは、公開実行のデフォルトとして`evidence_mode="v2"`、`sources=[]`、`evidence=[]`、`flow_iteration=0`、`max_flow_iterations=1`、`validation_status="not_run"`として初期化する。旧ルートは`evidence_mode="legacy"`を明示した場合だけ選択する。
+初期Stateでは、公開実行のデフォルトとして`evidence_mode="v2"`、`sources=[]`、`evidence=[]`、`flow_iteration=0`、`max_flow_iterations=0`、`validation_status="not_run"`として初期化する。旧ルートは`evidence_mode="legacy"`を明示した場合だけ選択する。文献検索の既定worker数は1、Evidence抽出の既定worker数は2である。必要な場合は実行時に明示指定して変更できる。
 
 ## 7. 目標フロー
 
@@ -499,6 +499,18 @@ Q6: "primary disease name" AND distinctive_HPO
 
 WikipediaやDDGSは背景情報・追加候補探索には利用できるが、最終診断の主要なliterature Evidenceにはしない。
 
+PubMed E-utilitiesが一時的に利用できない場合は、同じ候補・同じSourceRecord契約で
+Europe PMC Articles REST APIへ切り替える。これは一般Web検索への置換ではなく、
+PubMedを含むライフサイエンス文献の検索・抄録取得を行う文献APIのフォールバックである。
+1実行中にNCBIの500/502/503/504またはタイムアウトを検知した場合、候補ごとの再試行を
+続けず、PubMedをUnavailableとして扱う。Europe PMCも失敗した場合は、文献が存在しない
+とは判断せず、`literature_status="not_retrieved"`として実行ログにプロバイダ障害を残す。
+
+NCBI E-utilitiesの自動取得では`tool`と`email`を設定し、APIキーを使用する場合は
+`api_key`も付与する。リクエストはプロセス全体で3 requests/sec以下に制御する。
+設定値は`NCBI_TOOL`、`NCBI_EMAIL`、`NCBI_API_KEY`、
+`NCBI_MAX_REQUESTS_PER_SECOND`、`LITERATURE_REQUEST_RETRIES`で管理する。
+
 ### 8.4 取得データ
 
 PubMed/PMCから少なくとも次を保存する。
@@ -514,6 +526,23 @@ PubMed/PMCから少なくとも次を保存する。
 - 使用した検索クエリ
 - candidate_id
 - クエリごとのヒット件数、本文取得結果、同一性チェックによる採用・除外件数、失敗理由を実行ログに記録する
+
+Europe PMCをフォールバックに使う場合も、Referenceに採用するのは既定で`MED`または`PMC`
+SourceかつPMID/PMCIDを持つ記録に限定する。DOIだけの記録や対象Source外の記録は、検索結果の
+補助情報としても臨床Referenceには採用しない。採用・除外件数は実行ログの
+`LiteratureSearchDiagnostic`に残す。
+
+ReflectionおよびFinalの文章は、次の4種類を別フィールドで管理する。
+
+- `literature_basis_*`: 取得した文献Evidenceに直接基づく内容
+- `tool_considerations_*`: PubCaseFinder、ZeroShot、GestaltMatcher等のツール結果
+- `model_inference_*`: 上記を統合したモデルの推論。文献事実として扱わない
+- `uncertainty_*`: 未取得文献、患者情報不足、候補間の未解決点
+
+Reflectionは候補ごとの個別呼び出しには分割せず、候補全体を1回の構造化呼び出しで処理する。
+出力上限は`REFLECTION_MAX_COMPLETION_TOKENS`（既定30,000）、タイムアウトは
+`REFLECTION_REQUEST_TIMEOUT_SECONDS`（既定300秒）で管理する。構造化生成に失敗した場合も、
+候補を欠落させず、取得済みEvidenceとツール情報を明示した決定的フォールバックを返す。
 
 LLMによる要約を原文の代替として保存してはならない。
 

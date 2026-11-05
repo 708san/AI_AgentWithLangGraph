@@ -25,7 +25,7 @@
 主要クラス:
 
 ```python
-RareDiseaseDiagnosisPipeline(model_name="gpt-4o", enable_log=False, log_filename=None)
+RareDiseaseDiagnosisPipeline(model_name="gpt-5-2", enable_log=False, log_filename=None)
 ```
 
 実行メソッド:
@@ -154,7 +154,7 @@ run(
 | `createHPODictNode` | `hpoList` | `hpoDict` | `phenotype_mapping.json` で HPO ID をラベル化 |
 | `createAbsentHPODictNode` | `absentHpoList` | `absentHpoDict` | 明示的に観察されなかった HPO ID をラベル化 |
 | `createZeroShotNode` | `hpoDict`, `absentHpoDict`, `use_absentHPO`, `onset`, `sex`, `llm` | `zeroShotResult`, `prompt` | LLM 構造化出力で候補疾患を生成。`use_absentHPO=True` の場合のみ absent HPO を使用 |
-| `NormalizeZeroShotNode` | `zeroShotResult` | `zeroShotResult` | 疾患名を embedding 検索し、病名互換性を確認してOMIM IDを付与。互換性が不明でも候補は保持し、重複 OMIM を除外 |
+| `NormalizeZeroShotNode` | `zeroShotResult` | `zeroShotResult` | 疾患名を embedding 検索し、ローカルの疾患同定を確認してOMIM IDを付与。不一致はOMIM正本へ統一し、病名・OMIMの両方を確定できない候補は監査情報に残して公開候補から除外。残った候補の表示rankを連番化 |
 | `HPOwebSearchNode` | `hpoDict`, `llm` | `webresources` | HPO から DDGS 検索クエリを生成し、検索結果スニペットを要約 |
 | `DiseaseSearchWithHPONode` | `hpoDict`, `depth` | `phenotypeSearchResult` | HPO ラベルを embedding 化し、FAISS で類似 OMIM 疾患を検索 |
 | `mergeCandidateResultsNode` | `pubCaseFinder`, `zeroShotResult`, `GestaltMatcher`, `phenotypeSearchResult` | `mergedDiseaseCandidates` | 診断前に各ツールの順位付き疾患候補を疾患単位で統合し、どのツールで何位だったかを保持 |
@@ -720,7 +720,7 @@ List[PhenotypeSearchFormat]
 
 ## 11. 現行実装上の注意点
 
-- `agent/llm/azure_llm_instance.py` はモジュール末尾で `azure_llm = get_llm_instance("gpt-4o")` を実行するため、import 時点で `gpt-4o` 用環境変数が不足していると失敗する。
+- `agent/llm/azure_llm_instance.py` のモデル未指定時の既定値は `gpt-5-2`。明示指定時は指定モデル用の環境変数を使用する。
 - `agent/tools/diseaseNormalize.py` は import 時点で `AZURE_DBCLS_JAPANEAST` を確認し、FAISS インデックスも読み込む。環境変数または `.bin` ファイルが不足していると import に失敗する。
 - `HPOwebSearchNode` の出力キーは `snippet` だが、`createDiagnosis()` は Web 検索結果の本文として `content` を参照している。
 - `State` では `webresources` が必須扱いだが、初期 state には明示的に含まれていない。各処理は `state.get("webresources", [])` で補完している。

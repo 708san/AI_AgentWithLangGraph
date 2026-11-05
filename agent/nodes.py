@@ -207,7 +207,7 @@ def createZeroShotNode(state: State):
 @profile_node
 @save_result("NormalizeZeroShotNode")
 def NormalizeZeroShotNode(state: State):
-    """ZeroShotの結果に含まれる病名を正規化し、重複を排除する"""
+    """ZeroShotの病名を正規化し、全候補を連続rankで保持する"""
     print("NormalizeZeroShotNode called")
     # stateから値を取り出すのではなく、stateをそのまま渡す
     normalized_result = normalize_zeroshot_results(state)

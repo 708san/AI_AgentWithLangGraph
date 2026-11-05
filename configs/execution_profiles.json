@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "profile_id": "phenopacket.single",
+      "purpose": "Run the pipeline from one Phenopacket input.",
+      "entrypoint": "scripts/run_from_phenopacket.py",
+      "kind": "single_case",
+      "input_types": ["phenopacket", "optional_image"],
+      "output_types": ["final_diagnosis", "logs", "node_results"],
+      "evidence_mode": "v2 by default; legacy can be selected",
+      "external_api": true
+    },
+    {
+      "profile_id": "phenopacket.single_v2",
+      "purpose": "Run one v2 Phenopacket case with public and external response artifacts.",
+      "entrypoint": "scripts/run_single_v2_case.py",
+      "kind": "single_case",
+      "input_types": ["phenopacket", "optional_image"],
+      "output_types": ["public_response", "external_response", "phase_results", "node_results"],
+      "evidence_mode": "v2",
+      "external_api": true,
+      "compatibility": {
+        "required_artifacts": ["external_response"],
+        "optional_artifacts": ["public_response", "state"]
+      }
+    },
+    {
+      "profile_id": "image_case.single",
+      "purpose": "Run one stable image-backed case from the old metadata/image set.",
+      "entrypoint": "testCode/phenopacket_image_case/run_one_case.py",
+      "kind": "single_image_case",
+      "input_types": ["metadata_row", "face_image"],
+      "output_types": ["public_response", "external_response", "phase_results", "node_results", "timing"],
+      "evidence_mode": "v2",
+      "external_api": true
+    },
+    {
+      "profile_id": "image_case.batch",
+      "purpose": "Run the stable image-backed case set with resume and parallelism.",
+      "entrypoint": "testCode/phenopacket_image_case/run_all_cases.py",
+      "kind": "batch_cases",
+      "input_types": ["metadata_tsv", "image_directory"],
+      "output_types": ["case_manifest", "summary", "case_outputs", "analysis"],
+      "evidence_mode": "v2",
+      "external_api": true
+    },
+    {
+      "profile_id": "evaluation.zero_shot",
+      "purpose": "Evaluate Zero-shot generation and normalization only.",
+      "entrypoint": "scripts/evaluation/run_zero_shot.py",
+      "kind": "stage_evaluation",
+      "input_types": ["benchmark_json"],
+      "output_types": ["evaluation_json", "predictions", "traces"],
+      "evidence_mode": "stage_only",
+      "external_api": true
+    },
+    {
+      "profile_id": "evaluation.tentative",
+      "purpose": "Evaluate the current v2 pipeline stages and final diagnosis.",
+      "entrypoint": "scripts/evaluation/run_tentative.py",
+      "kind": "stage_evaluation",
+      "input_types": ["benchmark_json", "optional_images"],
+      "output_types": ["evaluation_json", "predictions", "traces", "logs"],
+      "evidence_mode": "v2",
+      "external_api": true
+    },
+    {
+      "profile_id": "analysis.saved_results",
+      "purpose": "Analyze existing result artifacts without calling diagnosis APIs.",
+      "entrypoint": "scripts/analyze_old74_v2_results.py",
+      "kind": "offline_analysis",
+      "input_types": ["saved_run_artifacts"],
+      "output_types": ["tables", "figures", "summary"],
+      "evidence_mode": "offline",
+      "external_api": false
+    },
+    {
+      "profile_id": "analysis.compare_results",
+      "purpose": "Compare saved old74 results across runs or conditions.",
+      "entrypoint": "scripts/compare_old74_v2_results.py",
+      "kind": "offline_analysis",
+      "input_types": ["saved_run_artifacts"],
+      "output_types": ["comparison_tables", "figures", "summary"],
+      "evidence_mode": "offline",
+      "external_api": false
+    }
+  ]
+}

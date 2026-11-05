@@ -12,14 +12,19 @@ import json
 import os
 from typing import Any, Iterator, Optional
 
-from agent.agent_pipeline import RareDiseaseDiagnosisPipeline
+from agent.agent_pipeline import (
+    DEFAULT_MAX_FLOW_ITERATIONS,
+    DEFAULT_REASONING_EFFORT,
+    DEFAULT_ZERO_SHOT_REASONING_EFFORT,
+    RareDiseaseDiagnosisPipeline,
+)
 from agent.utils.response_serializer import (
     serialize_external_compatibility,
     serialize_public_state,
 )
 
 
-DEFAULT_MODEL_NAME = "gpt-4o"
+DEFAULT_MODEL_NAME = "gpt-5-2"
 
 AGENT_OUTPUT_KEY_BY_STEP_TYPE = {
     "PUB_CASE_FINDER": "pubCaseFinder",
@@ -152,13 +157,15 @@ def run_stream(
     sex: Optional[str] = None,
     onset: Optional[str] = None,
     model_name: str = DEFAULT_MODEL_NAME,
+    reasoning_effort: Optional[str] = DEFAULT_REASONING_EFFORT,
+    zero_shot_reasoning_effort: Optional[str] = DEFAULT_ZERO_SHOT_REASONING_EFFORT,
     enable_log: Optional[bool] = None,
     verbose: bool = False,
     use_absent_hpo: bool = False,
     filter_importance: Optional[bool] = None,
     image_path: Optional[str] = None,
     evidence_mode: str = "v2",
-    max_flow_iterations: int = 1,
+    max_flow_iterations: int = DEFAULT_MAX_FLOW_ITERATIONS,
 ) -> Iterator[tuple[str, dict[str, Any]]]:
     """Run the pipeline and yield each completed node update.
 
@@ -178,6 +185,8 @@ def run_stream(
     )
     pipeline = RareDiseaseDiagnosisPipeline(
         model_name=model_name,
+        reasoning_effort=reasoning_effort,
+        zero_shot_reasoning_effort=zero_shot_reasoning_effort,
         enable_log=resolved_enable_log,
     )
     yield from pipeline.stream(
