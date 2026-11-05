@@ -17,7 +17,10 @@ from ..llm.llm_wrapper import is_content_filter_error
 
 
 def _reflection_token_limits() -> list[int]:
-    raw_limits = os.getenv("REFLECTION_TOKEN_LIMITS", "12000,16000,20000")
+    # v2 Reflection is a single structured call over the complete differential.
+    # Keep it unsplit and give the deployment enough output room; operators can
+    # override this when their Azure deployment has a smaller completion cap.
+    raw_limits = os.getenv("REFLECTION_TOKEN_LIMITS", "30000")
     try:
         limits = [int(value.strip()) for value in raw_limits.split(",") if value.strip()]
     except ValueError:
@@ -26,7 +29,7 @@ def _reflection_token_limits() -> list[int]:
 
 
 def _reflection_request_timeout_seconds() -> float:
-    return float(os.getenv("REFLECTION_REQUEST_TIMEOUT_SECONDS", "180"))
+    return float(os.getenv("REFLECTION_REQUEST_TIMEOUT_SECONDS", "300"))
 
 
 def _reflection_retry_wait_seconds() -> float:
@@ -104,16 +107,49 @@ def _normalize_name(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def _candidate_value(candidate, key: str, default=None):
+    if isinstance(candidate, dict):
+        return candidate.get(key, default)
+    return getattr(candidate, key, default)
+
+
+def _candidate_tool_rankings(candidate):
+    rankings = _candidate_value(candidate, "tool_rankings")
+    if rankings is None:
+        rankings = _candidate_value(candidate, "tool_supports", [])
+    return rankings or []
+
+
+def _ranking_value(ranking, key: str, default=None):
+    if isinstance(ranking, dict):
+        return ranking.get(key, default)
+    return getattr(ranking, key, default)
+
+
+def _compact_reflection_prompt_text(value: str, limit: int = 600) -> str:
+    """Bound repeated source excerpts in the Reflection prompt.
+
+    The complete excerpt remains in State and in the external Evidence ledger;
+    Reflection only needs enough context to judge relevance and select the
+    Evidence IDs it uses.  This keeps the single-call design while avoiding a
+    large duplicated prompt for long PMC articles.
+    """
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3].rstrip() + "..."
+
+
 def _find_merged_candidate(state: State, diagnosis_to_judge):
     diagnosis_omim = _normalize_omim_id(getattr(diagnosis_to_judge, "OMIM_id", None))
     diagnosis_name = _normalize_name(getattr(diagnosis_to_judge, "disease_name", ""))
     merged_candidates = state.get("mergedDiseaseCandidates", []) or []
 
     for candidate in merged_candidates:
-        candidate_omim = _normalize_omim_id(candidate.get("OMIM_id"))
+        candidate_omim = _normalize_omim_id(_candidate_value(candidate, "OMIM_id"))
         if diagnosis_omim and candidate_omim == diagnosis_omim:
             return candidate
-        if not diagnosis_omim and _normalize_name(candidate.get("disease_name", "")) == diagnosis_name:
+        if not diagnosis_omim and _normalize_name(_candidate_value(candidate, "disease_name", "")) == diagnosis_name:
             return candidate
     return None
 
@@ -130,19 +166,19 @@ def _format_tool_support(state: State, diagnosis_to_judge) -> str:
 
     lines.append(
         "Merged candidate summary: "
-        f"consensus_count={matched_candidate.get('consensus_count', 'N/A')}, "
-        f"best_tool_rank={matched_candidate.get('best_rank', 'N/A')}"
+        f"consensus_count={_candidate_value(matched_candidate, 'consensus_count', 'N/A')}, "
+        f"best_tool_rank={_candidate_value(matched_candidate, 'best_rank', 'N/A')}"
     )
-    for ranking in matched_candidate.get("tool_rankings", []) or []:
-        score = ranking.get("score")
+    for ranking in _candidate_tool_rankings(matched_candidate):
+        score = _ranking_value(ranking, "score")
         score_text = f", score={score:.3f}" if isinstance(score, (int, float)) else ""
-        note = str(ranking.get("note", "") or "").replace("\n", " ").strip()
+        note = str(_ranking_value(ranking, "note", "") or "").replace("\n", " ").strip()
         if len(note) > 180:
             note = note[:177].rstrip() + "..."
         note_text = f", note={note}" if note else ""
         lines.append(
-            f"- {ranking.get('tool', 'UnknownTool')}: "
-            f"rank={ranking.get('rank', 'N/A')}{score_text}{note_text}"
+            f"- {_ranking_value(ranking, 'tool', 'UnknownTool')}: "
+            f"rank={_ranking_value(ranking, 'rank', 'N/A')}{score_text}{note_text}"
         )
     return "\n".join(lines)
 
@@ -153,9 +189,9 @@ def _has_strong_tool_support(state: State, diagnosis_to_judge) -> bool:
     if not candidate:
         return isinstance(tentative_rank, int) and tentative_rank <= 1
 
-    for ranking in candidate.get("tool_rankings", []) or []:
-        tool = str(ranking.get("tool", "")).lower()
-        rank = ranking.get("rank")
+    for ranking in _candidate_tool_rankings(candidate):
+        tool = str(_ranking_value(ranking, "tool", "")).lower()
+        rank = _ranking_value(ranking, "rank")
         try:
             rank = int(rank)
         except (TypeError, ValueError):
@@ -359,18 +395,6 @@ def create_reflection_v2(state: State) -> tuple[ReflectionOutputV2, str]:
     present_hpo = ", ".join((state.get("hpoDict", {}) or {}).values())
     llm = state.get("llm")
 
-    def direct_profile_overlap(candidate) -> bool:
-        def normalize(value: str) -> str:
-            return re.sub(r"[^a-z0-9]+", " ", str(value or "").casefold()).strip()
-
-        patient_terms = {normalize(value) for value in (state.get("hpoDict", {}) or {}).values()}
-        patient_terms.discard("")
-        disease_terms = {
-            normalize(value) for value in (candidate.phenotype_labels or [])
-        }
-        disease_terms.discard("")
-        return bool(patient_terms & disease_terms)
-
     def status_for(candidate):
         items = [item for item in evidence if item.candidate_id == candidate.candidate_id]
         candidate_sources = [
@@ -396,6 +420,14 @@ def create_reflection_v2(state: State) -> tuple[ReflectionOutputV2, str]:
         for candidate in candidates:
             items = [item for item in evidence if item.candidate_id == candidate.candidate_id]
             status = status_for(candidate)
+            strong_tool_support = _has_strong_tool_support(state, candidate)
+            literature_claims_en = [item.claim_en for item in items if item.support in {"supports", "contradicts"}]
+            literature_claims_ja = [item.claim_ja for item in items if item.support in {"supports", "contradicts"}]
+            tool_summary = ", ".join(
+                f"{support.tool} rank={support.rank}"
+                for support in candidate.tool_supports
+                if support.rank is not None
+            ) or "no diagnostic-tool ranking was available"
             assessments = [
                 EvidenceAssessment(
                     evidence_id=item.evidence_id,
@@ -416,10 +448,13 @@ def create_reflection_v2(state: State) -> tuple[ReflectionOutputV2, str]:
                     disease_name_en=candidate.disease_name,
                     disease_name_ja=candidate.disease_name,
                     # Without an LLM judgment, do not turn retrieval/tool
-                    # presence into an automatic positive reflection.
+                    # presence into an automatic positive reflection unless
+                    # the candidate has strong, independently recorded tool
+                    # support.  In particular, do not use the local disease
+                    # phenotype table as a hidden fallback judgement.
                     correctness=(
                         status != "contradictory"
-                        and direct_profile_overlap(candidate)
+                        and strong_tool_support
                     ),
                     patient_summary_en=f"Patient features supplied to the flow: {present_hpo or 'not provided'}.",
                     patient_summary_ja=f"フローに入力された患者所見: {present_hpo or '未提供'}。",
@@ -432,6 +467,38 @@ def create_reflection_v2(state: State) -> tuple[ReflectionOutputV2, str]:
                         "この候補は検証済みの文献Evidenceにより支持されています。"
                         if status == "supported"
                         else "この候補は現時点では文献支持済みとは判断できません。"
+                    ),
+                    literature_basis_en=(
+                        " ".join(literature_claims_en)
+                        if literature_claims_en
+                        else "No candidate-matched literature claim was validated in this run."
+                    ),
+                    literature_basis_ja=(
+                        " ".join(literature_claims_ja)
+                        if literature_claims_ja
+                        else "この実行では候補に対応する文献主張を検証できませんでした。"
+                    ),
+                    tool_considerations_en=f"Diagnostic-tool signals considered: {tool_summary}.",
+                    tool_considerations_ja=f"考慮した診断ツールの情報: {tool_summary}。",
+                    model_inference_en=(
+                        "Model inference: strong diagnostic-tool support and the supplied patient information keep this candidate plausible; no local disease-phenotype table was used in this fallback."
+                        if strong_tool_support
+                        else "Model inference: this fallback could not establish candidate-specific clinical fit without an LLM judgement."
+                    ),
+                    model_inference_ja=(
+                        "モデル推論: 強い診断ツール支持と提供された患者情報により候補として妥当性が残ります。このフォールバックではローカル疾患表現型表を使用していません。"
+                        if strong_tool_support
+                        else "モデル推論: LLMによる判断がないため、このフォールバックでは候補特異的な臨床適合性を確定できません。"
+                    ),
+                    uncertainty_en=(
+                        "Uncertainty: literature retrieval or Evidence extraction remains incomplete."
+                        if status != "supported"
+                        else "Uncertainty: this reflection is not a molecular diagnosis and may be limited by incomplete patient data."
+                    ),
+                    uncertainty_ja=(
+                        "不確実性: 文献取得またはEvidence抽出が不十分な可能性があります。"
+                        if status != "supported"
+                        else "不確実性: このReflectionは分子診断ではなく、患者情報の不足の影響を受けます。"
                     ),
                     evidence_assessments=assessments,
                     # Only attach evidence that can support or contradict the
@@ -456,29 +523,33 @@ def create_reflection_v2(state: State) -> tuple[ReflectionOutputV2, str]:
 
     evidence_text = "\n".join(
         f"{item.evidence_id} candidate={item.candidate_id} support={item.support} confidence={item.confidence} "
-        f"EN={item.claim_en} JA={item.claim_ja} excerpt={item.excerpt}"
+        f"EN={_compact_reflection_prompt_text(item.claim_en, 500)} "
+        f"JA={_compact_reflection_prompt_text(item.claim_ja, 500)} "
+        f"excerpt={_compact_reflection_prompt_text(item.excerpt, 600)}"
         for item in evidence
     ) or "No validated Evidence"
     candidate_text = "\n".join(
         f"{candidate.candidate_id}: {candidate.disease_name}; "
         f"OMIM={candidate.OMIM_id or 'unknown'}; "
         f"consensus_count={candidate.consensus_count}; best_rank={candidate.best_rank}; "
-        f"tools={', '.join(f'{support.tool}:rank={support.rank},score={support.score}' for support in candidate.tool_supports) or 'none'}; "
-        f"database_phenotypes={', '.join(candidate.phenotype_labels[:20]) or 'none'}"
+        f"tools={', '.join(f'{support.tool}:rank={support.rank},score={support.score}' for support in candidate.tool_supports) or 'none'}"
         for candidate in candidates
     )
     prompt = f"""You are reviewing a rare-disease differential diagnosis.
 Judge whether each candidate should remain plausible in the differential, not whether it is confirmed.
 `correctness` is a binary retain-in-the-differential decision, not a literature-retrieval flag and not a claim of confirmed diagnosis. Set it true only when the patient has a meaningful, candidate-specific phenotype match (one distinctive match or multiple matching findings) and no decisive contradiction. Set it false when the profile shows only generic overlap, a clear phenotype mismatch, a decisive contradiction, or tool ranking is the only positive signal. A candidate returned by a diagnostic tool is a hypothesis to assess, not proof of fit. Do not mark every candidate true by default; compare candidates against the same patient findings and distinguish strong, specific matches from broad neurodevelopmental overlap.
-Missing or weakly retrieved literature is uncertainty, never evidence against a candidate by itself. Do not set correctness=false solely because no source or Evidence was retrieved; use the phenotype profile and explicitly supplied absent findings to judge plausibility.
+Missing or weakly retrieved literature is uncertainty, never evidence against a candidate by itself. Do not set correctness=false solely because no source or Evidence was retrieved; use the supplied patient findings, supplied Evidence, diagnostic-tool signals, and general medical knowledge as clearly labeled model inference. No local disease-phenotype table is supplied; do not assume one was supplied.
 An explicitly absent finding may count against a candidate only when it is supplied in the absent-phenotype section; unreported findings are unknown.
-Tool rankings, consensus, and database phenotypes are auxiliary candidate-evaluation information, not literature citations.
+Tool rankings and consensus are auxiliary candidate-evaluation information, not literature citations.
 For every supplied candidate return ReflectionFormatV2 with English and Japanese fields.
+Keep the output concise: patient_summary_en/ja should be one sentence; diagnosis_analysis_en/ja should be at most three sentences; each provenance field should be one concise sentence. Do not repeat the full patient feature list, Evidence excerpts, or the same claim in multiple fields.
+Use evidence_assessments only for Evidence IDs that are directly used in diagnosis_analysis or are necessary to explain a contradiction/uncertainty. Do not emit a redundant assessment for every supplied Evidence item. The complete Evidence ledger is preserved outside Reflection.
 Do not drop a candidate solely because literature is insufficient; use `insufficient` or `not_retrieved` when appropriate. `not_retrieved` means no candidate-matched source was obtained in this run, not that no literature exists.
 Use only supplied candidate_id and evidence_id values. Keep evidence_ids identical across the bilingual analysis.
 Literature status must be supported only when a literature Evidence item supports the candidate. For each EvidenceAssessment, `supports_patient=yes` only when the claim describes a phenotype actually present in the patient; a disease-identity statement, mechanism, or a different/unique finding is not a patient match. Use `no` for a clear mismatch and `unknown` when the claim does not permit comparison.
 An Evidence claim that only says its source or excerpt is unrelated to the candidate is not a clinical contradiction. Do not set `correctness=false` or `literature_status=contradictory` for source-relevance failures.
-Explain in prose how the patient features relate to the disease claims in the Evidence. Do not treat an article about the candidate as support for every patient feature or for the candidate's overall fit.
+Explain in prose how the patient features relate to the disease claims in the Evidence. Do not treat an article about the candidate as support for every patient feature or for the candidate's overall fit. General model knowledge may be used only as clearly labeled model inference, never as a literature fact.
+Populate literature_basis_en/ja with only the supplied literature Evidence. Populate tool_considerations_en/ja with diagnostic-tool signals without treating them as citations. Populate model_inference_en/ja with clearly labeled clinical interpretation, which may use general model knowledge but must not be presented as literature fact. Populate uncertainty_en/ja with retrieval limitations, missing data, and unresolved conflicts. Do not put Evidence markers in these provenance fields; Evidence markers belong only in diagnosis_analysis_en/ja.
 Do not create a separate match, impact, or limitation object; state uncertainty in the analysis text.
 Do not use a general medical-knowledge statement as if it came from a cited literature source.
 
@@ -487,7 +558,21 @@ PATIENT_ABSENT_FEATURES: {', '.join((state.get('absentHpoDict', {}) or {}).value
 CANDIDATES:\n{candidate_text}
 EVIDENCE:\n{evidence_text}"""
     try:
-        result = llm.get_structured_llm(ReflectionOutputV2).invoke([HumanMessage(content=prompt)])
+        reflection_llm = llm
+        max_tokens = int(os.getenv("REFLECTION_MAX_COMPLETION_TOKENS", "30000"))
+        # Use a temporary client only for the v2 Reflection call so the larger
+        # budget does not silently change Zero-shot, tentative, or Final calls.
+        if isinstance(getattr(llm, "default_max_tokens", None), (int, float)) and hasattr(
+            llm, "get_temp_llm_with_max_tokens"
+        ):
+            reflection_llm = llm.get_temp_llm_with_max_tokens(
+                max_tokens,
+                timeout_seconds=_reflection_request_timeout_seconds(),
+            )
+            structured_llm = reflection_llm.with_structured_output(ReflectionOutputV2)
+        else:
+            structured_llm = reflection_llm.get_structured_llm(ReflectionOutputV2)
+        result = structured_llm.invoke([HumanMessage(content=prompt)])
         allowed_candidates = {candidate.candidate_id for candidate in candidates}
         allowed_evidence = {item.evidence_id for item in evidence}
         fallback_by_candidate = {

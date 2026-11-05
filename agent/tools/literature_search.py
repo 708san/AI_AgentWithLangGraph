@@ -11,8 +11,10 @@ import hashlib
 import json
 import os
 import re
+import threading
 import time
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Iterable
 
@@ -24,12 +26,65 @@ from ..state.state_types import MergedDiseaseCandidateV2, SourceRecord
 
 
 NCBI_BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+EUROPE_PMC_BASE_URL = "https://www.ebi.ac.uk/europepmc/webservices/rest"
 DEFAULT_MAX_RESULTS = int(os.getenv("PUBMED_MAX_RESULTS_PER_CANDIDATE", "2"))
 DEFAULT_MAX_QUERIES = max(4, int(os.getenv("PUBMED_MAX_QUERIES_PER_CANDIDATE", "6")))
 LITERATURE_MAX_WORKERS = max(1, int(os.getenv("PUBMED_MAX_WORKERS", "2")))
 REQUEST_TIMEOUT = float(os.getenv("PUBMED_REQUEST_TIMEOUT_SECONDS", "20"))
+REQUEST_RETRIES = max(0, int(os.getenv("LITERATURE_REQUEST_RETRIES", "1")))
 MAX_ABSTRACT_LENGTH = int(os.getenv("PUBMED_MAX_ABSTRACT_LENGTH", "12000"))
 MAX_FULL_TEXT_LENGTH = int(os.getenv("PMC_MAX_FULL_TEXT_LENGTH", "50000"))
+NCBI_TOOL = os.getenv("NCBI_TOOL", "AI_AgentWithLangGraph")
+NCBI_EMAIL = os.getenv("NCBI_EMAIL", "")
+NCBI_API_KEY = os.getenv("NCBI_API_KEY", "")
+NCBI_MAX_REQUESTS_PER_SECOND = max(
+    1.0, float(os.getenv("NCBI_MAX_REQUESTS_PER_SECOND", "3"))
+)
+EUROPE_PMC_MAX_RESULTS = max(
+    1, int(os.getenv("EUROPE_PMC_MAX_RESULTS_PER_CANDIDATE", str(DEFAULT_MAX_RESULTS)))
+)
+EUROPE_PMC_ALLOWED_SOURCES = {
+    value.strip().upper()
+    for value in os.getenv("EUROPE_PMC_ALLOWED_SOURCES", "MED,PMC").split(",")
+    if value.strip()
+}
+
+_NCBI_RATE_LOCK = threading.Lock()
+_LAST_NCBI_REQUEST_AT = 0.0
+_NCBI_TRANSIENT_STATUS_CODES = {500, 502, 503, 504}
+
+
+class LiteratureProviderUnavailable(RuntimeError):
+    """Raised when a provider is unavailable and the caller should fail over."""
+
+
+@dataclass
+class _ProviderState:
+    """Run-scoped provider health shared by concurrent candidate searches."""
+
+    ncbi_unavailable: bool = False
+    ncbi_error: str | None = None
+    europe_pmc_unavailable: bool = False
+    europe_pmc_error: str | None = None
+    lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    def mark_ncbi_unavailable(self, error: str) -> None:
+        with self.lock:
+            self.ncbi_unavailable = True
+            self.ncbi_error = error
+
+    def is_ncbi_unavailable(self) -> bool:
+        with self.lock:
+            return self.ncbi_unavailable
+
+    def mark_europe_pmc_unavailable(self, error: str) -> None:
+        with self.lock:
+            self.europe_pmc_unavailable = True
+            self.europe_pmc_error = error
+
+    def is_europe_pmc_unavailable(self) -> bool:
+        with self.lock:
+            return self.europe_pmc_unavailable
 
 
 def _candidate_value(candidate: Any, key: str, default: Any = None) -> Any:
@@ -94,25 +149,79 @@ def build_literature_queries(
     return list(dict.fromkeys(query for query in queries if query))[:query_limit]
 
 
+def _is_ncbi_endpoint(endpoint: str) -> bool:
+    return endpoint.startswith(NCBI_BASE_URL)
+
+
+def _is_literature_endpoint(endpoint: str) -> bool:
+    return _is_ncbi_endpoint(endpoint) or endpoint.startswith(EUROPE_PMC_BASE_URL)
+
+
+def _ncbi_params(params: dict[str, Any]) -> dict[str, Any]:
+    """Add the identifiers NCBI requests for automated clients."""
+    enriched = dict(params)
+    enriched.setdefault("tool", NCBI_TOOL)
+    if NCBI_EMAIL:
+        enriched.setdefault("email", NCBI_EMAIL)
+    if NCBI_API_KEY:
+        enriched.setdefault("api_key", NCBI_API_KEY)
+    return enriched
+
+
+def _wait_for_ncbi_slot() -> None:
+    """Apply one process-wide E-utilities rate limit across worker threads."""
+    global _LAST_NCBI_REQUEST_AT
+    interval = 1.0 / NCBI_MAX_REQUESTS_PER_SECOND
+    with _NCBI_RATE_LOCK:
+        now = time.monotonic()
+        wait = interval - (now - _LAST_NCBI_REQUEST_AT)
+        if wait > 0:
+            time.sleep(wait)
+        _LAST_NCBI_REQUEST_AT = time.monotonic()
+
+
+def _request_params(endpoint: str, params: dict[str, Any]) -> dict[str, Any]:
+    if _is_ncbi_endpoint(endpoint):
+        _wait_for_ncbi_slot()
+        return _ncbi_params(params)
+    return dict(params)
+
+
 def _request_json(
     session: requests.Session,
     endpoint: str,
     params: dict[str, Any],
-    retries: int = 2,
+    retries: int = REQUEST_RETRIES,
     on_error=None,
 ) -> dict[str, Any]:
     for attempt in range(retries + 1):
         try:
-            response = session.get(endpoint, params=params, timeout=REQUEST_TIMEOUT)
+            response = session.get(
+                endpoint,
+                params=_request_params(endpoint, params),
+                timeout=REQUEST_TIMEOUT,
+            )
             if response.status_code == 429 and attempt < retries:
-                time.sleep(2 ** attempt)
+                retry_after = response.headers.get("Retry-After")
+                try:
+                    delay = float(retry_after) if retry_after else 2 ** attempt
+                except (TypeError, ValueError):
+                    delay = 2 ** attempt
+                time.sleep(delay)
                 continue
+            if _is_literature_endpoint(endpoint) and response.status_code in _NCBI_TRANSIENT_STATUS_CODES:
+                message = f"{response.status_code} Server Error for url: {getattr(response, 'url', endpoint)}"
+                if on_error:
+                    on_error(message)
+                raise LiteratureProviderUnavailable(message)
             response.raise_for_status()
             return response.json()
         except (requests.RequestException, ValueError) as exc:
             if attempt >= retries:
                 if on_error:
                     on_error(str(exc))
+                if _is_literature_endpoint(endpoint):
+                    raise LiteratureProviderUnavailable(str(exc)) from exc
                 return {}
             time.sleep(2 ** attempt)
     return {}
@@ -122,21 +231,37 @@ def _request_text(
     session: requests.Session,
     endpoint: str,
     params: dict[str, Any],
-    retries: int = 2,
+    retries: int = REQUEST_RETRIES,
     on_error=None,
 ) -> str:
     for attempt in range(retries + 1):
         try:
-            response = session.get(endpoint, params=params, timeout=REQUEST_TIMEOUT)
+            response = session.get(
+                endpoint,
+                params=_request_params(endpoint, params),
+                timeout=REQUEST_TIMEOUT,
+            )
             if response.status_code == 429 and attempt < retries:
-                time.sleep(2 ** attempt)
+                retry_after = response.headers.get("Retry-After")
+                try:
+                    delay = float(retry_after) if retry_after else 2 ** attempt
+                except (TypeError, ValueError):
+                    delay = 2 ** attempt
+                time.sleep(delay)
                 continue
+            if _is_literature_endpoint(endpoint) and response.status_code in _NCBI_TRANSIENT_STATUS_CODES:
+                message = f"{response.status_code} Server Error for url: {getattr(response, 'url', endpoint)}"
+                if on_error:
+                    on_error(message)
+                raise LiteratureProviderUnavailable(message)
             response.raise_for_status()
             return response.text
         except requests.RequestException as exc:
             if attempt >= retries:
                 if on_error:
                     on_error(str(exc))
+                if _is_literature_endpoint(endpoint):
+                    raise LiteratureProviderUnavailable(str(exc)) from exc
                 return ""
             time.sleep(2 ** attempt)
     return ""
@@ -179,6 +304,75 @@ def _parse_article(article: ET.Element) -> dict[str, Any]:
         "authors": authors,
         "doi": article_ids.get("doi"),
         "pmc": article_ids.get("pmc"),
+    }
+
+
+def build_europepmc_queries(
+    candidate: MergedDiseaseCandidateV2,
+    retry: bool = False,
+) -> list[str]:
+    """Build provider-neutral queries for Europe PMC's REST search API."""
+    disease = _clean_term(_candidate_value(candidate, "disease_name"))
+    names = [
+        _clean_term(part)
+        for part in re.split(r"\s*[;|]\s*", disease)
+        if _clean_term(part)
+    ]
+    primary_name = names[0] if names else disease
+    genes = [
+        _clean_term(value)
+        for value in (_candidate_value(candidate, "gene_symbols", []) or [])
+        if _clean_term(value)
+    ]
+    synonyms = [
+        _clean_term(value)
+        for value in (_candidate_value(candidate, "synonyms", []) or [])
+        if _clean_term(value)
+    ]
+    queries: list[str] = []
+    if primary_name:
+        queries.append(f'"{primary_name}"')
+    if primary_name and genes:
+        queries.append(f'"{primary_name}" AND ({" OR ".join(genes[:3])})')
+    for synonym in synonyms:
+        if synonym.casefold() != primary_name.casefold():
+            queries.append(f'"{synonym}"')
+    for name in names[1:]:
+        if name.casefold() != primary_name.casefold():
+            queries.append(f'"{name}"')
+    if retry and primary_name:
+        queries.append(f'"{primary_name}" AND (genotype OR inheritance OR diagnosis)')
+    return list(dict.fromkeys(query for query in queries if query))[:DEFAULT_MAX_QUERIES]
+
+
+def _strip_html(value: Any) -> str:
+    return re.sub(r"<[^>]+>", " ", str(value or "")).strip()
+
+
+def _parse_europepmc_result(result: dict[str, Any]) -> dict[str, Any]:
+    author_list = result.get("authorList") or {}
+    authors = []
+    for author in author_list.get("author", []) or []:
+        name = _clean_term(author.get("fullName") or author.get("authorName"))
+        if name:
+            authors.append(name)
+    if not authors and result.get("authorString"):
+        authors = [
+            _clean_term(value)
+            for value in str(result["authorString"]).split(",")
+            if _clean_term(value)
+        ]
+    pmid = _clean_term(result.get("pmid") or (result.get("source") == "MED" and result.get("id")))
+    pmcid = _pmc_identifier(result.get("pmcid"))
+    return {
+        "pmid": pmid or None,
+        "pmc": pmcid,
+        "title": _strip_html(result.get("title")),
+        "abstract": _strip_html(result.get("abstractText"))[:MAX_ABSTRACT_LENGTH],
+        "journal": _clean_term(result.get("journalTitle")),
+        "year": _clean_term(result.get("pubYear")),
+        "authors": authors,
+        "doi": _clean_term(result.get("doi")) or None,
     }
 
 
@@ -323,14 +517,195 @@ def _source_id(identifier: str, candidate_id: str) -> str:
     return f"SRC-{digest}"
 
 
+def _source_keys_from_article(article: dict[str, Any]) -> set[str]:
+    pmid = _clean_term(article.get("pmid"))
+    pmcid = _pmc_identifier(article.get("pmc"))
+    doi = _clean_term(article.get("doi"))
+    return {
+        value.casefold()
+        for value in (
+            pmid and f"PMID:{pmid}",
+            pmcid and f"PMCID:{pmcid}",
+            doi,
+        )
+        if value
+    }
+
+
+def _source_from_article(
+    article: dict[str, Any],
+    candidate: MergedDiseaseCandidateV2,
+    query: str,
+    session: requests.Session,
+    provider: str,
+) -> SourceRecord | None:
+    candidate_id = _candidate_value(candidate, "candidate_id")
+    pmid = _clean_term(article.get("pmid")) or None
+    pmcid = _pmc_identifier(article.get("pmc"))
+    doi = _clean_term(article.get("doi")) or None
+    if not pmid and not pmcid and not doi:
+        return None
+
+    content = _clean_term(article.get("abstract"))
+    source_name = "PubMed" if pmid else "Europe PMC"
+    content_type = "abstract"
+    identifier = f"PMID:{pmid}" if pmid else (f"PMCID:{pmcid}" if pmcid else f"DOI:{doi}")
+    source_url = (
+        f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
+        if pmid
+        else f"https://europepmc.org/article/{'PMC' if pmcid else 'MED'}/{pmcid or doi}"
+    )
+    if pmcid:
+        try:
+            pmc_content = _fetch_pmc_full_text(session, pmcid)
+        except LiteratureProviderUnavailable:
+            pmc_content = {}
+        if pmc_content.get("content"):
+            content = pmc_content["content"]
+            source_name = "PMC"
+            content_type = "full_text"
+            identifier = f"PMCID:{pmcid}"
+            source_url = f"https://pmc.ncbi.nlm.nih.gov/articles/{pmcid}/"
+
+    if not content:
+        return None
+    return SourceRecord(
+        source_id=_source_id(identifier, candidate_id),
+        source_type="literature",
+        source_name=source_name,
+        title=article.get("title") or "Untitled literature record",
+        url=source_url,
+        identifier=identifier,
+        pmid=pmid,
+        pmcid=pmcid,
+        doi=doi,
+        authors=article.get("authors", []),
+        journal=article.get("journal") or None,
+        publication_year=article.get("year") or None,
+        candidate_ids=[candidate_id],
+        disease_name=_candidate_value(candidate, "disease_name"),
+        OMIM_id=canonical_omim_id(_candidate_value(candidate, "OMIM_id")),
+        gene_symbols=list(_candidate_value(candidate, "gene_symbols", []) or []),
+        content_type=content_type,
+        raw_content=content,
+        search_query=f"{provider}:{query}",
+        retrieved_at=datetime.now(timezone.utc).isoformat(),
+        citation_allowed=True,
+    )
+
+
+def search_candidate_literature_europe_pmc(
+    candidate: MergedDiseaseCandidateV2,
+    existing_sources: Iterable[SourceRecord] = (),
+    retry: bool = False,
+    session: requests.Session | None = None,
+    provider_state: _ProviderState | None = None,
+) -> list[SourceRecord]:
+    """Search Europe PMC and normalize results into the same SourceRecord ledger."""
+    session = session or requests.Session()
+    provider_state = provider_state or _ProviderState()
+    if provider_state.is_europe_pmc_unavailable():
+        return []
+    existing_keys = {
+        key
+        for source in existing_sources
+        if source.source_type == "literature"
+        for key in _source_keys(source)
+    }
+    sources: list[SourceRecord] = []
+    diagnostic = {
+        "provider": "europe_pmc",
+        "candidate_id": _candidate_value(candidate, "candidate_id"),
+        "retry": retry,
+        "queries": [],
+        "accepted_sources": 0,
+    }
+    for query in build_europepmc_queries(candidate, retry=retry):
+        query_diagnostic = {
+            "query": query,
+            "hits": 0,
+            "identity_rejected": 0,
+            "source_rejected": 0,
+            "identifier_rejected": 0,
+            "accepted_sources": 0,
+            "errors": [],
+        }
+        diagnostic["queries"].append(query_diagnostic)
+        try:
+            payload = _request_json(
+                session,
+                f"{EUROPE_PMC_BASE_URL}/search",
+                {
+                    "query": query,
+                    "format": "json",
+                    "resultType": "core",
+                    "pageSize": EUROPE_PMC_MAX_RESULTS,
+                },
+                on_error=query_diagnostic["errors"].append,
+            )
+        except LiteratureProviderUnavailable as exc:
+            provider_state.mark_europe_pmc_unavailable(str(exc))
+            diagnostic["provider_error"] = str(exc)
+            print(f"[Literature] Europe PMC unavailable: {exc}")
+            break
+        results = (payload.get("resultList", {}) or {}).get("result", []) or []
+        query_diagnostic["hits"] = len(results)
+        for result in results:
+            provider_source = _clean_term(result.get("source")).upper()
+            if provider_source not in EUROPE_PMC_ALLOWED_SOURCES:
+                query_diagnostic["source_rejected"] += 1
+                continue
+            article = _parse_europepmc_result(result)
+            if not article.get("pmid") and not article.get("pmc"):
+                # DOI-only Europe PMC records can be preprints or records
+                # outside PubMed/PMC. They are not stable enough for the
+                # clinical literature Reference contract.
+                query_diagnostic["identifier_rejected"] += 1
+                continue
+            if not _matches_candidate(article, candidate):
+                query_diagnostic["identity_rejected"] += 1
+                continue
+            article_keys = _source_keys_from_article(article)
+            if not article_keys or article_keys & existing_keys:
+                continue
+            source = _source_from_article(
+                article, candidate, query, session, provider="europe_pmc"
+            )
+            if source is None:
+                continue
+            sources.append(source)
+            query_diagnostic["accepted_sources"] += 1
+            diagnostic["accepted_sources"] += 1
+            existing_keys.update(article_keys)
+            if len(sources) >= EUROPE_PMC_MAX_RESULTS:
+                print(f"[LiteratureSearchDiagnostic] {json.dumps(diagnostic, ensure_ascii=False)}")
+                return sources
+    print(f"[LiteratureSearchDiagnostic] {json.dumps(diagnostic, ensure_ascii=False)}")
+    return sources
+
+
 def search_candidate_literature(
     candidate: MergedDiseaseCandidateV2,
     hpo_labels: Iterable[str] = (),
     existing_sources: Iterable[SourceRecord] = (),
     retry: bool = False,
     session: requests.Session | None = None,
+    provider_state: _ProviderState | None = None,
 ) -> list[SourceRecord]:
     session = session or requests.Session()
+    provider_state = provider_state or _ProviderState()
+    if provider_state.is_ncbi_unavailable():
+        print(
+            "[Literature] PubMed unavailable for this run; "
+            f"using Europe PMC for {_candidate_value(candidate, 'candidate_id')}"
+        )
+        return search_candidate_literature_europe_pmc(
+            candidate,
+            existing_sources=existing_sources,
+            retry=retry,
+            session=session,
+            provider_state=provider_state,
+        )
     candidate_id = _candidate_value(candidate, "candidate_id")
     existing_keys = {
         key
@@ -356,22 +731,54 @@ def search_candidate_literature(
             "errors": [],
         }
         diagnostic["queries"].append(query_diagnostic)
-        search_payload = _request_json(
-            session,
-            f"{NCBI_BASE_URL}/esearch.fcgi",
-            {"db": "pubmed", "term": query, "retmode": "json", "retmax": DEFAULT_MAX_RESULTS},
-            on_error=query_diagnostic["errors"].append,
-        )
+        try:
+            search_payload = _request_json(
+                session,
+                f"{NCBI_BASE_URL}/esearch.fcgi",
+                {"db": "pubmed", "term": query, "retmode": "json", "retmax": DEFAULT_MAX_RESULTS},
+                on_error=query_diagnostic["errors"].append,
+            )
+        except LiteratureProviderUnavailable as exc:
+            provider_state.mark_ncbi_unavailable(str(exc))
+            diagnostic["provider_error"] = str(exc)
+            print(f"[Literature] PubMed unavailable; falling back to Europe PMC: {exc}")
+            fallback_sources = search_candidate_literature_europe_pmc(
+                candidate,
+                existing_sources=existing_sources,
+                retry=retry,
+                session=session,
+                provider_state=provider_state,
+            )
+            diagnostic["fallback_provider"] = "europe_pmc"
+            diagnostic["fallback_sources"] = len(fallback_sources)
+            print(f"[LiteratureSearchDiagnostic] {json.dumps(diagnostic, ensure_ascii=False)}")
+            return fallback_sources
         ids = search_payload.get("esearchresult", {}).get("idlist", [])
         query_diagnostic["hits"] = len(ids)
         if not ids:
             continue
-        xml = _request_text(
-            session,
-            f"{NCBI_BASE_URL}/efetch.fcgi",
-            {"db": "pubmed", "id": ",".join(ids), "retmode": "xml"},
-            on_error=query_diagnostic["errors"].append,
-        )
+        try:
+            xml = _request_text(
+                session,
+                f"{NCBI_BASE_URL}/efetch.fcgi",
+                {"db": "pubmed", "id": ",".join(ids), "retmode": "xml"},
+                on_error=query_diagnostic["errors"].append,
+            )
+        except LiteratureProviderUnavailable as exc:
+            provider_state.mark_ncbi_unavailable(str(exc))
+            diagnostic["provider_error"] = str(exc)
+            print(f"[Literature] PubMed fetch unavailable; falling back to Europe PMC: {exc}")
+            fallback_sources = search_candidate_literature_europe_pmc(
+                candidate,
+                existing_sources=existing_sources,
+                retry=retry,
+                session=session,
+                provider_state=provider_state,
+            )
+            diagnostic["fallback_provider"] = "europe_pmc"
+            diagnostic["fallback_sources"] = len(fallback_sources)
+            print(f"[LiteratureSearchDiagnostic] {json.dumps(diagnostic, ensure_ascii=False)}")
+            return fallback_sources
         if not xml:
             continue
         try:
@@ -405,7 +812,10 @@ def search_candidate_literature(
             identifier = pubmed_identifier
             source_url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/"
             if pmcid:
-                pmc_content = _fetch_pmc_full_text(session, pmcid)
+                try:
+                    pmc_content = _fetch_pmc_full_text(session, pmcid)
+                except LiteratureProviderUnavailable:
+                    pmc_content = {}
                 if pmc_content.get("content"):
                     content = pmc_content["content"]
                     source_name = "PMC"
@@ -464,6 +874,7 @@ def search_literature_for_candidates(
     if not candidate_list:
         return all_sources
 
+    provider_state = _ProviderState()
     # Each worker gets the same immutable snapshot.  Sharing the growing
     # ``all_sources`` list between workers would make de-duplication racey.
     # Results are merged in candidate order below, preserving the old output
@@ -484,6 +895,7 @@ def search_literature_for_candidates(
                 hpo_labels=hpo_labels,
                 existing_sources=base_sources,
                 retry=retry,
+                provider_state=provider_state,
             )
         except Exception as exc:
             print(f"[Literature] search failed for {candidate_id}: {exc}")

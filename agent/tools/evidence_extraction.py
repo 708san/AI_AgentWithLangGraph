@@ -72,7 +72,7 @@ def _is_off_topic_rejection_claim(claim: str) -> bool:
 CHUNK_MAX_CHARS = int(os.getenv("EVIDENCE_CHUNK_MAX_CHARS", "3500"))
 MAX_CHUNKS_PER_SOURCE = int(os.getenv("EVIDENCE_MAX_CHUNKS_PER_SOURCE", "2"))
 MAX_CHUNKS_PER_CANDIDATE = int(os.getenv("EVIDENCE_MAX_CHUNKS_PER_CANDIDATE", "10"))
-EVIDENCE_MAX_WORKERS = max(1, int(os.getenv("EVIDENCE_MAX_WORKERS", "2")))
+EVIDENCE_MAX_WORKERS = max(1, int(os.getenv("EVIDENCE_MAX_WORKERS", "3")))
 
 
 @dataclass(frozen=True)

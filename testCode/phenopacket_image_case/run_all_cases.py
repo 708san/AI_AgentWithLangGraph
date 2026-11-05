@@ -8,7 +8,7 @@ Usage::
 
     .venv/bin/python testCode/phenopacket_image_case/run_all_cases.py \
       --pubmed-max-workers 2 \
-      --evidence-max-workers 2
+      --evidence-max-workers 3
 
 Completed cases are skipped when their input fingerprint and execution
 configuration match the existing ``run_config.json`` and the output contract
@@ -267,20 +267,20 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--image-dir", default=str(DEFAULT_IMAGE_DIR))
     parser.add_argument("--output-root", default=str(DEFAULT_ALL_OUTPUT_ROOT))
     parser.add_argument("--model", default="gpt-5-2")
-    parser.add_argument("--max-flow-iterations", type=int, default=1)
+    parser.add_argument("--max-flow-iterations", type=int, default=0)
     parser.add_argument("--use-phenobrain", action="store_true")
     parser.add_argument("--use-absent-hpo", action="store_true")
     parser.add_argument(
         "--pubmed-max-workers",
         type=_positive_int,
         default=2,
-        help="Maximum concurrent candidate literature searches per patient.",
+        help="Maximum concurrent candidate literature searches per patient. Defaults to 2.",
     )
     parser.add_argument(
         "--evidence-max-workers",
         type=_positive_int,
-        default=2,
-        help="Maximum concurrent candidate Evidence extractions per patient.",
+        default=3,
+        help="Maximum concurrent candidate Evidence extractions per patient. Defaults to 3.",
     )
     parser.add_argument(
         "--max-parallel-cases",

@@ -137,7 +137,7 @@ def tentative_executor(model, *, log_dir=None):
 def main(mode, argv=None):
     parser = argparse.ArgumentParser(description=f"Run {mode} evaluation.")
     parser.add_argument("--benchmark", type=Path, required=True)
-    parser.add_argument("--model", choices=["gpt-4o", "gpt-5-1", "gpt-5-2"], default="gpt-4o")
+    parser.add_argument("--model", choices=["gpt-4o", "gpt-5-1", "gpt-5-2"], default="gpt-5-2")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--ks", nargs="+", type=int, default=[1, 3, 5])

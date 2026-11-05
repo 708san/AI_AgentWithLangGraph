@@ -31,9 +31,12 @@ from agent.tools.evidence_extraction import (
 )
 from agent.tools.evidence_validation import validate_v2_output
 from agent.tools.literature_search import (
+    LiteratureProviderUnavailable,
     build_literature_queries,
+    build_europepmc_queries,
     matches_candidate_identity,
     search_candidate_literature,
+    search_candidate_literature_europe_pmc,
     search_literature_for_candidates,
 )
 from agent.tools.reflection import create_reflection_v2
@@ -68,6 +71,23 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
             v2_log = Path(pipeline.logfile_path).read_text(encoding="utf-8")
             self.assertIn("evidence_mode=v2", v2_log)
             self.assertIn("V2 GRAPH", v2_log)
+
+    def test_pipeline_defaults_all_reasoning_to_medium(self):
+        with patch("agent.agent_pipeline.get_llm_instance") as get_llm:
+            get_llm.side_effect = [Mock(name="main_llm"), Mock(name="zero_shot_llm")]
+            pipeline = RareDiseaseDiagnosisPipeline(model_name="gpt-5-2")
+
+        self.assertEqual(get_llm.call_count, 1)
+        self.assertEqual(get_llm.call_args_list[0].kwargs["reasoning_effort"], "medium")
+        self.assertIs(pipeline.llm, pipeline.zero_shot_llm)
+
+    def test_pipeline_defaults_to_no_literature_retry_iterations(self):
+        with patch("agent.agent_pipeline.get_llm_instance") as get_llm:
+            get_llm.return_value = Mock(name="main_llm")
+            pipeline = RareDiseaseDiagnosisPipeline(model_name="gpt-5-2")
+
+        initial_state = pipeline._build_initial_state(hpo_list=[])
+        self.assertEqual(initial_state["max_flow_iterations"], 0)
 
     def setUp(self):
         self.candidate = MergedDiseaseCandidateV2(
@@ -137,6 +157,32 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
         self.assertNotIn("selection_reason", output.model_dump_json())
         self.assertEqual(reasons[0]["ans"][0]["selection_reason"], generated.ans[0].selection_reason)
         self.assertIn("selection_reason", prompt)
+
+    def test_zero_shot_prefers_dedicated_llm(self):
+        generated = ZeroShotReasonedOutput(ans=[{
+            "disease_name": "Example syndrome",
+            "rank": 1,
+            "OMIM_id": "123456",
+            "selection_reason": "Dedicated reasoning profile.",
+        }])
+        shared_llm = Mock()
+        dedicated_llm = Mock()
+        dedicated_llm.get_structured_llm.return_value = Mock()
+        dedicated_llm.invoke_with_content_filter_retry.return_value = generated
+
+        output, _ = createZeroshot({
+            "hpoDict": {"HP:1": "Hypotonia"},
+            "absentHpoDict": {},
+            "use_absentHPO": False,
+            "onset": "Unknown",
+            "sex": "unknown",
+            "llm": shared_llm,
+            "zero_shot_llm": dedicated_llm,
+        })
+
+        self.assertEqual(output.ans[0].disease_name, "Example syndrome")
+        dedicated_llm.get_structured_llm.assert_called_once()
+        shared_llm.get_structured_llm.assert_not_called()
 
     def test_tentative_identity_validation_allows_partial_selection(self):
         valid = DiagnosisOutputV2(ans=[{
@@ -225,6 +271,82 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
         self.assertIn("Example syndrome", output.getvalue())
         self.assertIn('"hits": 0', output.getvalue())
 
+    def test_pubmed_failure_falls_back_to_europe_pmc(self):
+        with patch(
+            "agent.tools.literature_search._request_json",
+            side_effect=LiteratureProviderUnavailable("500 Server Error"),
+        ):
+            with patch(
+                "agent.tools.literature_search.search_candidate_literature_europe_pmc",
+                return_value=[self.source],
+            ) as fallback:
+                sources = search_candidate_literature(
+                    self.candidate,
+                    session=Mock(),
+                )
+
+        self.assertEqual(sources, [self.source])
+        fallback.assert_called_once()
+
+    def test_europe_pmc_fallback_normalizes_core_result(self):
+        europe_payload = {
+            "resultList": {
+                "result": [{
+                    "source": "MED",
+                    "id": "98765432",
+                    "pmid": "98765432",
+                    "title": "Example syndrome and EXG1",
+                    "abstractText": "Example syndrome is associated with hypotonia and EXG1 variants.",
+                    "journalTitle": "Example Journal",
+                    "pubYear": "2025",
+                    "authorString": "A Author, B Author",
+                }]
+            }
+        }
+        def request_json(_session, endpoint, _params, **_kwargs):
+            if "eutils.ncbi.nlm.nih.gov" in endpoint:
+                raise LiteratureProviderUnavailable("500 Server Error")
+            return europe_payload
+
+        with patch(
+            "agent.tools.literature_search._request_json",
+            side_effect=request_json,
+        ):
+            sources = search_candidate_literature(self.candidate, session=Mock())
+
+        self.assertEqual(len(sources), 1)
+        self.assertEqual(sources[0].identifier, "PMID:98765432")
+        self.assertEqual(sources[0].source_name, "PubMed")
+        self.assertEqual(sources[0].publication_year, "2025")
+        self.assertIn("EXG1", sources[0].raw_content)
+
+    def test_europe_pmc_rejects_non_med_pmc_doi_only_records(self):
+        europe_payload = {
+            "resultList": {
+                "result": [{
+                    "source": "PPR",
+                    "id": "10.1234/example.preprint",
+                    "doi": "10.1234/example.preprint",
+                    "title": "Example syndrome and EXG1",
+                    "abstractText": "Example syndrome is associated with hypotonia.",
+                }]
+            }
+        }
+        with patch(
+            "agent.tools.literature_search._request_json",
+            return_value=europe_payload,
+        ):
+            sources = search_candidate_literature_europe_pmc(
+                self.candidate,
+                session=Mock(),
+            )
+        self.assertEqual(sources, [])
+
+    def test_europe_pmc_queries_keep_disease_and_gene_together(self):
+        queries = build_europepmc_queries(self.candidate)
+        self.assertIn('"Example syndrome"', queries[0])
+        self.assertTrue(any("EXG1" in query for query in queries))
+
     def test_reflection_retrieval_status_is_run_scoped_and_not_a_negative_judgment(self):
         no_literature = create_reflection_v2({
             "mergedDiseaseCandidates": [self.candidate],
@@ -236,7 +358,9 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
             "llm": None,
         })[0].ans[0]
         self.assertEqual(no_literature.literature_status, "not_retrieved")
-        self.assertTrue(no_literature.correctness)
+        # The no-LLM fallback no longer uses the local disease-phenotype table
+        # to manufacture a positive clinical-fit judgement.
+        self.assertFalse(no_literature.correctness)
 
         source_without_extractable_evidence = create_reflection_v2({
             "mergedDiseaseCandidates": [self.candidate],
@@ -248,7 +372,7 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
             "llm": None,
         })[0].ans[0]
         self.assertEqual(source_without_extractable_evidence.literature_status, "insufficient")
-        self.assertTrue(source_without_extractable_evidence.correctness)
+        self.assertFalse(source_without_extractable_evidence.correctness)
 
     def test_reflection_fallback_does_not_default_every_candidate_to_true(self):
         generic_candidate = self.candidate.model_copy(update={
@@ -265,9 +389,25 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
         })
         self.assertFalse(result.ans[0].correctness)
 
+    def test_fallback_provenance_separates_literature_tools_inference_and_uncertainty(self):
+        result, _ = create_reflection_v2({
+            "mergedDiseaseCandidates": [self.candidate],
+            "evidence": [self.evidence],
+            "sources": [self.source],
+            "hpoDict": {"HP:1": "Hypotonia"},
+            "absentHpoDict": {},
+            "use_absentHPO": False,
+            "llm": None,
+        })
+        answer = result.ans[0]
+        self.assertIn(self.evidence.claim_en, answer.literature_basis_en)
+        self.assertIn("Model inference", answer.model_inference_en)
+        self.assertIn("Uncertainty", answer.uncertainty_en)
+
     def test_reflection_prompt_defines_retention_separately_from_retrieval(self):
         candidate = self.candidate.model_copy(update={
-            "tool_supports": [CandidateSupport(tool="GestaltMatcher", rank=1, score=0.91)]
+            "tool_supports": [CandidateSupport(tool="GestaltMatcher", rank=1, score=0.91)],
+            "phenotype_labels": ["LocalOnlyDiseasePhenotype"],
         })
         llm = Mock()
         llm.get_structured_llm.return_value.invoke.return_value = ReflectionOutputV2(ans=[])
@@ -285,6 +425,35 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
         self.assertIn("A candidate returned by a diagnostic tool is a hypothesis", prompt)
         self.assertIn("GestaltMatcher:rank=1", prompt)
         self.assertIn("PATIENT_ABSENT_FEATURES: Seizures", prompt)
+        self.assertIn("Keep the output concise", prompt)
+        self.assertIn("complete Evidence ledger is preserved outside Reflection", prompt)
+        self.assertNotIn("LocalOnlyDiseasePhenotype", prompt)
+        self.assertNotIn("database_phenotypes=", prompt)
+
+    def test_reflection_uses_larger_temporary_llm_for_real_wrapper_shape(self):
+        generated = ReflectionOutputV2(ans=[])
+        structured = Mock()
+        structured.invoke.return_value = generated
+        temporary_llm = Mock()
+        temporary_llm.with_structured_output.return_value = structured
+        llm = Mock()
+        llm.default_max_tokens = 15000
+        llm.get_temp_llm_with_max_tokens.return_value = temporary_llm
+        result, _ = create_reflection_v2({
+            "mergedDiseaseCandidates": [self.candidate],
+            "evidence": [],
+            "sources": [],
+            "hpoDict": {"HP:1": "Hypotonia"},
+            "absentHpoDict": {},
+            "use_absentHPO": False,
+            "llm": llm,
+        })
+        llm.get_temp_llm_with_max_tokens.assert_called_once_with(
+            30000,
+            timeout_seconds=300.0,
+        )
+        temporary_llm.with_structured_output.assert_called_once_with(ReflectionOutputV2)
+        self.assertEqual(len(result.ans), 1)
 
     def test_retry_evidence_extraction_skips_already_resolved_candidates(self):
         unresolved = self.candidate.model_copy(update={"candidate_id": "OMIM:654321"})
@@ -415,6 +584,10 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
         item = result["finalDiagnosis"]["ans"][0]
         reference = result["finalDiagnosis"]["references"][0]
         self.assertEqual(item["citation_numbers"], [1])
+        self.assertEqual(item["reference_numbers"], [1])
+        self.assertEqual(item["evidence"][0]["evidence_id"], "EVD-1")
+        self.assertEqual(item["reference_details"][0]["number"], 1)
+        self.assertEqual(item["reference_details"][0]["evidence"][0]["claim_en"], self.evidence.claim_en)
         self.assertIn("[1]", item["description_en"])
         self.assertEqual(reference["number"], 1)
         self.assertEqual(reference["title"], self.source.title)
@@ -512,7 +685,122 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
         self.assertEqual(result["finalDiagnosis"]["references"][0]["number"], 1)
         reflection_item = result["reflection"]["ans"][0]
         self.assertEqual(reflection_item["citation_numbers"], [2])
+        self.assertEqual(reflection_item["reference_numbers"], [2])
+        self.assertEqual(reflection_item["reference_details"][0]["number"], 2)
+        self.assertEqual(reflection_item["evidence"][0]["reference_number"], 2)
         self.assertIn("[2]", reflection_item["diagnosis_analysis_en"])
+
+    def test_external_final_reference_details_include_all_selected_evidence(self):
+        second_evidence = self.evidence.model_copy(update={
+            "evidence_id": "EVD-2",
+            "claim_en": "The disease can include developmental delay.",
+            "claim_ja": "この疾患では発達遅滞を伴うことがある。",
+            "excerpt": "The disease can include developmental delay",
+        })
+        diagnosis = DiagnosisOutputV2(ans=[DiagnosisFormatV2(
+            candidate_id="OMIM:123456",
+            disease_name_en="Example syndrome",
+            disease_name_ja="Example syndrome",
+            OMIM_id="OMIM:123456",
+            rank=1,
+            description_en=(
+                "The disease is associated with hypotonia. [[EVIDENCE:EVD-1]] "
+                "The disease can include developmental delay. [[EVIDENCE:EVD-2]]"
+            ),
+            description_ja=(
+                "この疾患は筋緊張低下と関連します。[[EVIDENCE:EVD-1]] "
+                "この疾患では発達遅滞を伴うことがある。[[EVIDENCE:EVD-2]]"
+            ),
+            evidence_ids=["EVD-1", "EVD-2"],
+            literature_status="supported",
+        )])
+        result = serialize_external_compatibility({
+            "evidence_mode": "v2",
+            "pubCaseFinder": [],
+            "GestaltMatcher": [],
+            "phenotypeSearchResult": [],
+            "zeroShotResult": {"ans": []},
+            "mergedDiseaseCandidates": [],
+            "sources": [self.source],
+            "evidence": [self.evidence, second_evidence],
+            "tentativeDiagnosis": diagnosis,
+            "reflection": {"ans": [{
+                "candidate_id": "OMIM:123456",
+                "disease_name_en": "Example syndrome",
+                "disease_name_ja": "Example syndrome",
+                "correctness": True,
+                "diagnosis_analysis_en": "The evidence supports the candidate.",
+                "diagnosis_analysis_ja": "Evidenceは候補を支持します。",
+                "evidence_ids": ["EVD-1", "EVD-2"],
+            }]},
+            "finalDiagnosis": diagnosis,
+        })
+
+        final = result["finalDiagnosis"]["finalDiagnosis"]
+        item = final["ans"][0]
+        self.assertEqual(item["citation_numbers"], [1])
+        self.assertEqual(
+            [row["evidence_id"] for row in item["reference_details"][0]["evidence"]],
+            ["EVD-1", "EVD-2"],
+        )
+        self.assertEqual(
+            [row["claim_en"] for row in final["reference_details"][0]["evidence"]],
+            [self.evidence.claim_en, second_evidence.claim_en],
+        )
+        self.assertEqual(
+            [row["claim_en"] for row in final["references"][0]["evidence"]],
+            [self.evidence.claim_en, second_evidence.claim_en],
+        )
+        reflection = result["reflection"]["reflection"]["ans"][0]
+        self.assertEqual(reflection["citation_numbers"], [1])
+        self.assertEqual(reflection["reference_numbers"], [1])
+        self.assertNotIn("evidence", reflection["reference_details"][0])
+
+    def test_external_reflection_references_are_bibliographic_without_evidence(self):
+        diagnosis = DiagnosisOutputV2(ans=[DiagnosisFormatV2(
+            candidate_id="OMIM:123456",
+            disease_name_en="Example syndrome",
+            disease_name_ja="Example syndrome",
+            OMIM_id="OMIM:123456",
+            rank=1,
+            description_en="The disease is associated with hypotonia. [[EVIDENCE:EVD-1]]",
+            description_ja="この疾患は筋緊張低下と関連します。[[EVIDENCE:EVD-1]]",
+            evidence_ids=["EVD-1"],
+            literature_status="supported",
+        )])
+        result = serialize_external_compatibility({
+            "evidence_mode": "v2",
+            "pubCaseFinder": [],
+            "GestaltMatcher": [],
+            "phenotypeSearchResult": [],
+            "zeroShotResult": {"ans": []},
+            "mergedDiseaseCandidates": [],
+            "sources": [self.source],
+            "evidence": [self.evidence],
+            "tentativeDiagnosis": diagnosis,
+            "reflection": {"ans": [{
+                "candidate_id": "OMIM:123456",
+                "disease_name_en": "Example syndrome",
+                "disease_name_ja": "Example syndrome",
+                "diagnosis_analysis_en": "The literature supports the phenotype. [[EVIDENCE:EVD-1]]",
+                "diagnosis_analysis_ja": "文献が表現型を支持します。[[EVIDENCE:EVD-1]]",
+                "evidence_ids": ["EVD-1"],
+            }]},
+            "finalDiagnosis": diagnosis,
+        })
+
+        reflection = result["reflection"]["reflection"]
+        reference = reflection["references"][0]
+        item = reflection["ans"][0]
+        self.assertEqual(reference["number"], 1)
+        self.assertEqual(reference["title"], self.source.title)
+        self.assertEqual(reference["identifier"], self.source.identifier)
+        self.assertEqual(reference["url"], self.source.url)
+        self.assertNotIn("evidence", reference)
+        self.assertEqual(item["citation_numbers"], [1])
+        self.assertEqual(item["reference_numbers"], [1])
+        self.assertEqual(item["reference_details"], [reference])
+        self.assertNotIn("evidence", item["reference_details"][0])
 
     def test_serializer_does_not_backfill_a_citation_to_unrelated_prose(self):
         result = _add_citations(
@@ -700,9 +988,59 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
         self.assertEqual(final.validation_errors, [])
         self.assertIn("[[EVIDENCE:EVD-1]]", final.ans[0].description_en)
 
-    def test_final_prompt_uses_phenotype_and_tool_support_not_literature_volume_for_rank(self):
+    def test_final_generation_repairs_identity_drift_and_rank_gaps(self):
+        tentative = DiagnosisOutputV2(ans=[DiagnosisFormatV2(
+            candidate_id="OMIM:123456",
+            disease_name_en="Example syndrome",
+            disease_name_ja="Example syndrome",
+            OMIM_id="OMIM:123456",
+            rank=1,
+            description_en="Tentative candidate.",
+            description_ja="暫定候補です。",
+            literature_status="not_retrieved",
+        )])
+        generated = FinalDiagnosisGenerationOutput(ans=[DiagnosisFormatV2(
+            candidate_id="OMIM:123456",
+            disease_name_en="Example disease",
+            disease_name_ja="別の疾患",
+            OMIM_id="123456",
+            rank=7,
+            description_en="The generated explanation remains usable.",
+            description_ja="生成された説明は利用可能です。",
+            evidence_ids=["EVD-from-another-candidate"],
+            literature_status="not_retrieved",
+        )])
+
+        class Structured:
+            def invoke(self, _messages):
+                return generated
+
+        class FakeLLM:
+            def get_structured_llm(self, _schema):
+                return Structured()
+
+        final, _prompt = createFinalDiagnosisV2({
+            "tentativeDiagnosis": tentative,
+            "mergedDiseaseCandidates": [self.candidate],
+            "reflection": None,
+            "evidence": [self.evidence],
+            "sources": [self.source],
+            "hpoDict": {"HP:1": "Hypotonia"},
+            "absentHpoDict": {},
+            "use_absentHPO": False,
+            "llm": FakeLLM(),
+        })
+
+        self.assertEqual(final.ans[0].rank, 1)
+        self.assertEqual(final.ans[0].OMIM_id, "OMIM:123456")
+        self.assertEqual(final.ans[0].disease_name_en, "Example syndrome")
+        self.assertEqual(final.ans[0].evidence_ids, [])
+        self.assertEqual(final.validation_errors, [])
+
+    def test_final_prompt_uses_patient_and_tool_support_not_literature_volume_for_rank(self):
         candidate = self.candidate.model_copy(update={
-            "tool_supports": [CandidateSupport(tool="GestaltMatcher", rank=1, score=0.91)]
+            "tool_supports": [CandidateSupport(tool="GestaltMatcher", rank=1, score=0.91)],
+            "phenotype_labels": ["LocalOnlyDiseasePhenotype"],
         })
         tentative = DiagnosisOutputV2(ans=[DiagnosisFormatV2(
             candidate_id=candidate.candidate_id,
@@ -752,6 +1090,8 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
         self.assertIn("correctness=true remains eligible", prompt)
         self.assertIn("GestaltMatcher:rank=1", prompt)
         self.assertIn("Hypotonia", prompt)
+        self.assertNotIn("LocalOnlyDiseasePhenotype", prompt)
+        self.assertNotIn("candidate_phenotypes=", prompt)
 
     def test_node_result_uses_same_simple_projection(self):
         node_result = serialize_node_result(

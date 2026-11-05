@@ -6,6 +6,7 @@ from functools import wraps
 from pydantic import BaseModel
 import copy
 from typing import Any
+from datetime import datetime, timezone
 from agent.utils.response_serializer import (
     serialize_external_compatibility,
     serialize_node_result,
@@ -33,6 +34,65 @@ def _safe_path_component(value: Any) -> str:
     return component.strip("._") or "unknown"
 
 
+def _record_node_status(
+    node_name: str,
+    status: str,
+    *,
+    error: Exception | None = None,
+    retry_count: int = 0,
+) -> None:
+    """Persist node lifecycle state without interfering with graph execution."""
+    result_dir = os.environ.get("AGENT_RESULT_DIR")
+    if not result_dir:
+        return
+    try:
+        os.makedirs(result_dir, exist_ok=True)
+        status_path = os.path.join(result_dir, "node_status.json")
+        lock_path = f"{status_path}.lock"
+        with open(lock_path, "a+", encoding="utf-8") as lock_handle:
+            fcntl.flock(lock_handle, fcntl.LOCK_EX)
+            try:
+                if os.path.exists(status_path):
+                    try:
+                        with open(status_path, encoding="utf-8") as status_handle:
+                            payload = json.load(status_handle)
+                    except (OSError, json.JSONDecodeError):
+                        payload = {}
+                else:
+                    payload = {}
+                nodes = payload.setdefault("nodes", {})
+                entry = nodes.setdefault(node_name, {"node": node_name})
+                now = datetime.now(timezone.utc).isoformat()
+                if status == "started":
+                    entry.update({
+                        "status": "running",
+                        "started_at": now,
+                        "finished_at": None,
+                        "retry_count": retry_count,
+                        "error_type": None,
+                        "error_message": None,
+                    })
+                else:
+                    entry.update({
+                        "status": status,
+                        "finished_at": now,
+                        "retry_count": retry_count,
+                    })
+                    if error is not None:
+                        entry.update({
+                            "error_type": type(error).__name__,
+                            "error_message": str(error),
+                        })
+                payload["updated_at"] = now
+                _write_json(status_path, payload)
+            finally:
+                fcntl.flock(lock_handle, fcntl.LOCK_UN)
+    except Exception as exc:
+        # Lifecycle bookkeeping must never turn a successful graph node into
+        # a failed node. The main artifacts remain authoritative.
+        print(f"[WARNING] Could not record status for node '{node_name}': {exc}")
+
+
 def _build_phase_results(
     *,
     patient_id: Any,
@@ -57,7 +117,7 @@ def _build_phase_results(
     accumulated.update({
         key: value
         for key, value in data_for_saving.items()
-        if key not in {"node_results", "llm", "gestalt_matcher_result_loader"}
+        if key not in {"node_results", "llm", "zero_shot_llm", "gestalt_matcher_result_loader"}
     })
 
     def pick(*keys: str) -> dict[str, Any]:
@@ -171,11 +231,11 @@ def save_node_result(node_name: str, result_data: Any, state: dict[str, Any]) ->
                 # baseline, then let the persisted cumulative node results win.
                 accumulated_state = {
                     key: value for key, value in state.items()
-                    if key not in {"node_results", "llm", "gestalt_matcher_result_loader"}
+                    if key not in {"node_results", "llm", "zero_shot_llm", "gestalt_matcher_result_loader"}
                 }
                 accumulated_state.update({
                     key: value for key, value in data_for_saving.items()
-                    if key not in {"node_results", "llm", "gestalt_matcher_result_loader"}
+                    if key not in {"node_results", "llm", "zero_shot_llm", "gestalt_matcher_result_loader"}
                 })
                 if state.get("evidence_mode"):
                     accumulated_state["evidence_mode"] = state["evidence_mode"]
@@ -233,7 +293,13 @@ def save_result(node_name):
     def decorator(func):
         @wraps(func)
         def wrapper(state):
-            result_data = func(state)
+            _record_node_status(node_name, "started")
+            try:
+                result_data = func(state)
+            except Exception as exc:
+                _record_node_status(node_name, "failed", error=exc)
+                raise
+            _record_node_status(node_name, "completed")
             save_node_result(node_name, result_data, state)
             return result_data
         wrapper._saves_result = True

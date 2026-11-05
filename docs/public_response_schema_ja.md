@@ -53,7 +53,7 @@ Referenceは自由記述をそのまま再利用せず、検証済みEvidenceか
 | 旧版の場所 | 旧版での根拠の形式 | 新版での扱い |
 |---|---|---|
 | tentativeDiagnosis.reference | PubCaseFinder、ZeroShot、GestaltMatcherなどのツール名を並べた文字列 | 暫定診断は文献検索前なので、通常はreferencesが空。ツール根拠は候補やtool_rankingsから確認する。 |
-| reflection.ans[].references | PubMed、Wikipedia、PhenotypeSearch、GestaltMatcherなどを含む自由記述の配列 | 文献はEvidenceとReferenceに分離する。ツールの順位やスコアは文献Referenceにしない。 |
+| reflection.ans[].references | Reference番号と文献情報の構造化配列 | 文献Referenceのみを返す。EvidenceはReference内に埋め込まない。ツールの順位やスコアは文献Referenceにしない。 |
 | finalDiagnosis.reference | [1]、[2]と本文を対応させた長い文字列 | referencesを構造化し、ans[].citation_numbersから対応付ける。referenceは表示用の補助文字列として残す。 |
 
 旧版のように、ツール名だけを文献Referenceとして扱ったり、
@@ -141,9 +141,17 @@ JSONの形式は変更せず、用途だけを次のように整理します。
 | finalDiagnosis.ans[].disease_name_ja | 日本語疾患名。 |
 | finalDiagnosis.ans[].description_en | 英語の説明。 |
 | finalDiagnosis.ans[].description_ja | 日本語の説明。 |
+| finalDiagnosis.ans[].literature_basis_en / literature_basis_ja | 検証済み文献Evidenceだけに基づく要約。 |
+| finalDiagnosis.ans[].tool_considerations_en / tool_considerations_ja | 診断ツールの順位・スコア等。文献Citationではない。 |
+| finalDiagnosis.ans[].model_inference_en / model_inference_ja | 表現型・ツール・Evidenceを統合したモデル推論。文献事実とは区別する。 |
+| finalDiagnosis.ans[].uncertainty_en / uncertainty_ja | 文献取得、患者情報、候補間の未解決点。 |
 | finalDiagnosis.ans[].literature_status | 文献根拠の状態。 |
 | finalDiagnosis.ans[].citation_numbers | その候補が引用したReference番号。 |
+| finalDiagnosis.ans[].reference_numbers | `citation_numbers`と同じReference番号の機械可読別名。 |
+| finalDiagnosis.ans[].evidence | その候補が使用したEvidence。claim、原文抜粋、Reference番号を含む。 |
+| finalDiagnosis.ans[].reference_details | その候補が使用したReferenceと、そのReference内で使用したEvidence。 |
 | finalDiagnosis.references | 最終診断で使用された文献一覧。 |
+| finalDiagnosis.reference_details | 最終診断全体で使用された文献とEvidenceの追跡情報。 |
 | finalDiagnosis.references[].number | 引用番号。 |
 | finalDiagnosis.references[].title | 論文タイトル。 |
 | finalDiagnosis.references[].identifier | PMIDまたはPMCID。 |
@@ -153,6 +161,15 @@ JSONの形式は変更せず、用途だけを次のように整理します。
 
 最終診断の文章にある[n]は、トップレベル`references[].number == n`のReferenceに対応します。
 `finalDiagnosis.references`には、最終診断で使用したReferenceの部分集合も含まれます。
+`finalDiagnosis.ans[*].reference_details`では、疾患候補ごとに使用したReferenceだけを返し、
+各Referenceの`evidence`にその候補で使用した全claimを返します。
+
+Reflectionについても、各`reflection.ans[*]`に
+`citation_numbers`、`reference_numbers`、`references`、`reference_details`を持たせ、
+分析結果からReference番号と書誌情報を追跡できます。ReflectionのReferenceには
+Evidenceを埋め込まず、Evidenceとの対応が必要な場合はトップレベルのEvidenceを利用します。
+Reflectionの各回答にも`literature_basis_*`、`tool_considerations_*`、
+`model_inference_*`、`uncertainty_*`を持たせ、文献・ツール・モデル推論・不確実性を分離します。
 
 ### 症例情報として使うキー
 
@@ -267,6 +284,21 @@ absentHpoListにない所見は、「ない」とは限りません。未入力�
 | flow_iteration | integer | 文献検索・検証フローの反復回数。 |
 | max_flow_iterations | integer | 許可された最大反復回数。 |
 | validation_status | string | 全体の検証状態。passed、partial、failed。 |
+
+### 4.3 推論・取得の運用設定
+
+Reflection v2は候補全体を1回の構造化LLM呼び出しで処理します。候補ごとに分割しません。
+既定の完了トークン上限は30,000です。必要に応じて次の環境変数で調整できます。
+
+| 環境変数 | 既定値 | 内容 |
+|---|---:|---|
+| `REFLECTION_MAX_COMPLETION_TOKENS` | `30000` | Reflection v2の完了トークン上限。 |
+| `REFLECTION_REQUEST_TIMEOUT_SECONDS` | `300` | Reflection v2のリクエストタイムアウト。 |
+| `EUROPE_PMC_ALLOWED_SOURCES` | `MED,PMC` | Reference採用対象とするEurope PMCのSource。DOIのみの記録は採用しない。 |
+
+途中でノードが失敗した場合、実行結果ディレクトリの`node_status.json`に、ノードごとの
+`running`、`completed`、`failed`、開始・終了時刻、エラー型・メッセージを保存します。
+生成途中の`phase_results.json`およびノード別JSONと合わせて、失敗位置と部分結果を確認できます。
 | validation_errors | array<string> | 構造やIDの検証エラー。問題がなければ空配列。 |
 
 validation_statusの意味は次の通りです。
@@ -577,12 +609,16 @@ reflection
 | diagnosis_analysis_ja | string | 患者所見と文献Evidenceの関係を説明する日本語文。 |
 | literature_status | string | 文献Evidenceの状態。 |
 | citation_numbers | array<integer> | 分析文で参照したReference番号。 |
+| reference_numbers | array<integer> | `citation_numbers`と同じReference番号の機械可読別名。 |
+| references | array<object> | そのReflection候補が参照した書誌情報。各Referenceは`number`、`title`、`identifier`、`url`、著者、雑誌、出版年を持つ。Evidenceは含めない。 |
+| reference_details | array<object> | `references`と同じ書誌情報。Finalとの共通UI表示用。Evidenceは含めない。 |
+| evidence | array<object> | Reflectionで利用したEvidence。Reference内には埋め込まず、独立した配列として扱う。 |
 
-reflection自体にはreferences配列がありませんが、`citation_numbers`と本文中の`[n]`は
-全体共通のトップレベル`references`を参照します。そこからURLや文献情報を解決できます。
+`citation_numbers`と本文中の`[n]`は、全体共通のトップレベル`references`、または
+Reflection候補内の`references`を参照します。どちらからもURLや書誌情報を解決できます。
 
-旧版のreflection.ans[].referencesのように、候補ごとに文献やツールの説明を自由記述で持たせる方式は、
-文献とツールの区別や番号対応が難しいため、新版では採用していません。
+旧版のreflection.ans[].referencesのように、文献やツールの説明を自由記述の文字列だけで
+持たせる方式は採用しません。Reflectionの`references`はFinalと同じ構造化書誌情報です。
 
 ## 10. Reference番号の付け方と対応関係
 

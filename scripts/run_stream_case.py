@@ -73,12 +73,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-root", default=str(DEFAULT_OUTPUT_ROOT))
     parser.add_argument("--run-dir", default=None)
     parser.add_argument("--metadata-occurrence", type=int, default=None)
-    parser.add_argument("--model", default="gpt-4o")
-    parser.add_argument("--max-flow-iterations", type=int, default=1)
+    parser.add_argument("--model", default="gpt-5-2")
+    parser.add_argument("--max-flow-iterations", type=int, default=0)
     parser.add_argument("--use-phenobrain", action="store_true")
     parser.add_argument("--use-absent-hpo", action="store_true")
     parser.add_argument("--pubmed-max-workers", type=int, default=2)
-    parser.add_argument("--evidence-max-workers", type=int, default=2)
+    parser.add_argument("--evidence-max-workers", type=int, default=3)
     return parser
 
 

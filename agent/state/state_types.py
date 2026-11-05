@@ -138,6 +138,14 @@ class DiagnosisFormatV2(BaseModel):
     description_en: str
     description_ja: str
     evidence_ids: List[str] = Field(default_factory=list)
+    literature_basis_en: str = ""
+    literature_basis_ja: str = ""
+    tool_considerations_en: str = ""
+    tool_considerations_ja: str = ""
+    model_inference_en: str = ""
+    model_inference_ja: str = ""
+    uncertainty_en: str = ""
+    uncertainty_ja: str = ""
     literature_status: Literal[
         "supported", "insufficient", "contradictory", "not_retrieved"
     ]
@@ -177,6 +185,14 @@ class ReflectionFormatV2(BaseModel):
     patient_summary_ja: str
     diagnosis_analysis_en: str
     diagnosis_analysis_ja: str
+    literature_basis_en: str = ""
+    literature_basis_ja: str = ""
+    tool_considerations_en: str = ""
+    tool_considerations_ja: str = ""
+    model_inference_en: str = ""
+    model_inference_ja: str = ""
+    uncertainty_en: str = ""
+    uncertainty_ja: str = ""
     evidence_assessments: List[EvidenceAssessment] = Field(default_factory=list)
     evidence_ids: List[str] = Field(default_factory=list)
     literature_status: Literal[
@@ -250,6 +266,7 @@ class State(TypedDict):
     sex: Optional[str]
     patient_id: Optional[str]
     llm: Optional[AzureOpenAIWrapper]
+    zero_shot_llm: Optional[AzureOpenAIWrapper]
     # Operational runners may provide already-materialized GestaltMatcher
     # results (for example, results persisted by a worker service).  This is
     # an execution-only callback and is excluded from serialized outputs.

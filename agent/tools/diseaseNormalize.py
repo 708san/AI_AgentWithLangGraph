@@ -90,7 +90,12 @@ def normalize_gestalt_results(state: State) -> list:
 
 def normalize_zeroshot_results(state: State) -> Optional[ZeroShotOutput]:
     """
-    State内のZero-shot病名を正規化する。照合不一致や重複でも候補は保持する。
+    State内のZero-shot病名を正規化し、公開候補を連番で再採番する。
+
+    A known local OMIM record is the identity authority.  If neither the
+    supplied OMIM ID nor the generated disease name can be resolved to a
+    known local identity, the row is excluded from the public Zero-shot list
+    but retained in ``zeroShotValidation`` for auditability.
     """
     zeroshot_output = state.get("zeroShotResult")
     if not zeroshot_output or not zeroshot_output.ans:
@@ -125,11 +130,11 @@ def normalize_zeroshot_results(state: State) -> Optional[ZeroShotOutput]:
                     f"with its local canonical label {known_label!r}."
                 )
             # A known OMIM record is the identity source of truth. Keep the
-            # generated label in zeroShotValidation for audit, canonicalize
-            # the public label, and retain the original rank and candidate.
+            # generated label in zeroShotValidation for audit and canonicalize
+            # the public label.
             resolved_id = supplied_id
             resolved_label = known_label
-        elif not supplied_id and cleaned_name:
+        elif cleaned_name:
             try:
                 omim_id, omim_label, sim = disease_normalize(disease_name_upper)
             except Exception as exc:
@@ -144,35 +149,48 @@ def normalize_zeroshot_results(state: State) -> Optional[ZeroShotOutput]:
                 resolved_id = candidate_id
                 resolved_label = omim_label
                 status = "normalized"
-                reason = f"Unique local normalization match (similarity={sim:.2f})."
+                if supplied_id:
+                    reason = (
+                        f"Supplied OMIM ID is unknown locally; disease name resolved to a "
+                        f"unique local identity (similarity={sim:.2f})."
+                    )
+                else:
+                    reason = f"Unique local normalization match (similarity={sim:.2f})."
             else:
                 status = "unconfirmed"
-                reason = "No compatible local name/OMIM match was confirmed; candidate retained without an assigned OMIM ID."
+                reason = "No compatible local name/OMIM match was confirmed; candidate is excluded as unconfirmed."
         elif supplied_id:
-            reason = "OMIM identifier is not present in the local database; candidate retained as unconfirmed."
+            reason = "OMIM identifier is not present in the local database; candidate is excluded as unconfirmed."
 
-        # Keep every generated Zero-shot row. Record the model rank for audit,
-        # and use response order for a gap-free display rank.
+        # Keep the model rank for audit. Candidates with no confirmed identity
+        # are not safe to expose as a public disease result; record them and
+        # continue so the accepted rows can be renumbered without gaps.
         duplicate_key = resolved_id or cleaned_name.upper()
         duplicate = duplicate_key in seen_candidate_keys
-        display_rank = len(normalized_ans) + 1
+        excluded = status == "unconfirmed"
         validation_item = {
             "disease_name": original_name,
             "OMIM_id": original_omim,
             "rank": model_rank,
-            "display_rank": display_rank,
+            "display_rank": None,
             "normalized_disease_name": resolved_label,
             "normalized_OMIM_id": resolved_id,
             "status": status,
             "reason": reason,
             "duplicate": duplicate,
-            "excluded": False,
-            "exclusion_status": None,
+            "excluded": excluded,
+            "exclusion_status": "unconfirmed_identity" if excluded else None,
         }
+        if excluded:
+            validation.append(validation_item)
+            continue
+
+        display_rank = len(normalized_ans) + 1
+        validation_item["display_rank"] = display_rank
         if duplicate:
             validation_item["duplicate_reason"] = (
                 "The normalized disease identity was already emitted by another candidate; "
-                "this row is retained to preserve the Zero-shot rank list."
+                "this row is retained for compatibility; consumers may collapse duplicate identities."
             )
         validation.append(validation_item)
         diag.disease_name = resolved_label

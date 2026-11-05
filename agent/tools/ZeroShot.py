@@ -16,7 +16,8 @@ def createZeroshot(state: State, *, reasoning_sink=None):
     use_absent_hpo = state.get("use_absentHPO", False)
     onset = state.get("onset")
     sex = state.get("sex")
-    llm = state.get("llm")
+    # Zero-shot can use a separate reasoning profile from the rest of the graph.
+    llm = state.get("zero_shot_llm") or state.get("llm")
 
     if not hpo_dict or not llm:
         return None, None

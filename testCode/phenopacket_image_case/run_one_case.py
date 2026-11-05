@@ -70,7 +70,7 @@ def _jsonable(value: Any) -> Any:
         return {
             str(key): _jsonable(item)
             for key, item in value.items()
-            if key != "llm"
+            if key not in {"llm", "zero_shot_llm"}
         }
     if isinstance(value, (list, tuple)):
         return [_jsonable(item) for item in value]
@@ -278,7 +278,19 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Stable output key; use an image-qualified key for duplicate patient IDs.",
     )
     parser.add_argument("--model", default="gpt-5-2")
-    parser.add_argument("--max-flow-iterations", type=int, default=1)
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=("none", "low", "medium", "high", "xhigh"),
+        default="medium",
+        help="Reasoning effort for GPT-5 models. Defaults to medium.",
+    )
+    parser.add_argument(
+        "--zero-shot-reasoning-effort",
+        choices=("none", "low", "medium", "high", "xhigh"),
+        default="medium",
+        help="Separate reasoning effort for Zero-shot. Defaults to medium.",
+    )
+    parser.add_argument("--max-flow-iterations", type=int, default=0)
     parser.add_argument("--use-phenobrain", action="store_true")
     parser.add_argument("--use-absent-hpo", action="store_true")
     parser.add_argument(
@@ -290,8 +302,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--evidence-max-workers",
         type=_positive_int,
-        default=2,
-        help="Maximum concurrent candidate Evidence extractions. Defaults to 2.",
+        default=3,
+        help="Maximum concurrent candidate Evidence extractions. Defaults to 3.",
     )
     return parser
 
@@ -381,6 +393,11 @@ def main() -> int:
             "image_sha256": run_info["image_sha256"],
             "metadata_occurrence": args.metadata_occurrence,
             "model": args.model,
+            "reasoning_effort": args.reasoning_effort or os.environ.get(
+                "AZURE_LLM_REASONING_EFFORT", "none"
+            ),
+            "zero_shot_reasoning_effort": args.zero_shot_reasoning_effort
+            or "medium",
             "max_flow_iterations": args.max_flow_iterations,
             "use_phenobrain": args.use_phenobrain,
             "use_absent_hpo": args.use_absent_hpo,
@@ -412,6 +429,8 @@ def main() -> int:
 
                 pipeline = RareDiseaseDiagnosisPipeline(
                     model_name=args.model,
+                    reasoning_effort=args.reasoning_effort,
+                    zero_shot_reasoning_effort=args.zero_shot_reasoning_effort,
                     enable_log=True,
                     log_filename="agent.log",
                     log_dir=str(logs_dir),
