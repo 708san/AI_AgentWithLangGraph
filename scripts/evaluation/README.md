@@ -41,4 +41,25 @@ python -m scripts.evaluation.evaluate \
   --output path/to/report.json
 ```
 
+## Zero-shot model/reasoning comparison
+
+The current Zero-shot prompt and legacy 74-case inputs can be compared across
+both GPT-5 models and three reasoning efforts without running the rest of the
+diagnosis graph:
+
+```bash
+.venv/bin/python -m scripts.evaluation.run_zeroshot_model_comparison
+```
+
+The default conditions are `gpt-5-2/gpt-5-4` × `none/medium/high`. Results are
+stored under `testCode/phenopacket_image_case/runs/zeroshot_model_reasoning_comparison_74/`.
+Each patient/condition has its own `status.json`, `zero_shot.json`,
+`reasoned_output.json`, input snapshot, and prompt snapshot. Completed
+conditions are skipped on rerun, so interruption or transient API failures can
+resume with the same command. Use `--force` to regenerate completed
+conditions, `--dry-run` to materialize inputs/prompts without API calls, and
+`--max-cases 1` for a smoke test. `comparison_summary.csv` contains each
+condition's predictions and gold ranks; `evaluation_summary.csv` contains
+exact and MONDO close-match Hit@1/3/5 metrics.
+
 Hit@kは明示された`rank`（候補統合では`best_rank`）で計算し、MRRは正解順位の逆数の平均です。出力・候補ID・重複・正規化前後の欠落はレポートへ残します。評価結果は推論精度の観測であり、臨床的な正しさを保証しません。
