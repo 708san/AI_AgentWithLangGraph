@@ -132,30 +132,37 @@ GESTALT_API_USER=your_username
 GESTALT_API_PASS=your_password
 ```
 
-For the GPT-5.4 execution route, also configure the Azure deployment used by
-the repository and choose the reasoning effort explicitly when running a case:
+The default diagnosis pipeline uses GPT-5.2 / medium for the main stages and
+GPT-5.4 / high for Zero-shot. Configure both Azure deployments:
 
 ```dotenv
+AZURE_OPENAI_5-2_ENDPOINT=your_endpoint
+AZURE_OPENAI_5-2_API_KEY=your_api_key
+AZURE_OPENAI_5-2_DEPLOYMENT_NAME=your_deployment
+AZURE_OPENAI_5-2_API_VERSION=your_api_version
 AZURE_OPENAI_5-4_ENDPOINT=your_endpoint
 AZURE_OPENAI_5-4_API_KEY=your_api_key
 AZURE_OPENAI_5-4_DEPLOYMENT_NAME=your_deployment
 AZURE_OPENAI_5-4_API_VERSION=your_api_version
-AZURE_LLM_REASONING_EFFORT=medium
 ```
 
-The single-case runner accepts `--model gpt-5-4`,
-`--reasoning-effort {none,low,medium,high,xhigh}`, and the optional
-`--zero-shot-reasoning-effort` override. The default reasoning effort for the
-main flow is `AZURE_LLM_REASONING_EFFORT` or `none`; Zero-shot defaults to
-`medium`. For example, to explicitly use medium reasoning only for Zero-shot:
+The single-case runners accept `--model`, `--reasoning-effort`,
+`--zero-shot-model`, and `--zero-shot-reasoning-effort` overrides. For example,
+to use GPT-5.2 / medium for both the main flow and Zero-shot:
 
 ```bash
 python testCode/phenopacket_image_case/run_one_case.py \
   --patient-id 272 \
-  --model gpt-5-4 \
-  --reasoning-effort none \
+  --model gpt-5-2 \
+  --reasoning-effort medium \
+  --zero-shot-model gpt-5-2 \
   --zero-shot-reasoning-effort medium
 ```
+
+GPT-5.x requests use a default maximum of 30,000 completion tokens. GPT-4o
+retains its model-specific 8,192-token default. Reflection already has its own
+30,000-token limit. For reasoning models, reasoning tokens count against this
+completion budget and leave fewer tokens for the visible structured response.
 
 ---
 

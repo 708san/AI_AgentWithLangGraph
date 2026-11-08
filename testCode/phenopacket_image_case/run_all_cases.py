@@ -158,6 +158,10 @@ def _expected_config(
         "image_sha256": _sha256(image_path),
         "metadata_occurrence": metadata_occurrence,
         "model": args.model,
+        "zero_shot_model": args.zero_shot_model,
+        "reasoning_effort": "medium",
+        "zero_shot_reasoning_effort": "high",
+        "default_max_completion_tokens": 30000,
         "max_flow_iterations": args.max_flow_iterations,
         "use_phenobrain": args.use_phenobrain,
         "use_absent_hpo": args.use_absent_hpo,
@@ -267,6 +271,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--image-dir", default=str(DEFAULT_IMAGE_DIR))
     parser.add_argument("--output-root", default=str(DEFAULT_ALL_OUTPUT_ROOT))
     parser.add_argument("--model", default="gpt-5-2")
+    parser.add_argument("--zero-shot-model", default="gpt-5-4")
     parser.add_argument("--max-flow-iterations", type=int, default=0)
     parser.add_argument("--use-phenobrain", action="store_true")
     parser.add_argument("--use-absent-hpo", action="store_true")
@@ -356,6 +361,8 @@ def _run_one_case(
         case_key,
         "--model",
         args.model,
+        "--zero-shot-model",
+        args.zero_shot_model,
         "--max-flow-iterations",
         str(args.max_flow_iterations),
         "--pubmed-max-workers",
@@ -612,6 +619,13 @@ def main() -> int:
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                     "metadata": str(metadata_path),
                     "image_dir": str(image_dir),
+                    "model_config": {
+                        "model": args.model,
+                        "reasoning_effort": "medium",
+                        "zero_shot_model": args.zero_shot_model,
+                        "zero_shot_reasoning_effort": "high",
+                        "default_max_completion_tokens": 30000,
+                    },
                     "patient_count": len(patient_order),
                     "case_count": len(case_entries),
                     "max_parallel_cases": args.max_parallel_cases,
@@ -694,6 +708,13 @@ def main() -> int:
         "duration_seconds": round(time.monotonic() - started, 3),
         "metadata": str(metadata_path),
         "image_dir": str(image_dir),
+        "model_config": {
+            "model": args.model,
+            "reasoning_effort": "medium",
+            "zero_shot_model": args.zero_shot_model,
+            "zero_shot_reasoning_effort": "high",
+            "default_max_completion_tokens": 30000,
+        },
         "output_root": str(output_root),
         "patient_count": len(patient_order),
         "case_count": len(case_entries),
