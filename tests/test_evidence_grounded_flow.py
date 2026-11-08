@@ -72,14 +72,17 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
             self.assertIn("evidence_mode=v2", v2_log)
             self.assertIn("V2 GRAPH", v2_log)
 
-    def test_pipeline_defaults_all_reasoning_to_medium(self):
+    def test_pipeline_defaults_main_and_zero_shot_to_separate_profiles(self):
         with patch("agent.agent_pipeline.get_llm_instance") as get_llm:
             get_llm.side_effect = [Mock(name="main_llm"), Mock(name="zero_shot_llm")]
             pipeline = RareDiseaseDiagnosisPipeline(model_name="gpt-5-2")
 
-        self.assertEqual(get_llm.call_count, 1)
+        self.assertEqual(get_llm.call_count, 2)
+        self.assertEqual(get_llm.call_args_list[0].args[0], "gpt-5-2")
         self.assertEqual(get_llm.call_args_list[0].kwargs["reasoning_effort"], "medium")
-        self.assertIs(pipeline.llm, pipeline.zero_shot_llm)
+        self.assertEqual(get_llm.call_args_list[1].args[0], "gpt-5-4")
+        self.assertEqual(get_llm.call_args_list[1].kwargs["reasoning_effort"], "high")
+        self.assertIsNot(pipeline.llm, pipeline.zero_shot_llm)
 
     def test_pipeline_defaults_to_no_literature_retry_iterations(self):
         with patch("agent.agent_pipeline.get_llm_instance") as get_llm:

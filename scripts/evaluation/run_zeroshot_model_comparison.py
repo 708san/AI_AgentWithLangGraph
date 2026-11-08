@@ -22,10 +22,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import json
 import os
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -61,6 +63,7 @@ MODELS = ("gpt-5-2", "gpt-5-4")
 REASONING_EFFORTS = ("none", "medium", "high")
 SCHEMA_VERSION = 1
 TOP_K_VALUES = (1, 3, 5)
+ZERO_SHOT_MAX_TOKENS = 30_000
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -152,6 +155,7 @@ def _condition_is_complete(
         and status.get("prompt_sha256") == prompt_sha256
         and status.get("model") == model
         and status.get("reasoning_effort") == effort
+        and status.get("max_tokens") == ZERO_SHOT_MAX_TOKENS
         and (condition_dir / "zero_shot.json").is_file()
         and (condition_dir / "reasoned_output.json").is_file()
     )
@@ -172,6 +176,7 @@ def _write_condition_status(
         "status": status,
         "model": model,
         "reasoning_effort": effort,
+        "max_tokens": ZERO_SHOT_MAX_TOKENS,
         "input_fingerprint": input_fingerprint,
         "prompt_sha256": prompt_sha256,
         "started_at": started_at,
@@ -181,11 +186,34 @@ def _write_condition_status(
     _write_json(condition_dir / "status.json", payload)
 
 
+def _write_condition_timing(
+    condition_dir: Path,
+    *,
+    model: str,
+    effort: str,
+    started_at: str,
+    finished_at: str | None,
+    duration_seconds: float,
+    status: str,
+) -> None:
+    _write_json(
+        condition_dir / "timing.json",
+        {
+            "model": model,
+            "reasoning_effort": effort,
+            "status": status,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "duration_seconds": duration_seconds,
+        },
+    )
+
+
 def _make_llm(model: str, effort: str, timeout_seconds: float):
-    """Use the same Azure wrapper and token budget as the active agent."""
+    """Build the Zero-shot comparison client with its configured token budget."""
     wrapper = get_llm_instance(model, reasoning_effort=effort)
     wrapper.llm = wrapper.get_temp_llm_with_max_tokens(
-        wrapper.default_max_tokens,
+        ZERO_SHOT_MAX_TOKENS,
         timeout_seconds=timeout_seconds,
     )
     return wrapper
@@ -215,6 +243,22 @@ def _run_condition(
         started_at=started_at,
     )
     reasoning_payload: dict[str, Any] = {}
+    stop_heartbeat = threading.Event()
+
+    def report_elapsed() -> None:
+        while not stop_heartbeat.wait(30):
+            elapsed = time.monotonic() - started
+            print(
+                f"[ZeroShot:{model}/{effort}] elapsed={elapsed:.0f}s",
+                flush=True,
+            )
+
+    heartbeat = threading.Thread(
+        target=report_elapsed,
+        name=f"zeroshot-timer-{model}-{effort}",
+        daemon=True,
+    )
+    heartbeat.start()
     try:
         result, prompt = createZeroshot(
             {**state, "llm": llm},
@@ -226,6 +270,8 @@ def _run_condition(
             raise RuntimeError("ZeroShot returned no result")
         _write_json(condition_dir / "zero_shot.json", result.model_dump())
         _write_json(condition_dir / "reasoned_output.json", reasoning_payload)
+        finished_at = datetime.now(timezone.utc).isoformat()
+        duration_seconds = round(time.monotonic() - started, 3)
         _write_condition_status(
             condition_dir,
             status="completed",
@@ -234,10 +280,21 @@ def _run_condition(
             input_fingerprint=input_fingerprint,
             prompt_sha256=prompt_sha256,
             started_at=started_at,
-            finished_at=datetime.now(timezone.utc).isoformat(),
-            duration_seconds=round(time.monotonic() - started, 3),
+            finished_at=finished_at,
+            duration_seconds=duration_seconds,
+        )
+        _write_condition_timing(
+            condition_dir,
+            model=model,
+            effort=effort,
+            started_at=started_at,
+            finished_at=finished_at,
+            duration_seconds=duration_seconds,
+            status="completed",
         )
     except KeyboardInterrupt:
+        finished_at = datetime.now(timezone.utc).isoformat()
+        duration_seconds = round(time.monotonic() - started, 3)
         _write_condition_status(
             condition_dir,
             status="interrupted",
@@ -246,10 +303,22 @@ def _run_condition(
             input_fingerprint=input_fingerprint,
             prompt_sha256=prompt_sha256,
             started_at=started_at,
-            duration_seconds=round(time.monotonic() - started, 3),
+            finished_at=finished_at,
+            duration_seconds=duration_seconds,
+        )
+        _write_condition_timing(
+            condition_dir,
+            model=model,
+            effort=effort,
+            started_at=started_at,
+            finished_at=finished_at,
+            duration_seconds=duration_seconds,
+            status="interrupted",
         )
         raise
     except Exception as exc:
+        finished_at = datetime.now(timezone.utc).isoformat()
+        duration_seconds = round(time.monotonic() - started, 3)
         _write_condition_status(
             condition_dir,
             status="failed",
@@ -258,10 +327,69 @@ def _run_condition(
             input_fingerprint=input_fingerprint,
             prompt_sha256=prompt_sha256,
             started_at=started_at,
-            duration_seconds=round(time.monotonic() - started, 3),
+            finished_at=finished_at,
+            duration_seconds=duration_seconds,
             error_type=type(exc).__name__,
             error=str(exc),
         )
+        _write_condition_timing(
+            condition_dir,
+            model=model,
+            effort=effort,
+            started_at=started_at,
+            finished_at=finished_at,
+            duration_seconds=duration_seconds,
+            status="failed",
+        )
+    finally:
+        stop_heartbeat.set()
+        heartbeat.join(timeout=1)
+
+
+def _run_condition_job(
+    *,
+    condition_dir: Path,
+    llm: Any | None,
+    request_timeout_seconds: float,
+    state: dict[str, Any],
+    expected_prompt: str,
+    input_fingerprint: str,
+    prompt_sha256: str,
+    model: str,
+    effort: str,
+) -> dict[str, Any]:
+    """Run one condition from the global work queue."""
+    try:
+        if llm is None:
+            llm = _make_llm(model, effort, request_timeout_seconds)
+        _run_condition(
+            condition_dir=condition_dir,
+            llm=llm,
+            state=state,
+            expected_prompt=expected_prompt,
+            input_fingerprint=input_fingerprint,
+            prompt_sha256=prompt_sha256,
+            model=model,
+            effort=effort,
+        )
+    except Exception as exc:
+        # _run_condition normally records model errors itself. This catches
+        # unexpected worker/setup errors without losing resumable state.
+        _write_condition_status(
+            condition_dir,
+            status="failed",
+            model=model,
+            effort=effort,
+            input_fingerprint=input_fingerprint,
+            prompt_sha256=prompt_sha256,
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
+    return _read_json(condition_dir / "status.json") or {
+        "status": "unknown",
+        "model": model,
+        "reasoning_effort": effort,
+    }
 
 
 def _normalize_omim(value: Any) -> str | None:
@@ -410,6 +538,58 @@ def _write_summaries(
     _write_json(output_root / "evaluation_summary.json", {"metrics": metrics})
 
 
+def _write_timing_summary(
+    output_root: Path,
+    rows: list[dict[str, str]],
+    conditions: list[tuple[str, str]],
+) -> None:
+    condition_summaries = []
+    for model, effort in conditions:
+        durations: list[float] = []
+        completed = 0
+        failed = 0
+        interrupted = 0
+        for row in rows:
+            status = _read_json(
+                _condition_dir(output_root / f"patient_{_metadata_id(row)}", model, effort)
+                / "status.json"
+            ) or {}
+            duration = status.get("duration_seconds")
+            if isinstance(duration, (int, float)):
+                durations.append(float(duration))
+            if status.get("status") == "completed":
+                completed += 1
+            elif status.get("status") == "failed":
+                failed += 1
+            elif status.get("status") == "interrupted":
+                interrupted += 1
+        condition_summaries.append(
+            {
+                "model": model,
+                "reasoning_effort": effort,
+                "condition": _condition_key(model, effort),
+                "total_cases": len(rows),
+                "completed_cases": completed,
+                "failed_cases": failed,
+                "interrupted_cases": interrupted,
+                "measured_cases": len(durations),
+                "total_seconds": round(sum(durations), 3),
+                "average_seconds": round(sum(durations) / len(durations), 3)
+                if durations
+                else None,
+                "min_seconds": round(min(durations), 3) if durations else None,
+                "max_seconds": round(max(durations), 3) if durations else None,
+            }
+        )
+    _write_json(
+        output_root / "timing_summary.json",
+        {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "conditions": condition_summaries,
+        },
+    )
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Compare current Zero-shot output for all 74 legacy cases."
@@ -437,6 +617,12 @@ def _parse_args() -> argparse.Namespace:
         help="Azure request timeout per condition.",
     )
     parser.add_argument(
+        "--max-parallel-conditions",
+        type=int,
+        default=6,
+        help="Maximum Zero-shot conditions running globally across patients. Defaults to 6.",
+    )
+    parser.add_argument(
         "--max-cases",
         type=int,
         default=None,
@@ -455,6 +641,8 @@ def _parse_args() -> argparse.Namespace:
     args = parser.parse_args()
     if args.request_timeout_seconds <= 0:
         parser.error("--request-timeout-seconds must be greater than zero")
+    if args.max_parallel_conditions < 1:
+        parser.error("--max-parallel-conditions must be at least one")
     if args.max_cases is not None and not 1 <= args.max_cases <= 74:
         parser.error("--max-cases must be between 1 and 74")
     return args
@@ -485,9 +673,11 @@ def main() -> int:
             for model, effort in conditions
         ],
         "request_timeout_seconds": args.request_timeout_seconds,
+        "max_tokens": ZERO_SHOT_MAX_TOKENS,
         "prompt_source": "agent/tools/ZeroShot.py:build_zeroshot_prompt",
         "only_zero_shot": True,
         "cases": len(rows),
+        "max_parallel_conditions": args.max_parallel_conditions,
     }
     if existing_config:
         for key in (
@@ -514,12 +704,12 @@ def main() -> int:
         "reasoning_efforts": efforts,
         "conditions": len(conditions),
         "cases": len(rows),
+        "max_parallel_conditions": args.max_parallel_conditions,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
     _write_json(output_root / "run_status.json", run_status)
-    llm_cache: dict[tuple[str, str], Any] = {}
     attempted = 0
-
+    pending_tasks: list[dict[str, Any]] = []
     try:
         for index, row in enumerate(rows, start=1):
             patient_id = _metadata_id(row)
@@ -564,61 +754,95 @@ def main() -> int:
                         flush=True,
                     )
                     continue
-                attempted += 1
-                key = (model, effort)
-                try:
-                    if key not in llm_cache:
-                        print(f"Initializing {model}/{effort}...", flush=True)
-                        llm_cache[key] = _make_llm(
-                            model, effort, args.request_timeout_seconds
-                        )
-                    print(
-                        f"[{index}/{len(rows)}] patient {patient_id} "
-                        f"{model}/{effort} started",
-                        flush=True,
-                    )
-                    _run_condition(
-                        condition_dir=condition_dir,
-                        llm=llm_cache[key],
-                        state=state,
-                        expected_prompt=prompt,
-                        input_fingerprint=input_fingerprint,
-                        prompt_sha256=prompt_sha256,
-                        model=model,
-                        effort=effort,
-                    )
-                except KeyboardInterrupt:
-                    raise
-                except Exception as exc:
-                    _write_condition_status(
-                        condition_dir,
-                        status="failed",
-                        model=model,
-                        effort=effort,
-                        input_fingerprint=input_fingerprint,
-                        prompt_sha256=prompt_sha256,
-                        error_type=type(exc).__name__,
-                        error=str(exc),
-                    )
-                status = _read_json(condition_dir / "status.json") or {}
-                print(
-                    f"[{index}/{len(rows)}] patient {patient_id} "
-                    f"{model}/{effort} {status.get('status', 'unknown')}",
-                    flush=True,
-                )
-                run_status.update(
+                pending_tasks.append(
                     {
-                        "attempted_conditions": attempted,
-                        "current_patient_id": patient_id,
-                        "current_condition": _condition_key(model, effort),
-                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                        "case_index": index,
+                        "patient_id": patient_id,
+                        "model": model,
+                        "effort": effort,
+                        "condition_dir": condition_dir,
+                        "state": state,
+                        "prompt": prompt,
+                        "input_fingerprint": input_fingerprint,
+                        "prompt_sha256": prompt_sha256,
                     }
                 )
-                _write_json(output_root / "run_status.json", run_status)
 
+        attempted = len(pending_tasks)
+        if args.dry_run:
             _write_summaries(output_root, rows, conditions, matcher)
+            _write_timing_summary(output_root, rows, conditions)
+        elif pending_tasks:
+            max_workers = min(args.max_parallel_conditions, len(pending_tasks))
+            print(
+                f"Queued {len(pending_tasks)} incomplete conditions across "
+                f"{len(rows)} patients; running continuously with "
+                f"{max_workers} workers.",
+                flush=True,
+            )
+            executor = ThreadPoolExecutor(
+                max_workers=max_workers,
+                thread_name_prefix="zeroshot-global",
+            )
+            futures = {
+                executor.submit(
+                    _run_condition_job,
+                    condition_dir=task["condition_dir"],
+                    llm=None,
+                    request_timeout_seconds=args.request_timeout_seconds,
+                    state=task["state"],
+                    expected_prompt=task["prompt"],
+                    input_fingerprint=task["input_fingerprint"],
+                    prompt_sha256=task["prompt_sha256"],
+                    model=task["model"],
+                    effort=task["effort"],
+                ): task
+                for task in pending_tasks
+            }
+            try:
+                for future in as_completed(futures):
+                    task = futures[future]
+                    status = future.result()
+                    duration = status.get("duration_seconds")
+                    duration_text = (
+                        f"{float(duration):.1f}s"
+                        if isinstance(duration, (int, float))
+                        else "n/a"
+                    )
+                    print(
+                        f"[{task['case_index']}/{len(rows)}] patient "
+                        f"{task['patient_id']} {task['model']}/{task['effort']} "
+                        f"{status.get('status', 'unknown')} ({duration_text})",
+                        flush=True,
+                    )
+                    run_status.update(
+                        {
+                            "attempted_conditions": attempted,
+                            "completed_tasks": sum(
+                                1
+                                for completed_future in futures
+                                if completed_future.done()
+                            ),
+                            "current_patient_id": task["patient_id"],
+                            "current_condition": _condition_key(
+                                task["model"], task["effort"]
+                            ),
+                            "updated_at": datetime.now(timezone.utc).isoformat(),
+                        }
+                    )
+                    _write_json(output_root / "run_status.json", run_status)
+            except KeyboardInterrupt:
+                for future in futures:
+                    future.cancel()
+                executor.shutdown(wait=False, cancel_futures=True)
+                raise
+            else:
+                executor.shutdown(wait=True)
+            _write_summaries(output_root, rows, conditions, matcher)
+            _write_timing_summary(output_root, rows, conditions)
     except KeyboardInterrupt:
         _write_summaries(output_root, rows, conditions, matcher)
+        _write_timing_summary(output_root, rows, conditions)
         _write_json(
             output_root / "run_status.json",
             {
@@ -639,6 +863,7 @@ def main() -> int:
         return 0
 
     _write_summaries(output_root, rows, conditions, matcher)
+    _write_timing_summary(output_root, rows, conditions)
     incomplete = []
     for row in rows:
         patient_id = _metadata_id(row)

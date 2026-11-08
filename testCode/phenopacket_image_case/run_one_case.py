@@ -278,6 +278,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Stable output key; use an image-qualified key for duplicate patient IDs.",
     )
     parser.add_argument("--model", default="gpt-5-2")
+    parser.add_argument("--zero-shot-model", default="gpt-5-4")
     parser.add_argument(
         "--reasoning-effort",
         choices=("none", "low", "medium", "high", "xhigh"),
@@ -287,8 +288,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--zero-shot-reasoning-effort",
         choices=("none", "low", "medium", "high", "xhigh"),
-        default="medium",
-        help="Separate reasoning effort for Zero-shot. Defaults to medium.",
+        default="high",
+        help="Separate reasoning effort for Zero-shot. Defaults to high.",
     )
     parser.add_argument("--max-flow-iterations", type=int, default=0)
     parser.add_argument("--use-phenobrain", action="store_true")
@@ -393,11 +394,11 @@ def main() -> int:
             "image_sha256": run_info["image_sha256"],
             "metadata_occurrence": args.metadata_occurrence,
             "model": args.model,
-            "reasoning_effort": args.reasoning_effort or os.environ.get(
-                "AZURE_LLM_REASONING_EFFORT", "none"
-            ),
+            "zero_shot_model": args.zero_shot_model,
+            "reasoning_effort": args.reasoning_effort,
             "zero_shot_reasoning_effort": args.zero_shot_reasoning_effort
-            or "medium",
+            or "high",
+            "default_max_completion_tokens": 30000,
             "max_flow_iterations": args.max_flow_iterations,
             "use_phenobrain": args.use_phenobrain,
             "use_absent_hpo": args.use_absent_hpo,
@@ -430,6 +431,7 @@ def main() -> int:
                 pipeline = RareDiseaseDiagnosisPipeline(
                     model_name=args.model,
                     reasoning_effort=args.reasoning_effort,
+                    zero_shot_model_name=args.zero_shot_model,
                     zero_shot_reasoning_effort=args.zero_shot_reasoning_effort,
                     enable_log=True,
                     log_filename="agent.log",

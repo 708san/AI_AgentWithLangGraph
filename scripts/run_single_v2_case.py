@@ -181,6 +181,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Artifact directory. Defaults to local_artifacts/single_case_runs/<timestamp>.",
     )
     parser.add_argument("--model", default="gpt-5-2", help="LLM model/deployment name.")
+    parser.add_argument("--zero-shot-model", default="gpt-5-4", help="Separate model for Zero-shot generation.")
     parser.add_argument(
         "--reasoning-effort",
         choices=("none", "low", "medium", "high", "xhigh"),
@@ -190,8 +191,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--zero-shot-reasoning-effort",
         choices=("none", "low", "medium", "high", "xhigh"),
-        default="medium",
-        help="Separate reasoning effort for Zero-shot. Defaults to medium.",
+        default="high",
+        help="Separate reasoning effort for Zero-shot. Defaults to high.",
     )
     parser.add_argument(
         "--evidence-mode",
@@ -293,6 +294,7 @@ def main() -> int:
         pipeline = RareDiseaseDiagnosisPipeline(
             model_name=args.model,
             reasoning_effort=args.reasoning_effort,
+            zero_shot_model_name=args.zero_shot_model,
             zero_shot_reasoning_effort=args.zero_shot_reasoning_effort,
             enable_log=True,
             log_filename="agent.log",
@@ -334,6 +336,13 @@ def main() -> int:
             "worker_config": {
                 "pubmed_max_workers": args.pubmed_max_workers,
                 "evidence_max_workers": args.evidence_max_workers,
+            },
+            "model_config": {
+                "model": args.model,
+                "reasoning_effort": args.reasoning_effort,
+                "zero_shot_model": args.zero_shot_model,
+                "zero_shot_reasoning_effort": args.zero_shot_reasoning_effort,
+                "default_max_completion_tokens": 30000,
             },
             "started_at": started_at.isoformat(),
             "finished_at": datetime.now(timezone.utc).isoformat(),

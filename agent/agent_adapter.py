@@ -15,6 +15,7 @@ from typing import Any, Iterator, Optional
 from agent.agent_pipeline import (
     DEFAULT_MAX_FLOW_ITERATIONS,
     DEFAULT_REASONING_EFFORT,
+    DEFAULT_ZERO_SHOT_MODEL_NAME,
     DEFAULT_ZERO_SHOT_REASONING_EFFORT,
     RareDiseaseDiagnosisPipeline,
 )
@@ -158,6 +159,7 @@ def run_stream(
     onset: Optional[str] = None,
     model_name: str = DEFAULT_MODEL_NAME,
     reasoning_effort: Optional[str] = DEFAULT_REASONING_EFFORT,
+    zero_shot_model_name: Optional[str] = DEFAULT_ZERO_SHOT_MODEL_NAME,
     zero_shot_reasoning_effort: Optional[str] = DEFAULT_ZERO_SHOT_REASONING_EFFORT,
     enable_log: Optional[bool] = None,
     verbose: bool = False,
@@ -186,6 +188,7 @@ def run_stream(
     pipeline = RareDiseaseDiagnosisPipeline(
         model_name=model_name,
         reasoning_effort=reasoning_effort,
+        zero_shot_model_name=zero_shot_model_name,
         zero_shot_reasoning_effort=zero_shot_reasoning_effort,
         enable_log=resolved_enable_log,
     )

@@ -12,6 +12,8 @@ CONTENT_FILTER_MARKERS = [
     "filtered due to the prompt",
 ]
 
+DEFAULT_MAX_COMPLETION_TOKENS = 30_000
+
 
 def is_content_filter_error(error: Exception) -> bool:
     message = str(error).lower()
@@ -37,7 +39,7 @@ class AzureOpenAIWrapper:
         self.reasoning_effort = reasoning_effort
         
         # デフォルトのトークン数
-        self.default_max_tokens = 8192 if model_name == 'gpt-4o' else 15000
+        self.default_max_tokens = 8192 if model_name == 'gpt-4o' else DEFAULT_MAX_COMPLETION_TOKENS
 
         self.rate_limiter = InMemoryRateLimiter(
             requests_per_second=float(os.getenv("AZURE_LLM_REQUESTS_PER_SECOND", "0.25")),

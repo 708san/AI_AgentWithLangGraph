@@ -25,7 +25,14 @@
 主要クラス:
 
 ```python
-RareDiseaseDiagnosisPipeline(model_name="gpt-5-2", enable_log=False, log_filename=None)
+RareDiseaseDiagnosisPipeline(
+    model_name="gpt-5-2",
+    reasoning_effort="medium",
+    zero_shot_model_name="gpt-5-4",
+    zero_shot_reasoning_effort="high",
+    enable_log=False,
+    log_filename=None,
+)
 ```
 
 実行メソッド:
@@ -604,6 +611,7 @@ List[PhenotypeSearchFormat]
 | `gpt-4o` | `AZURE_OPENAI_4o` |
 | `gpt-5-1` | `AZURE_OPENAI_5-1` |
 | `gpt-5-2` | `AZURE_OPENAI_5-2` |
+| `gpt-5-4` | `AZURE_OPENAI_5-4` |
 
 必要な環境変数:
 
@@ -621,7 +629,7 @@ List[PhenotypeSearchFormat]
 | `get_structured_llm(output_schema)` | Pydantic schema | structured LLM | 構造化出力用 LLM |
 | `generate(prompt)` | `str` | LLM 応答 | 通常テキスト生成 |
 
-`gpt-4o` は `temperature=0.0` と `max_tokens` を設定する。`gpt-5-1`, `gpt-5-2` は `model_kwargs.extra_body` に `max_completion_tokens`, `verbosity`, `reasoning_effort` を渡す。
+`gpt-4o` は `temperature=0.0` と最大8,192 tokensを設定する。GPT-5.xは既定で最大30,000 completion tokensと`verbosity=medium`を使い、GPT-5.1/5.2は`reasoning_effort`を、GPT-5.4はResponses API形式の`reasoning.effort`を渡す。
 
 ### 6.3 プロンプト
 
@@ -721,6 +729,7 @@ List[PhenotypeSearchFormat]
 ## 11. 現行実装上の注意点
 
 - `agent/llm/azure_llm_instance.py` のモデル未指定時の既定値は `gpt-5-2`。明示指定時は指定モデル用の環境変数を使用する。
+- 通常診断は `gpt-5-2 / medium`、Zero-shotは `gpt-5-4 / high` を既定とする。両Azure deploymentの環境変数が必要。
 - `agent/tools/diseaseNormalize.py` は import 時点で `AZURE_DBCLS_JAPANEAST` を確認し、FAISS インデックスも読み込む。環境変数または `.bin` ファイルが不足していると import に失敗する。
 - `HPOwebSearchNode` の出力キーは `snippet` だが、`createDiagnosis()` は Web 検索結果の本文として `content` を参照している。
 - `State` では `webresources` が必須扱いだが、初期 state には明示的に含まれていない。各処理は `state.get("webresources", [])` で補完している。

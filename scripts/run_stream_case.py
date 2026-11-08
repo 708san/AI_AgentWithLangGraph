@@ -74,6 +74,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--run-dir", default=None)
     parser.add_argument("--metadata-occurrence", type=int, default=None)
     parser.add_argument("--model", default="gpt-5-2")
+    parser.add_argument("--zero-shot-model", default="gpt-5-4")
     parser.add_argument("--max-flow-iterations", type=int, default=0)
     parser.add_argument("--use-phenobrain", action="store_true")
     parser.add_argument("--use-absent-hpo", action="store_true")
@@ -155,6 +156,10 @@ def main() -> int:
                 "image_source": str(source_image),
                 "image_sha256": _sha256(source_image),
                 "model": args.model,
+                "zero_shot_model": args.zero_shot_model,
+                "reasoning_effort": "medium",
+                "zero_shot_reasoning_effort": "high",
+                "default_max_completion_tokens": 30000,
                 "evidence_mode": "v2",
                 "max_flow_iterations": args.max_flow_iterations,
             },
@@ -183,6 +188,7 @@ def main() -> int:
                     sex=phenopacket.get("subject", {}).get("sex", "UNKNOWN_SEX"),
                     onset="Unknown",
                     model_name=args.model,
+                    zero_shot_model_name=args.zero_shot_model,
                     enable_log=True,
                     use_absent_hpo=args.use_absent_hpo,
                     image_path=str(copied_image),

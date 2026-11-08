@@ -23,7 +23,8 @@ from agent.state.state_types import ReflectionOutputV2
 
 DEFAULT_MODEL_NAME = "gpt-5-2"
 DEFAULT_REASONING_EFFORT = "medium"
-DEFAULT_ZERO_SHOT_REASONING_EFFORT = "medium"
+DEFAULT_ZERO_SHOT_MODEL_NAME = "gpt-5-4"
+DEFAULT_ZERO_SHOT_REASONING_EFFORT = "high"
 DEFAULT_MAX_FLOW_ITERATIONS = 0
 
 
@@ -87,7 +88,8 @@ class RareDiseaseDiagnosisPipeline:
         log_filename=None,
         log_dir=None,
         reasoning_effort: str | None = DEFAULT_REASONING_EFFORT,
-        zero_shot_reasoning_effort: str | None = None,
+        zero_shot_model_name: str | None = DEFAULT_ZERO_SHOT_MODEL_NAME,
+        zero_shot_reasoning_effort: str | None = DEFAULT_ZERO_SHOT_REASONING_EFFORT,
     ):
         self.enable_log = enable_log
         self.logfile_path = None
@@ -99,20 +101,22 @@ class RareDiseaseDiagnosisPipeline:
             self.logfile_path = self._get_logfile_path()
         
         self.llm = get_llm_instance(model_name, reasoning_effort=reasoning_effort)
-        # Zero-shot is intentionally more deliberate than the other calls by
-        # default.  Passing the literal string "none" remains an explicit
-        # opt-out; omitting the option uses medium reasoning.
+        # Zero-shot uses a separate model profile by default. Passing None for
+        # its model keeps backwards compatibility with callers that explicitly
+        # want the main model for every stage.
+        resolved_zero_shot_model_name = zero_shot_model_name or model_name
         resolved_zero_shot_reasoning_effort = (
-            zero_shot_reasoning_effort
-            if zero_shot_reasoning_effort is not None
-            else DEFAULT_ZERO_SHOT_REASONING_EFFORT
+            zero_shot_reasoning_effort or DEFAULT_ZERO_SHOT_REASONING_EFFORT
         )
         self.zero_shot_llm = (
             get_llm_instance(
-                model_name,
+                resolved_zero_shot_model_name,
                 reasoning_effort=resolved_zero_shot_reasoning_effort,
             )
-            if resolved_zero_shot_reasoning_effort != reasoning_effort
+            if (
+                resolved_zero_shot_model_name != model_name
+                or resolved_zero_shot_reasoning_effort != reasoning_effort
+            )
             else self.llm
         )
             

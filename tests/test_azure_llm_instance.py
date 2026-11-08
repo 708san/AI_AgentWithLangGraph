@@ -130,7 +130,7 @@ class TestAzureLlmInstance(unittest.TestCase):
         self.assertEqual(params["output_version"], "responses/v1")
         self.assertEqual(params["reasoning"], {"effort": "medium"})
         self.assertEqual(params["verbosity"], "medium")
-        self.assertEqual(params["max_tokens"], 15000)
+        self.assertEqual(params["max_tokens"], 30000)
 
 
 if __name__ == "__main__":
