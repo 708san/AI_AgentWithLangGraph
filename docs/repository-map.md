@@ -26,7 +26,7 @@ The repository develops a LangGraph-based rare-disease diagnosis agent and its e
 | `scripts/run_old_phenopacket_patient.py` | Legacy patient adapter |
 | `testCode/phenopacket_image_case/run_one_case.py` | Stable image-backed case execution |
 | `testCode/phenopacket_image_case/run_all_cases.py` | Resumable parallel batch execution |
-| `scripts/run_stream_case.py` | Streaming node updates |
+| `scripts/run_stream_case.py` | Streaming node updates and external stage snapshots |
 | `scripts/evaluation/runner.py` | Repeated stage-level evaluation |
 | `scripts/evaluation/evaluate.py` | Offline scoring and baseline comparison |
 
@@ -34,6 +34,7 @@ The repository develops a LangGraph-based rare-disease diagnosis agent and its e
 
 - `public_response.json`: pipeline-native public projection.
 - `external_response.json`: external delivery artifact with compatibility-oriented node wrappers and traceable evidence.
+- `agent.agent_adapter.run_external_stream()`: yields externally serialized stage payloads as each mapped node completes. Reflection includes accumulated Sources/Evidence and is ready before Final diagnosis completes.
 - `phase_results.json`: internal audit and partial-run artifact.
 - `node_results/`: per-node snapshots.
 - `execution_summary.json`: case execution status and artifact paths.

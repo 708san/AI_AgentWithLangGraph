@@ -763,3 +763,15 @@ citation_numbersが空の場合、その候補には現在の最終診断説明�
 5. ツール結果は診断候補の補助情報であり、文献Referenceではありません。
 6. source_idやevidence_idは内部追跡用です。外部向けのReferenceとEvidenceはReference番号を中心に対応付けます。
 
+## 14. ストリーミング時のReflection出力
+
+`agent.agent_adapter.run_external_stream()`は、外部向けステージが完了するたびに、
+`(step_type, payload)`を返します。ノード更新も同時に扱う場合は
+`run_stream_with_external_stages()`を使うと、各更新と対応する外部payloadを同じ実行から受け取れます。
+Reflectionのpayloadは`reflectionNode`完了時に生成され、
+それ以前に確定したSourcesとEvidenceを使ってReference番号と書誌情報を含みます。
+そのためFinal diagnosisの完了を待たずにReflectionを表示できます。
+
+この出力はノード完了単位です。Reflection生成中のトークン単位の逐次出力ではありません。
+ReflectionのReferenceにEvidenceを埋め込まず、既存の外部形式を維持します。
+

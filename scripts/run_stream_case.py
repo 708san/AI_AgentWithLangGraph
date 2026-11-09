@@ -1,8 +1,9 @@
 """Run one real case through the operational streaming adapter.
 
 This is a local verification runner. It reuses the same legacy metadata/image
-materialization as ``run_one_case.py`` and writes every streamed node update so
-the stream can be inspected without connecting to the worker database.
+materialization as ``run_one_case.py`` and writes every streamed node update,
+including its external stage payload when the node completes, so the stream can
+be inspected without connecting to the worker database.
 """
 
 from __future__ import annotations
@@ -65,7 +66,7 @@ def _append_jsonl(path: Path, value: Any) -> None:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run one real case through agent_adapter.run_stream()."
+        description="Run one real case through the external streaming adapter."
     )
     parser.add_argument("--patient-id", default="276")
     parser.add_argument("--metadata", default=str(DEFAULT_METADATA))
@@ -180,8 +181,12 @@ def main() -> int:
             with contextlib.redirect_stdout(runtime_log), contextlib.redirect_stderr(runtime_log):
                 from agent import agent_adapter
 
-                agent_result: dict[str, Any] = {"evidence_mode": "v2"}
-                for node_name, node_update in agent_adapter.run_stream(
+                for (
+                    node_name,
+                    serializable_update,
+                    step_type,
+                    external_payload,
+                ) in agent_adapter.run_stream_with_external_stages(
                     hpo_ids=present_hpo_ids,
                     absent_hpo_ids=absent_hpo_ids,
                     patient_id=str(args.patient_id),
@@ -195,8 +200,6 @@ def main() -> int:
                     evidence_mode="v2",
                     max_flow_iterations=args.max_flow_iterations,
                 ):
-                    serializable_update = agent_adapter.make_json_serializable(node_update)
-                    agent_result.update(node_update)
                     accumulated_updates.update(serializable_update)
                     node_update_history.setdefault(node_name, []).append(serializable_update)
                     event = {
@@ -204,16 +207,20 @@ def main() -> int:
                         "node_name": node_name,
                         "node_update": serializable_update,
                     }
+                    if step_type is not None and external_payload is not None:
+                        event["external_step"] = {
+                            "step_type": step_type,
+                            "payload": external_payload,
+                        }
                     _write_json(
                         stream_dir / f"{sequence:03d}_{node_name}.json",
                         event,
                     )
                     _append_jsonl(stream_events_path, event)
-                    step_type = agent_adapter.get_step_type_for_node(node_name)
-                    if step_type:
+                    if step_type is not None and external_payload is not None:
                         _write_json(
                             results_dir / "external_steps" / f"{step_type}.json",
-                            agent_adapter.build_step_output_json(step_type, agent_result),
+                            external_payload,
                         )
                     _write_json(
                         results_dir / "stream_state.json",

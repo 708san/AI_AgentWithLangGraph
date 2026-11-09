@@ -206,3 +206,86 @@ def run_stream(
         gestalt_matcher_result_loader=gestalt_matcher_result_loader,
         verbose=verbose,
     )
+
+
+def run_external_stream(
+    *,
+    hpo_ids: list[str],
+    gestalt_matcher_result_loader=None,
+    absent_hpo_ids: Optional[list[str]] = None,
+    patient_id: Optional[str] = None,
+    sex: Optional[str] = None,
+    onset: Optional[str] = None,
+    model_name: str = DEFAULT_MODEL_NAME,
+    reasoning_effort: Optional[str] = DEFAULT_REASONING_EFFORT,
+    zero_shot_model_name: Optional[str] = DEFAULT_ZERO_SHOT_MODEL_NAME,
+    zero_shot_reasoning_effort: Optional[str] = DEFAULT_ZERO_SHOT_REASONING_EFFORT,
+    enable_log: Optional[bool] = None,
+    verbose: bool = False,
+    use_absent_hpo: bool = False,
+    filter_importance: Optional[bool] = None,
+    image_path: Optional[str] = None,
+    evidence_mode: str = "v2",
+    max_flow_iterations: int = DEFAULT_MAX_FLOW_ITERATIONS,
+) -> Iterator[tuple[str, dict[str, Any]]]:
+    """Yield externally serialized stage payloads as their nodes complete.
+
+    Unlike :func:`run_stream`, this adapter emits only externally visible
+    stages. It keeps a cumulative State so stages such as Reflection can be
+    joined to Sources and Evidence produced by earlier nodes. The Reflection
+    payload is therefore ready for display as soon as ``reflectionNode``
+    completes; it does not wait for Final diagnosis.
+
+    Each yielded pair is ``(step_type, payload)`` where ``payload`` follows
+    :func:`build_step_output_json`'s established external wrapper shape.
+    """
+    stream_options = {
+        "hpo_ids": hpo_ids,
+        "gestalt_matcher_result_loader": gestalt_matcher_result_loader,
+        "absent_hpo_ids": absent_hpo_ids,
+        "patient_id": patient_id,
+        "sex": sex,
+        "onset": onset,
+        "model_name": model_name,
+        "reasoning_effort": reasoning_effort,
+        "zero_shot_model_name": zero_shot_model_name,
+        "zero_shot_reasoning_effort": zero_shot_reasoning_effort,
+        "enable_log": enable_log,
+        "verbose": verbose,
+        "use_absent_hpo": use_absent_hpo,
+        "filter_importance": filter_importance,
+        "image_path": image_path,
+        "evidence_mode": evidence_mode,
+        "max_flow_iterations": max_flow_iterations,
+    }
+    for _node_name, _node_update, step_type, payload in run_stream_with_external_stages(
+        **stream_options
+    ):
+        if step_type is not None and payload is not None:
+            yield step_type, payload
+
+
+def run_stream_with_external_stages(
+    **stream_options: Any,
+) -> Iterator[tuple[str, dict[str, Any], Optional[str], Optional[dict[str, Any]]]]:
+    """Yield every node update with its external stage payload, if applicable.
+
+    ``stream_options`` accepts the same keyword arguments as :func:`run_stream`.
+    The accumulated State is serialized at each externally visible node, so
+    callers can persist raw node events and publish the matching external
+    payload from the same run.
+    """
+    evidence_mode = stream_options.get("evidence_mode", "v2")
+    accumulated_state: dict[str, Any] = {"evidence_mode": evidence_mode}
+    for node_name, node_update in run_stream(**stream_options):
+        serializable_update = make_json_serializable(node_update)
+        if not isinstance(serializable_update, dict):
+            serializable_update = {}
+        accumulated_state.update(serializable_update)
+        step_type = get_step_type_for_node(node_name)
+        payload = (
+            build_step_output_json(step_type, accumulated_state)
+            if step_type is not None
+            else None
+        )
+        yield node_name, serializable_update, step_type, payload
