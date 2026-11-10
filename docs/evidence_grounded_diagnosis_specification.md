@@ -387,7 +387,7 @@ class State(TypedDict):
 
 `memory`は旧経路との互換用に残すが、新しい`createDiagnosisNode`、`reflectionNode`、`finalDiagnosisNode`は`evidence`と`sources`を使う。
 
-Zero-shotのLLM応答は、`selection_reason`を含むログ専用の一時モデルとして受け取り、理由を除いた`ZeroShotOutput`だけをStateへ渡す。正規化前の候補は`zeroShotRaw`、正規化結果は`zeroShotResult`として評価用に独立保存し、`selection_reason`や検証メタデータは公開レスポンスへ出さない。ローカルOMIMレコードで解決できるOMIM IDを病名同定の正本とし、病名はそのレコードのcanonical labelに揃える。不一致の元病名は検証ログに残し、既知のOMIMレコードがある候補はcanonical labelへ統一して公開候補に残す。ローカルレコードがないOMIM IDは`unconfirmed`として監査情報に残す。OMIM IDがない場合は、病名との互換性を確認できたときだけIDを付与し、病名・OMIMの両方を確定できない候補は`unconfirmed_identity`として公開Zero-shot候補から除外する。除外後の表示rankは1から連番で振り直し、元のモデルrankと除外理由は検証ログに記録する。検証statusは`match`、`normalized`、`mismatch`、`unconfirmed`を記録し、重複と除外の有無は別のフラグで表す。
+Zero-shotのLLM応答は、`selection_reason`を含むログ専用の一時モデルとして受け取り、理由を除いた`ZeroShotOutput`だけをStateへ渡す。正規化前の候補は`zeroShotRaw`、正規化結果は`zeroShotResult`として評価用に独立保存し、`selection_reason`や検証メタデータは公開レスポンスへ出さない。照合順は病名（表記正規化後の完全一致）、入力OMIM ID（ローカル辞書との完全一致）、FAISS最近傍であり、FAISSには閾値を設けない。検索に使う病名をまとめてEmbeddingし、API/FAISSを一括で呼ぶ。病名で一致すればそのIDを採用し、病名が一致しない場合はローカルで確認できた入力IDを優先する。両方で確定できない時だけFAISSを使う。病名の元表記はZeroShot結果に保持し、正規化後の正式名は監査ログに記録する。検索エラー時は候補と入力IDを保持し、IDを決められない場合も病名候補は残す。無効順位の候補も末尾に保持し、同一疾患の重複を整理した後、表示`rank`を1から連番化する。元順位、採用ID、検索方法、類似度、失敗理由は内部の`zeroShotValidation`に記録する。病名も利用可能なIDもない空行は疾患候補として表現できないため除外する。
 
 暫定診断は全統合候補を候補IDごとに一度ずつ含める。候補外ID、候補欠落、重複ID、順位の不整合、候補IDとOMIM IDの不一致、明らかな病名不一致を検出する。問題があれば検証内容を記録した上で1回だけ再生成し、再生成後も不正なら全入力候補を含む安全な代替出力を作る。候補外の候補を黙って削除して成功扱いにはしない。
 
@@ -538,6 +538,10 @@ ReflectionおよびFinalの文章は、次の4種類を別フィールドで管�
 - `tool_considerations_*`: PubCaseFinder、ZeroShot、GestaltMatcher等のツール結果
 - `model_inference_*`: 上記を統合したモデルの推論。文献事実として扱わない
 - `uncertainty_*`: 未取得文献、患者情報不足、候補間の未解決点
+
+`*_en`は英語、`*_ja`は日本語で記述し、反対言語の訳文を同じ欄に続けない。
+生成後は識別子と既知の病名を除いて明らかな言語混在だけを確認し、問題がある欄が見つかった場合に限り、該当する欄をまとめて1回修正生成する。
+修正後もEvidence引用マーカーが同じ順序で残ることを確認し、修正できない場合は元の文を保持する。
 
 Reflectionは候補ごとの個別呼び出しには分割せず、候補全体を1回の構造化呼び出しで処理する。
 出力上限は`REFLECTION_MAX_COMPLETION_TOKENS`（既定30,000）、タイムアウトは

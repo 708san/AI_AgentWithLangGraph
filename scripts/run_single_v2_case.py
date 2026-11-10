@@ -180,13 +180,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         help="Artifact directory. Defaults to local_artifacts/single_case_runs/<timestamp>.",
     )
-    parser.add_argument("--model", default="gpt-5-2", help="LLM model/deployment name.")
+    parser.add_argument("--model", default="gpt-5-4", help="LLM model/deployment name.")
     parser.add_argument("--zero-shot-model", default="gpt-5-4", help="Separate model for Zero-shot generation.")
     parser.add_argument(
         "--reasoning-effort",
         choices=("none", "low", "medium", "high", "xhigh"),
-        default="medium",
-        help="Reasoning effort for GPT-5 models. Defaults to medium.",
+        default="none",
+        help="Reasoning effort for GPT-5 models. Defaults to none.",
     )
     parser.add_argument(
         "--zero-shot-reasoning-effort",

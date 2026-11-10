@@ -277,13 +277,13 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Stable output key; use an image-qualified key for duplicate patient IDs.",
     )
-    parser.add_argument("--model", default="gpt-5-2")
+    parser.add_argument("--model", default="gpt-5-4")
     parser.add_argument("--zero-shot-model", default="gpt-5-4")
     parser.add_argument(
         "--reasoning-effort",
         choices=("none", "low", "medium", "high", "xhigh"),
-        default="medium",
-        help="Reasoning effort for GPT-5 models. Defaults to medium.",
+        default="none",
+        help="Reasoning effort for GPT-5 models. Defaults to none.",
     )
     parser.add_argument(
         "--zero-shot-reasoning-effort",

@@ -81,7 +81,7 @@ Hit@kは明示された`rank`（候補統合では`best_rank`）で計算し、M
 既定では比較結果ディレクトリの`analysis/`に、Markdownレポート、Top-1〜5のMATCHとCLOSE MATCHを積み上げ表示する図、指標表、条件別CSVを出力します。別の保存先は`--run-dir`と`--output-dir`で指定できます。
 症例別の`case_comparison.png`と`.svg`、`case_comparison.csv`も出力します。画像は患者情報・正解疾患・HPO数を左側に、6条件の正解順位を色分けして並べる一覧です。CSVは1症例1行で、6条件の各セルにM（MATCH順位）、C（CLOSE MATCHのみの順位）、または`-`を記録します。
 
-候補名からOMIM IDを補い、ZeroShotの除外・連番再採番をZebraSeek runtimeと同じ規則で適用して評価する場合は、次を実行します。これは未キャッシュの病名ごとに、runtimeの`disease_normalize`と同じAzure embedding検索を呼びます。検索結果は解析ディレクトリのキャッシュに保存され、再実行時に再利用されます。結果は既存の`analysis/`を上書きせず、`analysis_zebraseek_resolved/`へ保存します。
+候補名からOMIM IDを補い、ZeroShot runtimeと同じ照合・FAISS最近傍検索・重複整理・連番再採番を適用して評価する場合は、次を実行します。完全一致で解決しなかった病名を一括Embedding検索し、類似度閾値は設けません。検索結果は解析ディレクトリのキャッシュに保存され、再実行時に再利用されます。検索エラーやOMIM未確定でも病名候補は評価から除外しません。結果は既存の`analysis/`を上書きせず、`analysis_zebraseek_resolved/`へ保存します。
 
 ```bash
 .venv/bin/python -m scripts.evaluation.report_zeroshot_model_comparison \
@@ -89,4 +89,4 @@ Hit@kは明示された`rank`（候補統合では`best_rank`）で計算し、M
   --resolve-missing-ids
 ```
 
-`zeroshot_id_resolution_audit.csv`には候補ごとの元ID、補完ID、解決状態、除外有無、再採番後順位を記録します。未解決候補はZebraSeek runtime同様に除外し、残った候補の順位を1から振り直します。MATCH/CLOSE MATCHは`MondoOntologyMatcher`の判定に基づきます。
+`zeroshot_id_resolution_audit.csv`には候補ごとの元ID、補完ID、解決方法、Embedding類似度、除外有無、元順位、再採番後順位を記録します。病名・IDの解決に失敗した候補も残し、重複を整理した後の順位を1から振り直します。MATCH/CLOSE MATCHは`MondoOntologyMatcher`の判定に基づきます。

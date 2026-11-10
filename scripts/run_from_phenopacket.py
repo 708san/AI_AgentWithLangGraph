@@ -214,7 +214,7 @@ def run_pipeline_from_phenopacket(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the rare disease diagnosis pipeline using a Phenopacket JSON file.")
     parser.add_argument("--phenopacket", type=str, required=True, help="Path to the input Phenopacket JSON file.")
-    parser.add_argument("--model", type=str, default="gpt-5-2", choices=["gpt-4o", "gpt-5-1", "gpt-5-2"], help="The name of the model to use.")
+    parser.add_argument("--model", type=str, default="gpt-5-4", choices=["gpt-4o", "gpt-5-1", "gpt-5-2", "gpt-5-4"], help="The name of the model to use.")
     parser.add_argument("--image", type=str, default=None, help="Optional path to the patient's image file.")
     parser.add_argument("--output_mode", type=str, default="file", choices=["file", "print", "return"], help="Output mode: 'file' to save JSON, 'print' to print to stdout.")
     parser.add_argument("--use_phenobrain", action="store_true", help="Enable PhenoBrain explicitly (default: disabled).")

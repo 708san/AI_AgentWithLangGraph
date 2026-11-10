@@ -12,9 +12,28 @@ import re
 from typing import Any
 
 from pydantic import BaseModel
+from ..tools.candidate_metadata import (
+    known_disease_name,
+    normalize_disease_name,
+    parse_omim_id,
+    resolve_known_disease_identity,
+)
 
 
 INLINE_EVIDENCE_MARKER = re.compile(r"\[\[EVIDENCE:([^\]]+)\]\]")
+EVIDENCE_ID_PATTERN = re.compile(r"\bEVD-[A-Za-z0-9_-]+\b")
+EVIDENCE_ID_GROUP_PATTERN = re.compile(
+    r"(?:[\[［【]\s*)?EVD-[A-Za-z0-9_-]+"
+    r"(?:\s*[,;，；、]\s*EVD-[A-Za-z0-9_-]+)*"
+    r"(?:\s*[\]］】])?"
+)
+REFERENCE_NUMBER_CLUSTER = r"\[\d+\](?:(?:\s*[,;，；、]\s*|\s*)\[\d+\])+"
+WRAPPED_REFERENCE_NUMBER_CLUSTER_PATTERN = re.compile(
+    rf"(?:［|【|\[)\s*(?P<cluster>{REFERENCE_NUMBER_CLUSTER})\s*(?:］|】|\])"
+)
+ADJACENT_REFERENCE_GROUP_PATTERN = re.compile(
+    REFERENCE_NUMBER_CLUSTER
+)
 PUBLIC_PRIVATE_KEYS = {"prompt"}
 IMAGE_PATH_KEYS = {"imagePath", "image_path"}
 EXECUTION_ONLY_KEYS = {"llm", "zero_shot_llm", "gestalt_matcher_result_loader"}
@@ -326,7 +345,84 @@ def _add_citations(text: Any, evidence_items: list[dict[str, Any]], numbers_by_s
             end = result.find(claim) + len(claim)
             if marker not in result[end:end + len(marker) + 2]:
                 result = result[:end].rstrip() + f" {marker}" + result[end:]
+    return _deduplicate_reference_clusters(result)
+
+
+def _deduplicate_reference_clusters(text: Any) -> str:
+    """Collapse repeated reference numbers inside one citation-only cluster."""
+    result = str(text or "")
+
+    def unique_numbers(match: re.Match[str]) -> str:
+        numbers = list(dict.fromkeys(
+            int(number) for number in re.findall(r"\[(\d+)\]", match.group("cluster"))
+        ))
+        return "".join(f"[{number}]" for number in numbers)
+
+    result = WRAPPED_REFERENCE_NUMBER_CLUSTER_PATTERN.sub(unique_numbers, result)
+    result = ADJACENT_REFERENCE_GROUP_PATTERN.sub(
+        lambda match: "".join(
+            f"[{number}]"
+            for number in dict.fromkeys(
+                int(value) for value in re.findall(r"\[(\d+)\]", match.group(0))
+            )
+        ),
+        result,
+    )
     return result
+
+
+def _externalize_evidence_ids(
+    text: Any,
+    evidence_by_id: dict[str, dict[str, Any]],
+    number_by_source_id: dict[str, int],
+) -> tuple[str, list[int]]:
+    """Render model-emitted Evidence IDs as deduplicated public References."""
+    used_numbers: list[int] = []
+
+    def replace_evidence_group(match: re.Match[str]) -> str:
+        numbers: list[int] = []
+        for evidence_id in EVIDENCE_ID_PATTERN.findall(match.group(0)):
+            evidence_item = evidence_by_id.get(evidence_id)
+            if not evidence_item:
+                continue
+            number = number_by_source_id.get(str(evidence_item.get("source_id") or ""))
+            if number is not None:
+                if number not in numbers:
+                    numbers.append(number)
+                if number not in used_numbers:
+                    used_numbers.append(number)
+        return "".join(f"[{number}]" for number in numbers)
+
+    result = EVIDENCE_ID_GROUP_PATTERN.sub(replace_evidence_group, str(text or ""))
+    result = _deduplicate_reference_clusters(result)
+    return result, used_numbers
+
+
+def _format_external_citation_fields(
+    block: Any,
+    fields: tuple[str, ...],
+    evidence_by_id: dict[str, dict[str, Any]],
+    number_by_source_id: dict[str, int],
+) -> None:
+    """Normalize citations only in the legacy external-response projection."""
+    if not isinstance(block, dict):
+        return
+    for item in block.get("ans", []) or []:
+        if not isinstance(item, dict):
+            continue
+        numbers = list(dict.fromkeys(
+            int(number)
+            for number in item.get("citation_numbers", []) or []
+            if str(number).isdigit()
+        ))
+        for field in fields:
+            item[field], cited_numbers = _externalize_evidence_ids(
+                item.get(field), evidence_by_id, number_by_source_id
+            )
+            numbers.extend(number for number in cited_numbers if number not in numbers)
+        numbers = sorted(set(numbers))
+        item["citation_numbers"] = numbers
+        item["reference_numbers"] = numbers
 
 
 def _public_evidence(evidence: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -477,6 +573,80 @@ def _project_reflection(
         item.pop("reasoning", None)
         item.pop("citations", None)
         item.pop("evidence_assessments", None)
+    return output
+
+
+def _normalize_external_zero_shot(value: Any, validation: Any = None) -> Any:
+    """Keep valid named candidates and normalize identities/ranks at the API edge."""
+    if not isinstance(value, dict) or not isinstance(value.get("ans"), list):
+        return value
+
+    audit_by_display_rank = {}
+    for validation_row in validation or []:
+        if not isinstance(validation_row, dict) or validation_row.get("display_rank") is None:
+            continue
+        try:
+            display_rank = int(validation_row["display_rank"])
+        except (TypeError, ValueError):
+            continue
+        audit_by_display_rank[display_rank] = validation_row
+    eligible = []
+    seen_identity_keys: set[str] = set()
+    for input_index, item in enumerate(value["ans"]):
+        if not isinstance(item, dict):
+            continue
+        try:
+            model_order = int(item.get("rank"))
+        except (TypeError, ValueError):
+            continue
+        if model_order < 1:
+            continue
+
+        audit_row = audit_by_display_rank.get(model_order, {})
+        mapping_method = audit_row.get("mapping_method")
+        omim_id = parse_omim_id(item.get("OMIM_id") or item.get("omim_id"))
+        disease_name = str(item.get("disease_name") or "")
+        if not disease_name.strip():
+            continue
+
+        name_id, name_label, _ = resolve_known_disease_identity(disease_name)
+        if name_id and name_label:
+            canonical_id = name_id
+        elif omim_id:
+            canonical_id = omim_id
+        else:
+            canonical_id = None
+        # Keep the model's disease wording; the OMIM ID carries the resolved
+        # canonical identity, while the original wording remains auditable.
+        display_name = disease_name or (known_disease_name(canonical_id) if canonical_id else None)
+        if not display_name:
+            continue
+
+        if mapping_method == "faiss_nearest_no_threshold":
+            identity_key = f"NAME:{normalize_disease_name(disease_name)}"
+        else:
+            identity_key = canonical_id or f"NAME:{normalize_disease_name(display_name)}"
+        if identity_key == "NAME:" or identity_key in seen_identity_keys:
+            continue
+        seen_identity_keys.add(identity_key)
+
+        eligible.append((model_order, input_index, item, canonical_id, display_name))
+
+    eligible.sort(key=lambda row: (row[0], row[1]))
+    output = dict(value)
+    output["ans"] = []
+    for display_rank, (source_display_rank, _, item, omim_id, canonical_name) in enumerate(eligible, 1):
+        row = dict(item)
+        row["disease_name"] = canonical_name
+        row["OMIM_id"] = omim_id
+        source_audit = audit_by_display_rank.get(source_display_rank, {})
+        row["model_OMIM_id"] = source_audit.get(
+            "OMIM_id", item.get("model_OMIM_id", item.get("OMIM_id", item.get("omim_id")))
+        )
+        row.pop("omim_id", None)
+        row.pop("model_rank", None)
+        row["rank"] = display_rank
+        output["ans"].append(row)
     return output
 
 
@@ -669,7 +839,11 @@ def serialize_external_compatibility(state: dict) -> dict[str, Any]:
     raw_evidence = raw.get("evidence", []) or []
     if not isinstance(raw_evidence, list):
         raw_evidence = []
-    all_references, _, _ = _build_references(raw_sources, raw_evidence)
+    (
+        all_references,
+        external_number_by_source_id,
+        external_evidence_by_id,
+    ) = _build_references(raw_sources, raw_evidence)
     eligible_source_ids = {
         str(source.get("source_id"))
         for source in raw_sources
@@ -707,6 +881,22 @@ def serialize_external_compatibility(state: dict) -> dict[str, Any]:
         if item.get("number") is not None
     }
     projected = _project_v2(raw)
+    projected["zeroShotResult"] = _normalize_external_zero_shot(
+        projected.get("zeroShotResult"),
+        _to_public_value(state.get("zeroShotValidation", []) or []),
+    )
+    _format_external_citation_fields(
+        projected.get("finalDiagnosis"),
+        ("description_en", "description_ja", "description"),
+        external_evidence_by_id,
+        external_number_by_source_id,
+    )
+    _format_external_citation_fields(
+        projected.get("reflection"),
+        ("diagnosis_analysis_en", "diagnosis_analysis_ja"),
+        external_evidence_by_id,
+        external_number_by_source_id,
+    )
     result: dict[str, Any] = {
         "zeroShotResult": {"zeroShotResult": projected.get("zeroShotResult")},
         "pubCaseFinder": {"pubCaseFinder": projected.get("pubCaseFinder", [])},

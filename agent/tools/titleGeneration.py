@@ -168,7 +168,7 @@ def _load_llm(model_name: str) -> Any:
 def generate_patient_title(
     input_data: PatientTitleInput | dict[str, Any],
     llm: Any = None,
-    model_name: str = "gpt-5-2",
+    model_name: str = "gpt-5-4",
     use_llm: bool = True,
     max_completion_tokens: int = DEFAULT_MAX_COMPLETION_TOKENS,
     timeout_seconds: Optional[float] = 20.0,
@@ -261,7 +261,7 @@ def patient_title_input_from_state(state: dict[str, Any]) -> PatientTitleInput:
 def generate_patient_title_from_state(
     state: dict[str, Any],
     use_llm: bool = True,
-    model_name: str = "gpt-5-2",
+    model_name: str = "gpt-5-4",
     include_prompt: bool = False,
 ) -> PatientTitleOutput:
     return generate_patient_title(

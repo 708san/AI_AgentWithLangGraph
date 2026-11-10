@@ -18,12 +18,25 @@ from ..state.state_types import (
 
 _OMIM_RE = re.compile(r"(?:OMIM\s*[:#]?\s*)?(\d{4,7})", re.IGNORECASE)
 _DATA_PATH = Path(__file__).resolve().parent.parent / "data" / "DataForDiseaseSearchFromHPO" / "omim_database.json"
+_MAPPING_INDEX_PATH = Path(__file__).resolve().parent.parent / "data" / "DataForOmimMapping" / "DataForOmimMapping.json"
 
 
 def canonical_omim_id(value: Any) -> str | None:
     if value is None or value == "":
         return None
     match = _OMIM_RE.search(str(value))
+    return f"OMIM:{match.group(1)}" if match else None
+
+
+def parse_omim_id(value: Any) -> str | None:
+    """Parse only a complete OMIM identifier, never digits embedded in prose."""
+    if value is None or isinstance(value, bool):
+        return None
+    match = re.fullmatch(
+        r"\s*(?:OMIM\s*[:#]?\s*)?(\d{4,7})\s*",
+        str(value),
+        flags=re.IGNORECASE,
+    )
     return f"OMIM:{match.group(1)}" if match else None
 
 
@@ -97,6 +110,114 @@ def known_disease_aliases(omim_id: Any) -> list[str]:
         for item in str(record.get("synonym") or "").split(",")
         if item.strip()
     ]
+
+
+@lru_cache(maxsize=1)
+def _known_disease_name_index() -> dict[str, tuple[str, ...]]:
+    """Index local OMIM names and FAISS labels, including semicolon variants."""
+    matches: dict[str, set[str]] = {}
+
+    def add_name(name: Any, omim_id: Any) -> None:
+        canonical_id = canonical_omim_id(omim_id)
+        if not canonical_id:
+            return
+        text = str(name or "").strip()
+        if not text:
+            return
+        # Preserve the combined label and index each semicolon-delimited part.
+        # FAISS labels commonly use "OFFICIAL DISEASE NAME; ABBREVIATION".
+        for variant in [text, *(part.strip() for part in text.split(";") if part.strip())]:
+            normalized = normalize_disease_name(variant)
+            if normalized:
+                matches.setdefault(normalized, set()).add(canonical_id)
+
+    for omim_id, record in _load_omim_records().items():
+        add_name(record.get("disease_name"), omim_id)
+        for comma_part in str(record.get("synonym") or "").split(","):
+            if comma_part.strip():
+                add_name(comma_part, omim_id)
+
+    # Also index the exact labels used to build the FAISS mapping. In many
+    # entries the official title is before ';' and the acronym is after it.
+    try:
+        with _MAPPING_INDEX_PATH.open(encoding="utf-8") as handle:
+            mapping_index = json.load(handle)
+    except (OSError, ValueError):
+        mapping_index = {}
+    if isinstance(mapping_index, dict):
+        for label, omim_id in zip(
+            mapping_index.get("labels", []),
+            mapping_index.get("omim_ids", []),
+        ):
+            add_name(label, omim_id)
+
+    return {name: tuple(sorted(ids)) for name, ids in matches.items()}
+
+
+def resolve_known_disease_identity(value: Any) -> tuple[str | None, str | None, bool]:
+    """Resolve a name only when it exactly identifies one local OMIM record.
+
+    The final boolean indicates that the exact name is ambiguous across
+    multiple OMIM identities. Similarity search is intentionally not used as
+    an identity authority.
+    """
+    text = str(value or "")
+    normalized = normalize_disease_name(text)
+    if not normalized:
+        return None, None, False
+
+    name_index = _known_disease_name_index()
+    matches = set(name_index.get(normalized, ()))
+    if len(matches) == 1:
+        omim_id = next(iter(matches))
+        return omim_id, known_disease_name(omim_id), False
+
+    # Some OMIM/model titles append abbreviations as "full name; ABBR".
+    # Intersect the identities of resolvable components so an abbreviation can
+    # disambiguate a shared disease title. Unmatched components are ignored.
+    if ";" in text:
+        component_matches = [
+            set(name_index.get(normalize_disease_name(component), ()))
+            for component in text.split(";")
+        ]
+        component_matches = [ids for ids in component_matches if ids]
+        if component_matches:
+            intersection = set.intersection(*component_matches)
+            matches = intersection if intersection else set.union(*component_matches, matches)
+    if len(matches) != 1:
+        return None, None, len(matches) > 1
+    omim_id = next(iter(matches))
+    return omim_id, known_disease_name(omim_id), False
+
+
+def disease_name_matches_omim(value: Any, omim_id: Any) -> bool:
+    """Return whether a supplied name exactly matches an OMIM title/alias."""
+    normalized = normalize_disease_name(value)
+    canonical = canonical_omim_id(omim_id)
+    if not normalized or not canonical:
+        return False
+    resolved_id, _, ambiguous = resolve_known_disease_identity(value)
+    if resolved_id:
+        return resolved_id == canonical
+    if ambiguous:
+        return False
+    expected = [known_disease_name(canonical), *known_disease_aliases(canonical)]
+    expected = [
+        part.strip()
+        for name in expected if name
+        for part in str(name).split(";")
+        if part.strip()
+    ]
+    observed_names = {normalized}
+    observed_names.update(
+        normalize_disease_name(part)
+        for part in str(value or "").split(";")
+        if normalize_disease_name(part)
+    )
+    expected_names = {
+        normalize_disease_name(name) for name in expected if normalize_disease_name(name)
+    }
+    return bool(observed_names & expected_names)
 
 
 def names_compatible(observed: Any, expected: Any, synonyms: Iterable[Any] = ()) -> bool:

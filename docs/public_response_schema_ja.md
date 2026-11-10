@@ -373,9 +373,12 @@ zeroShotResult.ansはarray<object>です。
 
 | キー | 型 | 内容 |
 |---|---|---|
-| disease_name | string | Zero-shotが生成した疾患名。 |
-| rank | integer | Zero-shot内での順位。 |
-| OMIM_id | string | OMIM ID。 |
+| disease_name | string | Zero-shotモデルが返した病名表記。照合後も元の表現を保持。 |
+| rank | integer | OMIM同定・重複除去後の外部表示順位（1からの連番）。 |
+| OMIM_id | string \| null | 病名照合、既知OMIM照合、またはFAISS最近傍から割り当てたID。検索に失敗し、利用できるIDがない場合はnull。 |
+| model_OMIM_id | string \| null | Zero-shotモデルが元々返したOMIM ID。補正前の値。 |
+
+病名の完全照合では、大文字小文字や記号の違いを正規化し、`;`以降の略称も照合します。一意に決まればその病名に対応するIDを採用します。病名で決まらない場合は入力されたOMIM IDをローカル辞書で照合し、一致すればそのIDを採用します。どちらも一致しない場合に限りFAISS最近傍を類似度閾値なしで割り当てます。元の病名表記は保持し、補正後の`OMIM_id`とモデルが返した`model_OMIM_id`を並べて確認できます。Embedding/FAISSの実行エラー時も候補と入力IDを保持します。外部JSONには連番の`rank`だけを出し、元順位は含めません。検索方法、類似度、元順位、理由は内部監査用の`zeroShotValidation`に記録します。
 
 ### 5.5 phenoBrain、webresources、memory
 

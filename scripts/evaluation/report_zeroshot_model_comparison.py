@@ -1,8 +1,8 @@
 """Summarize and plot a saved Zero-shot model-comparison run.
 
 By default this is an offline analysis tool. ``--resolve-missing-ids`` opts in
-to ZebraSeek's Azure-embedding-backed disease-name resolver for candidates
-without a locally known OMIM identity.
+to ZebraSeek's Azure-embedding-backed resolver for disease-name/OMIM pairs
+that cannot be resolved by the local exact-name lookup.
 """
 
 from __future__ import annotations
@@ -32,9 +32,7 @@ if str(MONDO_TOOLS) not in sys.path:
 from MondoMatcher import MondoOntologyMatcher  # noqa: E402
 from agent.tools.candidate_metadata import (  # noqa: E402
     canonical_omim_id,
-    known_disease_aliases,
     known_disease_name,
-    names_compatible,
 )
 
 
@@ -86,7 +84,7 @@ def _percent(numerator: int, denominator: int) -> float:
 
 
 class ZebraSeekZeroShotResolver:
-    """Mirror normalize_zeroshot_results identity resolution and rank handling."""
+    """Use the runtime Zero-shot resolver with a persistent embedding cache."""
 
     def __init__(self, cache_path: Path):
         self.cache_path = cache_path
@@ -95,134 +93,74 @@ class ZebraSeekZeroShotResolver:
         except (OSError, json.JSONDecodeError):
             loaded = {}
         self.cache = loaded if isinstance(loaded, dict) else {}
-        self._disease_normalize = None
+    def _lookup_many(self, names: list[str]) -> list[tuple[str | None, str | None, float | None]]:
+        cache_keys = [name.upper() for name in names]
+        missing = list(dict.fromkeys(
+            key for key in cache_keys
+            if not isinstance(self.cache.get(key), dict)
+            or not self.cache[key].get("omim_id")
+            or not self.cache[key].get("disease_name")
+            or self.cache[key].get("lookup_error")
+        ))
+        if missing:
+            # Import lazily; one batched Azure call resolves all cache misses.
+            from agent.tools.diseaseNormalize import disease_normalize_many
 
-    def _lookup_by_name(self, cleaned_name: str) -> dict[str, Any]:
-        cache_key = cleaned_name.upper()
-        if cache_key in self.cache:
-            cached = self.cache[cache_key]
-            return cached if isinstance(cached, dict) else {}
+            looked_up = disease_normalize_many(missing)
+            for key, (omim_id, label, similarity) in zip(missing, looked_up):
+                self.cache[key] = {
+                    "omim_id": canonical_omim_id(omim_id),
+                    "disease_name": str(label or ""),
+                    "similarity": similarity,
+                }
+            self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = self.cache_path.with_suffix(self.cache_path.suffix + ".tmp")
+            temporary.write_text(
+                json.dumps(self.cache, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            temporary.replace(self.cache_path)
 
-        if self._disease_normalize is None:
-            # Import lazily: this runtime module loads the local FAISS index and
-            # Azure embedding client. It is needed only for unresolved names.
-            from agent.tools.diseaseNormalize import disease_normalize
-
-            self._disease_normalize = disease_normalize
-        try:
-            omim_id, label, similarity = self._disease_normalize(cache_key)
-            result = {
-                "omim_id": canonical_omim_id(omim_id),
-                "disease_name": str(label or ""),
-                "similarity": float(similarity),
-                "lookup_error": None,
-            }
-        except Exception as exc:
-            result = {
-                "omim_id": None,
-                "disease_name": "",
-                "similarity": None,
-                "lookup_error": f"{type(exc).__name__}: {exc}",
-            }
-        self.cache[cache_key] = result
-        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.cache_path.with_suffix(self.cache_path.suffix + ".tmp")
-        temporary.write_text(
-            json.dumps(self.cache, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-        )
-        temporary.replace(self.cache_path)
-        return result
-
-    @staticmethod
-    def _clean_name(value: Any) -> str:
-        text = str(value or "").strip().strip("*")
-        return re.sub(r"\s*\(.*\)\s*", "", text).strip()
+        results = []
+        for key in cache_keys:
+            cached = self.cache.get(key, {})
+            results.append((
+                canonical_omim_id(cached.get("omim_id")),
+                str(cached.get("disease_name") or "") or None,
+                float(cached["similarity"]) if cached.get("similarity") is not None else None,
+            ))
+        return results
 
     def normalize(self, predictions: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """Return ZebraSeek-normalized candidates and a per-candidate audit."""
-        normalized: list[dict[str, Any]] = []
-        audit: list[dict[str, Any]] = []
-        seen_candidate_keys: set[str] = set()
+        from agent.state.state_types import ZeroShotFormat, ZeroShotOutput
+        from agent.tools.diseaseNormalize import normalize_zeroshot_results
 
-        for model_order, raw in enumerate(predictions, start=1):
-            if not isinstance(raw, dict):
-                continue
-            original_name = raw.get("disease_name") or ""
-            original_id = raw.get("OMIM_id") or raw.get("omim_id")
-            cleaned_name = self._clean_name(original_name)
-            supplied_id = canonical_omim_id(original_id)
-            canonical_name = known_disease_name(supplied_id)
-            resolved_id = supplied_id
-            resolved_name = cleaned_name
-            similarity = None
-            lookup_error = None
+        valid_predictions = [item for item in predictions if isinstance(item, dict)]
+        typed_candidates = []
+        for raw in valid_predictions:
+            try:
+                rank = int(raw.get("rank"))
+            except (TypeError, ValueError):
+                rank = 0
+            typed_candidates.append(ZeroShotFormat(
+                disease_name=str(raw.get("disease_name") or ""),
+                rank=rank,
+                OMIM_id=raw.get("OMIM_id") or raw.get("omim_id"),
+            ))
 
-            if supplied_id and canonical_name:
-                resolved_name = canonical_name
-                status = (
-                    "match"
-                    if cleaned_name.upper() == canonical_name.upper()
-                    else "normalized"
-                    if names_compatible(
-                        cleaned_name,
-                        canonical_name,
-                        known_disease_aliases(supplied_id),
-                    )
-                    else "mismatch_id_authoritative"
-                )
-            elif cleaned_name:
-                lookup = self._lookup_by_name(cleaned_name)
-                lookup_id = canonical_omim_id(lookup.get("omim_id"))
-                lookup_name = str(lookup.get("disease_name") or "")
-                similarity = lookup.get("similarity")
-                lookup_error = lookup.get("lookup_error")
-                if lookup_id and lookup_name and names_compatible(
-                    cleaned_name,
-                    lookup_name,
-                    known_disease_aliases(lookup_id),
-                ):
-                    resolved_id = lookup_id
-                    resolved_name = lookup_name
-                    status = "normalized_from_name"
-                else:
-                    resolved_id = None
-                    status = "unconfirmed"
-            else:
-                resolved_id = None
-                status = "unconfirmed"
-
-            duplicate_key = resolved_id or cleaned_name.upper()
-            duplicate = duplicate_key in seen_candidate_keys
-            excluded = status == "unconfirmed"
-            display_rank = None
-            if not excluded:
-                # Match normalize_zeroshot_results: retain model order, drop
-                # unconfirmed identities, and assign gap-free display ranks.
-                display_rank = len(normalized) + 1
-                resolved_candidate = dict(raw)
-                resolved_candidate["OMIM_id"] = resolved_id
-                resolved_candidate["disease_name"] = resolved_name
-                resolved_candidate["rank"] = display_rank
-                normalized.append(resolved_candidate)
-                seen_candidate_keys.add(duplicate_key)
-
-            audit.append({
-                "model_order": model_order,
-                "model_rank": raw.get("rank"),
-                "raw_disease_name": original_name,
-                "cleaned_disease_name": cleaned_name,
-                "supplied_omim_id": original_id,
-                "resolved_omim_id": resolved_id,
-                "resolved_disease_name": resolved_name,
-                "status": status,
-                "duplicate": duplicate,
-                "excluded": excluded,
-                "display_rank": display_rank,
-                "embedding_similarity": similarity,
-                "lookup_error": lookup_error,
-            })
-
+        state = {"zeroShotResult": ZeroShotOutput(ans=typed_candidates)}
+        normalize_zeroshot_results(state, disease_lookup=self._lookup_many)
+        output = state["zeroShotResult"]
+        normalized = [item.model_dump() for item in output.ans] if output else []
+        audit = state.get("zeroShotValidation", [])
+        for item in audit:
+            item["model_order"] = int(item.get("input_index", 0)) + 1
+            item["raw_disease_name"] = item.get("disease_name")
+            item["cleaned_disease_name"] = item.get("disease_name")
+            item["supplied_omim_id"] = item.get("OMIM_id")
+            item["resolved_omim_id"] = item.get("normalized_OMIM_id")
+            item["resolved_disease_name"] = item.get("normalized_disease_name")
         return normalized, audit
 
 
@@ -854,7 +792,7 @@ def main() -> int:
         action="store_true",
         help=(
             "Mirror ZebraSeek ZeroShot ID normalization. This may call the configured "
-            "Azure embedding endpoint for each uncached disease name that needs resolution."
+            "Azure embedding endpoint once per batch of uncached disease names that needs resolution."
         ),
     )
     args = parser.parse_args()

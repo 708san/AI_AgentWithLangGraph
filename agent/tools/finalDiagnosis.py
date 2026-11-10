@@ -16,6 +16,7 @@ from ..state.state_types import (
 from ..llm.prompt import prompt_dict, build_prompt
 from ..llm.llm_wrapper import is_content_filter_error
 from ..utils.response_serializer import omim_number
+from ..utils.language_quality import repair_obvious_language_mixing
 from .diagnosis import attach_diagnosis_references
 from .candidate_metadata import canonical_omim_id, enrich_candidates, names_compatible
 from .evidence_validation import validate_v2_identity_fields
@@ -637,6 +638,7 @@ Every diagnosis must use an existing candidate_id and only existing evidence_ids
 A candidate may be described as literature-supported only when a validated literature Evidence item supports it. Tool rankings are not citations.
 If no usable literature Evidence was retrieved, say that no candidate-matched literature Evidence was available in this run; do not imply that no literature exists. Explain the patient's clinical findings and tool rationale without presenting either as a literature claim.
 Keep the English and Japanese descriptions semantically aligned and use the same evidence_ids.
+Write every `*_en` field in English only and every `*_ja` field in Japanese only. Do not append a translation in the other language. Keep standard disease names, gene symbols, medical terms, and identifiers in their accepted spelling.
 Explain the concrete patient features in relation to the supplied literature claims and identify important uncertainty.
 Write a substantive multi-sentence explanation for each diagnosis. Connect patient findings to the supplied Evidence and tool signals, and use general medical knowledge only as clearly labeled model inference; explain the clinical interpretation and remaining uncertainty. Do not return only a conclusion such as "supported" or "not supported".
 For every literature-grounded statement, place an inline marker immediately after that specific statement using [[EVIDENCE:EVD-...]]. The cited Evidence claim must directly support the whole statement; a paper merely being about the disease is not enough. Do not cite tool-derived phenotype profiles as if they came from literature. Do not place a marker at the end of an unrelated paragraph. Use only supplied evidence_id values and pair the same markers with semantically equivalent English and Japanese statements. Do not use numeric [1] markers; the serializer will convert internal markers to reference numbers.
@@ -740,6 +742,17 @@ EVIDENCE:\n{evidence_text}"""
                 authoritative_candidates.get(item.candidate_id),
                 evidence,
             )
+        answers = repair_obvious_language_mixing(
+            llm,
+            answers,
+            (
+                ("description_en", "description_ja"),
+                ("literature_basis_en", "literature_basis_ja"),
+                ("tool_considerations_en", "tool_considerations_ja"),
+                ("model_inference_en", "model_inference_ja"),
+                ("uncertainty_en", "uncertainty_ja"),
+            ),
+        )
         return DiagnosisOutputV2(ans=answers, evidence=evidence), prompt
     except Exception as exc:
         print(f"[FinalDiagnosisV2] structured generation failed: {exc}")

@@ -47,7 +47,7 @@ def _get_model_env_values(model_name: str):
     api_version = os.environ.get(f"{prefix}_API_VERSION")
     return endpoint, api_key, deployment_name, api_version
 
-def get_llm_instance(model_name: str = 'gpt-5-2', reasoning_effort: str | None = None):
+def get_llm_instance(model_name: str = 'gpt-5-4', reasoning_effort: str | None = "none"):
     """
     指定されたモデル名に基づいてAzureOpenAIWrapperのインスタンスを生成して返す。
     """

@@ -159,7 +159,7 @@ def _expected_config(
         "metadata_occurrence": metadata_occurrence,
         "model": args.model,
         "zero_shot_model": args.zero_shot_model,
-        "reasoning_effort": "medium",
+        "reasoning_effort": "none",
         "zero_shot_reasoning_effort": "high",
         "default_max_completion_tokens": 30000,
         "max_flow_iterations": args.max_flow_iterations,
@@ -270,7 +270,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--metadata", default=str(DEFAULT_METADATA))
     parser.add_argument("--image-dir", default=str(DEFAULT_IMAGE_DIR))
     parser.add_argument("--output-root", default=str(DEFAULT_ALL_OUTPUT_ROOT))
-    parser.add_argument("--model", default="gpt-5-2")
+    parser.add_argument("--model", default="gpt-5-4")
     parser.add_argument("--zero-shot-model", default="gpt-5-4")
     parser.add_argument("--max-flow-iterations", type=int, default=0)
     parser.add_argument("--use-phenobrain", action="store_true")
@@ -621,7 +621,7 @@ def main() -> int:
                     "image_dir": str(image_dir),
                     "model_config": {
                         "model": args.model,
-                        "reasoning_effort": "medium",
+                        "reasoning_effort": "none",
                         "zero_shot_model": args.zero_shot_model,
                         "zero_shot_reasoning_effort": "high",
                         "default_max_completion_tokens": 30000,
@@ -710,7 +710,7 @@ def main() -> int:
         "image_dir": str(image_dir),
         "model_config": {
             "model": args.model,
-            "reasoning_effort": "medium",
+            "reasoning_effort": "none",
             "zero_shot_model": args.zero_shot_model,
             "zero_shot_reasoning_effort": "high",
             "default_max_completion_tokens": 30000,

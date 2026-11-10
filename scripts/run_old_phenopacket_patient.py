@@ -371,7 +371,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(PROJECT_ROOT / "run_outputs" / "legacy_phenopacket"),
         help="Directory under which a timestamped run directory is created.",
     )
-    parser.add_argument("--model", default="gpt-5-2", choices=["gpt-4o", "gpt-5-1", "gpt-5-2"])
+    parser.add_argument("--model", default="gpt-5-4", choices=["gpt-4o", "gpt-5-1", "gpt-5-2", "gpt-5-4"])
     parser.add_argument(
         "--evidence-mode",
         choices=["legacy", "v2"],

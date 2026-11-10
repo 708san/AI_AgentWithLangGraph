@@ -14,6 +14,7 @@ from .candidate_metadata import enrich_candidates
 from .diagnosis import is_pubmed_reference
 from ..llm.prompt import prompt_dict, build_prompt
 from ..llm.llm_wrapper import is_content_filter_error
+from ..utils.language_quality import repair_obvious_language_mixing
 
 
 def _reflection_token_limits() -> list[int]:
@@ -542,6 +543,7 @@ Missing or weakly retrieved literature is uncertainty, never evidence against a 
 An explicitly absent finding may count against a candidate only when it is supplied in the absent-phenotype section; unreported findings are unknown.
 Tool rankings and consensus are auxiliary candidate-evaluation information, not literature citations.
 For every supplied candidate return ReflectionFormatV2 with English and Japanese fields.
+Write every `*_en` field in English only and every `*_ja` field in Japanese only. Do not append a translation in the other language. Keep standard disease names, gene symbols, medical terms, and identifiers in their accepted spelling.
 Keep the output concise: patient_summary_en/ja should be one sentence; diagnosis_analysis_en/ja should be at most three sentences; each provenance field should be one concise sentence. Do not repeat the full patient feature list, Evidence excerpts, or the same claim in multiple fields.
 Use evidence_assessments only for Evidence IDs that are directly used in diagnosis_analysis or are necessary to explain a contradiction/uncertainty. Do not emit a redundant assessment for every supplied Evidence item. The complete Evidence ledger is preserved outside Reflection.
 Do not drop a candidate solely because literature is insufficient; use `insufficient` or `not_retrieved` when appropriate. `not_retrieved` means no candidate-matched source was obtained in this run, not that no literature exists.
@@ -607,6 +609,18 @@ EVIDENCE:\n{evidence_text}"""
             or fallback_by_candidate[candidate.candidate_id]
             for candidate in candidates
         ]
+        answers = repair_obvious_language_mixing(
+            reflection_llm,
+            answers,
+            (
+                ("patient_summary_en", "patient_summary_ja"),
+                ("diagnosis_analysis_en", "diagnosis_analysis_ja"),
+                ("literature_basis_en", "literature_basis_ja"),
+                ("tool_considerations_en", "tool_considerations_ja"),
+                ("model_inference_en", "model_inference_ja"),
+                ("uncertainty_en", "uncertainty_ja"),
+            ),
+        )
         return ReflectionOutputV2(ans=answers), prompt
     except Exception as exc:
         print(f"[ReflectionV2] structured generation failed: {exc}")

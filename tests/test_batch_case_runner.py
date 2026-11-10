@@ -144,6 +144,7 @@ class BatchCaseRunnerTests(unittest.TestCase):
                 image_dir="images",
                 output_root=tmp,
                 model="gpt-4o",
+                zero_shot_model="gpt-5-4",
                 max_flow_iterations=1,
                 pubmed_max_workers=2,
                 evidence_max_workers=2,

@@ -167,10 +167,10 @@ Sex: {sex}
 - Do not add a weak diagnosis merely to increase diversity.
 - Do not duplicate one disease under synonyms.
 - Do not create a disease or OMIM identifier from memory. Use JSON null when an identifier is unknown.
-- An OMIM identifier must identify the disease, not merely a related gene or a different subtype.
+- Supply an OMIM identifier only when confident it identifies the exact disease name and subtype. An OMIM identifier must identify the disease, not merely a related gene or a different subtype.
 
 ## Output requirements
-- Return only the supplied structured output schema, with exactly five entries in `ans`, ranked 1 through 5.
+- Return only the supplied structured output schema, with five distinct disease identities in `ans`, ranked 1 through 5 and ordered by ascending rank.
 - Each entry must include `selection_reason`, no longer than two sentences, grounded only in the supplied patient information. Mention a major explicit contradiction or uncertainty when relevant.
 - `selection_reason` is for logging and evaluation only; it must not be used by downstream diagnosis, Evidence, Reflection, or public response generation.
 - Preserve OMIM title formatting and use JSON null for an unknown OMIM identifier. Do not add Markdown or commentary.""",
@@ -185,7 +185,8 @@ Important:
 - You are judging whether the diagnosis has enough clinical and phenotype-level support to remain in the final candidate list.
 - Missing information should lower confidence only when appropriate. It should not automatically exclude a diagnosis.
 
-Your final output must be a JSON object that adheres to the following Pydantic model:
+Your final output must be a JSON object that adheres to the following Pydantic model.
+Write each explanation in one language only: do not append a Japanese translation to English prose or an English translation to Japanese prose. Retain standard disease names, gene symbols, and identifiers in their standard spelling.
 
 ```python
 class ReflectionFormat(BaseModel):
@@ -303,6 +304,8 @@ Retrieved Medical Literature:
 """,
 
     "final_diagnosis_prompt": """You have access to the following information:
+
+Write English and Japanese content in their corresponding fields or sections only. Do not append a Japanese translation after English prose or an English translation after Japanese prose. Standard disease names, gene symbols, and identifiers may retain their accepted spelling.
 
 * Patient presentation (present HPO): {present_hpo}
   {absent_hpo_bullet_section}

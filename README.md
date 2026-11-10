@@ -80,7 +80,7 @@ and `Data/OldData/test_images/`:
 
 ```bash
 python testCode/phenopacket_image_case/run_all_cases.py \
-  --model gpt-5-2 \
+  --model gpt-5-4 \
   --max-parallel-cases 2 \
   --pubmed-max-workers 1 \
   --evidence-max-workers 2
@@ -148,7 +148,7 @@ AZURE_OPENAI_5-4_API_VERSION=your_api_version
 
 The single-case runners accept `--model`, `--reasoning-effort`,
 `--zero-shot-model`, and `--zero-shot-reasoning-effort` overrides. For example,
-to use GPT-5.2 / medium for both the main flow and Zero-shot:
+to explicitly override the main flow to GPT-5.2 / medium and Zero-shot to GPT-5.2 / medium:
 
 ```bash
 python testCode/phenopacket_image_case/run_one_case.py \

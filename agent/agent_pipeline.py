@@ -21,8 +21,8 @@ from agent.nodes import (
 from agent.state.state_types import ReflectionOutputV2
 
 
-DEFAULT_MODEL_NAME = "gpt-5-2"
-DEFAULT_REASONING_EFFORT = "medium"
+DEFAULT_MODEL_NAME = "gpt-5-4"
+DEFAULT_REASONING_EFFORT = "none"
 DEFAULT_ZERO_SHOT_MODEL_NAME = "gpt-5-4"
 DEFAULT_ZERO_SHOT_REASONING_EFFORT = "high"
 DEFAULT_MAX_FLOW_ITERATIONS = 0

@@ -26,8 +26,8 @@
 
 ```python
 RareDiseaseDiagnosisPipeline(
-    model_name="gpt-5-2",
-    reasoning_effort="medium",
+    model_name="gpt-5-4",
+    reasoning_effort="none",
     zero_shot_model_name="gpt-5-4",
     zero_shot_reasoning_effort="high",
     enable_log=False,
@@ -161,7 +161,7 @@ run(
 | `createHPODictNode` | `hpoList` | `hpoDict` | `phenotype_mapping.json` で HPO ID をラベル化 |
 | `createAbsentHPODictNode` | `absentHpoList` | `absentHpoDict` | 明示的に観察されなかった HPO ID をラベル化 |
 | `createZeroShotNode` | `hpoDict`, `absentHpoDict`, `use_absentHPO`, `onset`, `sex`, `llm` | `zeroShotResult`, `prompt` | LLM 構造化出力で候補疾患を生成。`use_absentHPO=True` の場合のみ absent HPO を使用 |
-| `NormalizeZeroShotNode` | `zeroShotResult` | `zeroShotResult` | 疾患名を embedding 検索し、ローカルの疾患同定を確認してOMIM IDを付与。不一致はOMIM正本へ統一し、病名・OMIMの両方を確定できない候補は監査情報に残して公開候補から除外。残った候補の表示rankを連番化 |
+| `NormalizeZeroShotNode` | `zeroShotResult` | `zeroShotResult`, `zeroShotValidation` | 病名を先に照合し、失敗時は入力OMIM IDをローカル辞書で照合。両方で確定しない場合のみ病名を一括Embeddingし、FAISS最近傍を閾値なしで割り当て。病名の元表記は保持し、検索失敗時も候補・入力IDを残す。重複整理後、順位不正の候補も末尾に含めて表示rankを連番化。元順位・採用ID・検索方法・類似度を監査記録に保存 |
 | `HPOwebSearchNode` | `hpoDict`, `llm` | `webresources` | HPO から DDGS 検索クエリを生成し、検索結果スニペットを要約 |
 | `DiseaseSearchWithHPONode` | `hpoDict`, `depth` | `phenotypeSearchResult` | HPO ラベルを embedding 化し、FAISS で類似 OMIM 疾患を検索 |
 | `mergeCandidateResultsNode` | `pubCaseFinder`, `zeroShotResult`, `GestaltMatcher`, `phenotypeSearchResult` | `mergedDiseaseCandidates` | 診断前に各ツールの順位付き疾患候補を疾患単位で統合し、どのツールで何位だったかを保持 |
@@ -728,8 +728,8 @@ List[PhenotypeSearchFormat]
 
 ## 11. 現行実装上の注意点
 
-- `agent/llm/azure_llm_instance.py` のモデル未指定時の既定値は `gpt-5-2`。明示指定時は指定モデル用の環境変数を使用する。
-- 通常診断は `gpt-5-2 / medium`、Zero-shotは `gpt-5-4 / high` を既定とする。両Azure deploymentの環境変数が必要。
+- `agent/llm/azure_llm_instance.py` のモデル未指定時の既定値は `gpt-5-4`。明示指定時は指定モデル用の環境変数を使用する。
+- 通常診断は `gpt-5-4 / none`、Zero-shotは `gpt-5-4 / high` を既定とする。推論設定は通常診断とZero-shotで独立している。
 - `agent/tools/diseaseNormalize.py` は import 時点で `AZURE_DBCLS_JAPANEAST` を確認し、FAISS インデックスも読み込む。環境変数または `.bin` ファイルが不足していると import に失敗する。
 - `HPOwebSearchNode` の出力キーは `snippet` だが、`createDiagnosis()` は Web 検索結果の本文として `content` を参照している。
 - `State` では `webresources` が必須扱いだが、初期 state には明示的に含まれていない。各処理は `state.get("webresources", [])` で補完している。

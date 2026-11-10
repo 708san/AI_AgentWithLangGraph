@@ -14,6 +14,7 @@ from typing import Any, Iterator, Optional
 
 from agent.agent_pipeline import (
     DEFAULT_MAX_FLOW_ITERATIONS,
+    DEFAULT_MODEL_NAME,
     DEFAULT_REASONING_EFFORT,
     DEFAULT_ZERO_SHOT_MODEL_NAME,
     DEFAULT_ZERO_SHOT_REASONING_EFFORT,
@@ -24,8 +25,6 @@ from agent.utils.response_serializer import (
     serialize_public_state,
 )
 
-
-DEFAULT_MODEL_NAME = "gpt-5-2"
 
 AGENT_OUTPUT_KEY_BY_STEP_TYPE = {
     "PUB_CASE_FINDER": "pubCaseFinder",

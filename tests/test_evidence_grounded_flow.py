@@ -45,6 +45,7 @@ from agent.tools.finalDiagnosis import _apply_evidence_contract, createFinalDiag
 from agent.nodes import evidenceExtractionNode
 from agent.utils.response_serializer import (
     _add_citations,
+    _deduplicate_reference_clusters,
     serialize_external_compatibility,
     serialize_node_result,
     serialize_public_state,
@@ -75,11 +76,11 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
     def test_pipeline_defaults_main_and_zero_shot_to_separate_profiles(self):
         with patch("agent.agent_pipeline.get_llm_instance") as get_llm:
             get_llm.side_effect = [Mock(name="main_llm"), Mock(name="zero_shot_llm")]
-            pipeline = RareDiseaseDiagnosisPipeline(model_name="gpt-5-2")
+            pipeline = RareDiseaseDiagnosisPipeline()
 
         self.assertEqual(get_llm.call_count, 2)
-        self.assertEqual(get_llm.call_args_list[0].args[0], "gpt-5-2")
-        self.assertEqual(get_llm.call_args_list[0].kwargs["reasoning_effort"], "medium")
+        self.assertEqual(get_llm.call_args_list[0].args[0], "gpt-5-4")
+        self.assertEqual(get_llm.call_args_list[0].kwargs["reasoning_effort"], "none")
         self.assertEqual(get_llm.call_args_list[1].args[0], "gpt-5-4")
         self.assertEqual(get_llm.call_args_list[1].kwargs["reasoning_effort"], "high")
         self.assertIsNot(pipeline.llm, pipeline.zero_shot_llm)
@@ -87,7 +88,7 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
     def test_pipeline_defaults_to_no_literature_retry_iterations(self):
         with patch("agent.agent_pipeline.get_llm_instance") as get_llm:
             get_llm.return_value = Mock(name="main_llm")
-            pipeline = RareDiseaseDiagnosisPipeline(model_name="gpt-5-2")
+            pipeline = RareDiseaseDiagnosisPipeline()
 
         initial_state = pipeline._build_initial_state(hpo_list=[])
         self.assertEqual(initial_state["max_flow_iterations"], 0)
@@ -110,6 +111,8 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
             title="Example syndrome and EXG1",
             identifier="PMID:12345678",
             url="https://pubmed.ncbi.nlm.nih.gov/12345678/",
+            journal="Journal of Example Medicine",
+            publication_year="2024",
             candidate_ids=["OMIM:123456"],
             content_type="abstract",
             raw_content="Example syndrome is associated with hypotonia and EXG1 variants.",
@@ -595,6 +598,8 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
         self.assertEqual(reference["number"], 1)
         self.assertEqual(reference["title"], self.source.title)
         self.assertEqual(reference["url"], self.source.url)
+        self.assertEqual(reference["journal"], self.source.journal)
+        self.assertEqual(reference["publication_year"], self.source.publication_year)
         self.assertEqual(reference["evidence"][0]["excerpt"], self.evidence.excerpt)
         self.assertEqual(
             set(reference),
@@ -760,6 +765,7 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
         self.assertNotIn("evidence", reflection["reference_details"][0])
 
     def test_external_reflection_references_are_bibliographic_without_evidence(self):
+        second_evidence = self.evidence.model_copy(update={"evidence_id": "EVD-2"})
         diagnosis = DiagnosisOutputV2(ans=[DiagnosisFormatV2(
             candidate_id="OMIM:123456",
             disease_name_en="Example syndrome",
@@ -779,15 +785,15 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
             "zeroShotResult": {"ans": []},
             "mergedDiseaseCandidates": [],
             "sources": [self.source],
-            "evidence": [self.evidence],
+            "evidence": [self.evidence, second_evidence],
             "tentativeDiagnosis": diagnosis,
             "reflection": {"ans": [{
                 "candidate_id": "OMIM:123456",
                 "disease_name_en": "Example syndrome",
                 "disease_name_ja": "Example syndrome",
-                "diagnosis_analysis_en": "The literature supports the phenotype. [[EVIDENCE:EVD-1]]",
-                "diagnosis_analysis_ja": "文献が表現型を支持します。[[EVIDENCE:EVD-1]]",
-                "evidence_ids": ["EVD-1"],
+                "diagnosis_analysis_en": "The literature supports the phenotype. [[EVIDENCE:EVD-1]][[EVIDENCE:EVD-2]]",
+                "diagnosis_analysis_ja": "文献が表現型を支持します。［EVD-1；EVD-2；EVD-1］",
+                "evidence_ids": ["EVD-1", "EVD-2"],
             }]},
             "finalDiagnosis": diagnosis,
         })
@@ -802,8 +808,16 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
         self.assertNotIn("evidence", reference)
         self.assertEqual(item["citation_numbers"], [1])
         self.assertEqual(item["reference_numbers"], [1])
+        self.assertEqual(item["diagnosis_analysis_en"].count("[1]"), 1)
+        self.assertEqual(item["diagnosis_analysis_ja"].count("[1]"), 1)
         self.assertEqual(item["reference_details"], [reference])
         self.assertNotIn("evidence", item["reference_details"][0])
+
+    def test_reference_cluster_dedup_handles_fullwidth_separators_and_keeps_distinct_refs(self):
+        self.assertEqual(
+            _deduplicate_reference_clusters("根拠［[6]；[7]；[6]］と別箇所[6]、[6]。"),
+            "根拠[6][7]と別箇所[6]。",
+        )
 
     def test_serializer_does_not_backfill_a_citation_to_unrelated_prose(self):
         result = _add_citations(

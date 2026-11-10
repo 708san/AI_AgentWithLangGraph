@@ -28,7 +28,7 @@ The adapter is available now:
 python -m project_ops run-profile \
   --profile-id phenopacket.single_v2 \
   --run-id single_v2_001 \
-  --script-args --input case.json --model gpt-5-2
+  --script-args --input case.json --model gpt-5-4
 ```
 
 The selected script is still the original entrypoint. The adapter adds Run
