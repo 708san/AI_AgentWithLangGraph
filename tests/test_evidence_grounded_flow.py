@@ -815,7 +815,7 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
 
     def test_reference_cluster_dedup_handles_fullwidth_separators_and_keeps_distinct_refs(self):
         self.assertEqual(
-            _deduplicate_reference_clusters("根拠［[6]；[7]；[6]］と別箇所[6]、[6]。"),
+            _deduplicate_reference_clusters("根拠［[7]；[6]；[7]］と別箇所[6]、[6]。"),
             "根拠[6][7]と別箇所[6]。",
         )
 

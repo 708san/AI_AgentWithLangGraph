@@ -353,18 +353,18 @@ def _deduplicate_reference_clusters(text: Any) -> str:
     result = str(text or "")
 
     def unique_numbers(match: re.Match[str]) -> str:
-        numbers = list(dict.fromkeys(
+        numbers = sorted({
             int(number) for number in re.findall(r"\[(\d+)\]", match.group("cluster"))
-        ))
+        })
         return "".join(f"[{number}]" for number in numbers)
 
     result = WRAPPED_REFERENCE_NUMBER_CLUSTER_PATTERN.sub(unique_numbers, result)
     result = ADJACENT_REFERENCE_GROUP_PATTERN.sub(
         lambda match: "".join(
             f"[{number}]"
-            for number in dict.fromkeys(
+            for number in sorted({
                 int(value) for value in re.findall(r"\[(\d+)\]", match.group(0))
-            )
+            })
         ),
         result,
     )
