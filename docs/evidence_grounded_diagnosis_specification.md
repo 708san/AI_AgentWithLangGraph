@@ -544,7 +544,7 @@ ReflectionおよびFinalの文章は、次の4種類を別フィールドで管�
 修正後もEvidence引用マーカーが同じ順序で残ることを確認し、修正できない場合は元の文を保持する。
 
 Reflectionは候補ごとの個別呼び出しには分割せず、候補全体を1回の構造化呼び出しで処理する。
-出力上限は`REFLECTION_MAX_COMPLETION_TOKENS`（既定30,000）、タイムアウトは
+出力上限は`REFLECTION_MAX_COMPLETION_TOKENS`（既定40,000）、タイムアウトは
 `REFLECTION_REQUEST_TIMEOUT_SECONDS`（既定300秒）で管理する。構造化生成に失敗した場合も、
 候補を欠落させず、取得済みEvidenceとツール情報を明示した決定的フォールバックを返す。
 

@@ -12,7 +12,7 @@ CONTENT_FILTER_MARKERS = [
     "filtered due to the prompt",
 ]
 
-DEFAULT_MAX_COMPLETION_TOKENS = 30_000
+DEFAULT_MAX_COMPLETION_TOKENS = 40_000
 
 
 def is_content_filter_error(error: Exception) -> bool:
@@ -28,7 +28,7 @@ class AzureOpenAIWrapper:
         api_key,
         deployment_name,
         api_version,
-        reasoning_effort=None,
+        reasoning_effort="medium",
     ):
         # 設定を保持（再構築時に使用）
         self.model_name = model_name
@@ -81,7 +81,7 @@ class AzureOpenAIWrapper:
             llm_params['extra_body'] = {
                 "max_completion_tokens": max_completion_tokens,
                 "verbosity": "medium",
-                "reasoning_effort": self.reasoning_effort or "none",
+                "reasoning_effort": self.reasoning_effort or "medium",
             }
         elif self.model_name == 'gpt-5-4':
             # GPT-5.4 is called through the Responses API.  AzureChatOpenAI
@@ -91,7 +91,7 @@ class AzureOpenAIWrapper:
             llm_params.update({
                 "use_responses_api": True,
                 "output_version": "responses/v1",
-                "reasoning": {"effort": self.reasoning_effort or "none"},
+                "reasoning": {"effort": self.reasoning_effort or "medium"},
                 "max_tokens": max_completion_tokens,
                 "verbosity": "medium",
             })

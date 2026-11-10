@@ -74,7 +74,7 @@ class TestAzureLlmInstance(unittest.TestCase):
             api_key="test-key",
             deployment_name="test-deployment",
             api_version="2025-01-01",
-            reasoning_effort="none",
+            reasoning_effort="medium",
         )
 
     @patch("agent.llm.azure_llm_instance.AzureOpenAIWrapper")
@@ -130,7 +130,7 @@ class TestAzureLlmInstance(unittest.TestCase):
         self.assertEqual(params["output_version"], "responses/v1")
         self.assertEqual(params["reasoning"], {"effort": "medium"})
         self.assertEqual(params["verbosity"], "medium")
-        self.assertEqual(params["max_tokens"], 30000)
+        self.assertEqual(params["max_tokens"], 40000)
 
 
 if __name__ == "__main__":

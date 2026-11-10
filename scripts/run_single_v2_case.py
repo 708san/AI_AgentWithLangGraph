@@ -185,8 +185,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--reasoning-effort",
         choices=("none", "low", "medium", "high", "xhigh"),
-        default="none",
-        help="Reasoning effort for GPT-5 models. Defaults to none.",
+        default="medium",
+        help="Reasoning effort for GPT-5 models. Defaults to medium.",
     )
     parser.add_argument(
         "--zero-shot-reasoning-effort",
@@ -342,7 +342,7 @@ def main() -> int:
                 "reasoning_effort": args.reasoning_effort,
                 "zero_shot_model": args.zero_shot_model,
                 "zero_shot_reasoning_effort": args.zero_shot_reasoning_effort,
-                "default_max_completion_tokens": 30000,
+                "default_max_completion_tokens": 40000,
             },
             "started_at": started_at.isoformat(),
             "finished_at": datetime.now(timezone.utc).isoformat(),

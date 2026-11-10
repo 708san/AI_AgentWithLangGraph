@@ -21,12 +21,12 @@ def _reflection_token_limits() -> list[int]:
     # v2 Reflection is a single structured call over the complete differential.
     # Keep it unsplit and give the deployment enough output room; operators can
     # override this when their Azure deployment has a smaller completion cap.
-    raw_limits = os.getenv("REFLECTION_TOKEN_LIMITS", "30000")
+    raw_limits = os.getenv("REFLECTION_TOKEN_LIMITS", "40000")
     try:
         limits = [int(value.strip()) for value in raw_limits.split(",") if value.strip()]
     except ValueError:
         limits = []
-    return limits or [12000, 16000, 20000]
+    return limits or [40000]
 
 
 def _reflection_request_timeout_seconds() -> float:
@@ -561,7 +561,7 @@ CANDIDATES:\n{candidate_text}
 EVIDENCE:\n{evidence_text}"""
     try:
         reflection_llm = llm
-        max_tokens = int(os.getenv("REFLECTION_MAX_COMPLETION_TOKENS", "30000"))
+        max_tokens = int(os.getenv("REFLECTION_MAX_COMPLETION_TOKENS", "40000"))
         # Use a temporary client only for the v2 Reflection call so the larger
         # budget does not silently change Zero-shot, tentative, or Final calls.
         if isinstance(getattr(llm, "default_max_tokens", None), (int, float)) and hasattr(

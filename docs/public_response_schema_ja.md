@@ -292,7 +292,7 @@ Reflection v2は候補全体を1回の構造化LLM呼び出しで処理します
 
 | 環境変数 | 既定値 | 内容 |
 |---|---:|---|
-| `REFLECTION_MAX_COMPLETION_TOKENS` | `30000` | Reflection v2の完了トークン上限。 |
+| `REFLECTION_MAX_COMPLETION_TOKENS` | `40000` | Reflection v2の完了トークン上限。 |
 | `REFLECTION_REQUEST_TIMEOUT_SECONDS` | `300` | Reflection v2のリクエストタイムアウト。 |
 | `EUROPE_PMC_ALLOWED_SOURCES` | `MED,PMC` | Reference採用対象とするEurope PMCのSource。DOIのみの記録は採用しない。 |
 

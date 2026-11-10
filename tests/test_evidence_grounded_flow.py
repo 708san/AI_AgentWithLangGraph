@@ -80,7 +80,7 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
 
         self.assertEqual(get_llm.call_count, 2)
         self.assertEqual(get_llm.call_args_list[0].args[0], "gpt-5-4")
-        self.assertEqual(get_llm.call_args_list[0].kwargs["reasoning_effort"], "none")
+        self.assertEqual(get_llm.call_args_list[0].kwargs["reasoning_effort"], "medium")
         self.assertEqual(get_llm.call_args_list[1].args[0], "gpt-5-4")
         self.assertEqual(get_llm.call_args_list[1].kwargs["reasoning_effort"], "high")
         self.assertIsNot(pipeline.llm, pipeline.zero_shot_llm)
@@ -455,7 +455,7 @@ class TestEvidenceGroundedFlow(unittest.TestCase):
             "llm": llm,
         })
         llm.get_temp_llm_with_max_tokens.assert_called_once_with(
-            30000,
+            40000,
             timeout_seconds=300.0,
         )
         temporary_llm.with_structured_output.assert_called_once_with(ReflectionOutputV2)

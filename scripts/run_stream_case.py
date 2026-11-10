@@ -76,7 +76,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--metadata-occurrence", type=int, default=None)
     parser.add_argument("--model", default="gpt-5-4")
     parser.add_argument("--zero-shot-model", default="gpt-5-4")
-    parser.add_argument("--reasoning-effort", choices=("none", "low", "medium", "high", "xhigh"), default="none")
+    parser.add_argument("--reasoning-effort", choices=("none", "low", "medium", "high", "xhigh"), default="medium")
     parser.add_argument("--zero-shot-reasoning-effort", choices=("none", "low", "medium", "high", "xhigh"), default="high")
     parser.add_argument("--max-flow-iterations", type=int, default=0)
     parser.add_argument("--use-phenobrain", action="store_true")
@@ -162,7 +162,7 @@ def main() -> int:
                 "zero_shot_model": args.zero_shot_model,
                 "reasoning_effort": args.reasoning_effort,
                 "zero_shot_reasoning_effort": args.zero_shot_reasoning_effort,
-                "default_max_completion_tokens": 30000,
+                "default_max_completion_tokens": 40000,
                 "evidence_mode": "v2",
                 "max_flow_iterations": args.max_flow_iterations,
             },

@@ -27,7 +27,7 @@
 ```python
 RareDiseaseDiagnosisPipeline(
     model_name="gpt-5-4",
-    reasoning_effort="none",
+    reasoning_effort="medium",
     zero_shot_model_name="gpt-5-4",
     zero_shot_reasoning_effort="high",
     enable_log=False,
@@ -629,7 +629,7 @@ List[PhenotypeSearchFormat]
 | `get_structured_llm(output_schema)` | Pydantic schema | structured LLM | 構造化出力用 LLM |
 | `generate(prompt)` | `str` | LLM 応答 | 通常テキスト生成 |
 
-`gpt-4o` は `temperature=0.0` と最大8,192 tokensを設定する。GPT-5.xは既定で最大30,000 completion tokensと`verbosity=medium`を使い、GPT-5.1/5.2は`reasoning_effort`を、GPT-5.4はResponses API形式の`reasoning.effort`を渡す。
+`gpt-4o` は `temperature=0.0` と最大8,192 tokensを設定する。GPT-5.xは既定で最大40,000 completion tokensと`verbosity=medium`を使い、通常処理のreasoning effortは`medium`、Zero-shotは`high`とする。GPT-5.1/5.2は`reasoning_effort`を、GPT-5.4はResponses API形式の`reasoning.effort`を渡す。
 
 ### 6.3 プロンプト
 
