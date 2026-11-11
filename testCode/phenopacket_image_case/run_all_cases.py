@@ -2,7 +2,8 @@
 
 This is a separate batch path from ``run_one_case.py``.  The one-case path
 keeps its timestamped directories; this path stores one stable directory per
-patient under ``runs/all_test/patient_<id>/`` and runs cases sequentially.
+patient under ``runs/all_test/patient_<id>/`` and runs cases concurrently up to
+``--max-parallel-cases``.
 
 Usage::
 
@@ -52,10 +53,13 @@ from testCode.phenopacket_image_case.run_one_case import (  # noqa: E402
     DEFAULT_METADATA,
     DEFAULT_OUTPUT_ROOT,
     EVIDENCE_MODE,
+    DEFAULT_MODEL_NAME,
+    DEFAULT_REASONING_EFFORT,
+    DEFAULT_ZERO_SHOT_MODEL_NAME,
+    DEFAULT_ZERO_SHOT_REASONING_EFFORT,
+    _git_snapshot,
     _positive_int,
 )
-
-
 DEFAULT_ALL_OUTPUT_ROOT = DEFAULT_OUTPUT_ROOT / "all_test"
 RUN_ONE = Path(__file__).with_name("run_one_case.py")
 _ACTIVE_LOCK = threading.Lock()
@@ -101,6 +105,18 @@ def _load_rows(metadata_path: Path) -> tuple[list[str], dict[str, list[dict[str,
 def _safe_case_component(value: str) -> str:
     component = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "unknown"))
     return component.strip("._") or "unknown"
+
+
+def _output_root_with_suffix(output_root: Path, suffix: str | None) -> Path:
+    """Append a safe experiment suffix to the selected run directory name."""
+    if not suffix:
+        return output_root
+    normalized = _safe_case_component(suffix)
+    if normalized != suffix or normalized in {"unknown", ".", ".."}:
+        raise ValueError(
+            "--output-suffix must contain only letters, numbers, '.', '_' or '-'."
+        )
+    return output_root.parent / f"{output_root.name}_{normalized}"
 
 
 def _row_image_token(row: dict[str, str], occurrence: int) -> str:
@@ -159,8 +175,8 @@ def _expected_config(
         "metadata_occurrence": metadata_occurrence,
         "model": args.model,
         "zero_shot_model": args.zero_shot_model,
-        "reasoning_effort": "medium",
-        "zero_shot_reasoning_effort": "high",
+        "reasoning_effort": args.reasoning_effort,
+        "zero_shot_reasoning_effort": args.zero_shot_reasoning_effort,
         "default_max_completion_tokens": 40000,
         "max_flow_iterations": args.max_flow_iterations,
         "use_phenobrain": args.use_phenobrain,
@@ -270,8 +286,24 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--metadata", default=str(DEFAULT_METADATA))
     parser.add_argument("--image-dir", default=str(DEFAULT_IMAGE_DIR))
     parser.add_argument("--output-root", default=str(DEFAULT_ALL_OUTPUT_ROOT))
-    parser.add_argument("--model", default="gpt-5-4")
-    parser.add_argument("--zero-shot-model", default="gpt-5-4")
+    parser.add_argument(
+        "--output-suffix",
+        default=None,
+        help="Append a safe experiment suffix, e.g. --output-suffix gpt54_p4 "
+        "creates runs/all_test_gpt54_p4/.",
+    )
+    parser.add_argument("--model", default=DEFAULT_MODEL_NAME)
+    parser.add_argument("--zero-shot-model", default=DEFAULT_ZERO_SHOT_MODEL_NAME)
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=("none", "low", "medium", "high", "xhigh"),
+        default=DEFAULT_REASONING_EFFORT,
+    )
+    parser.add_argument(
+        "--zero-shot-reasoning-effort",
+        choices=("none", "low", "medium", "high", "xhigh"),
+        default=DEFAULT_ZERO_SHOT_REASONING_EFFORT,
+    )
     parser.add_argument("--max-flow-iterations", type=int, default=0)
     parser.add_argument("--use-phenobrain", action="store_true")
     parser.add_argument("--use-absent-hpo", action="store_true")
@@ -290,8 +322,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--max-parallel-cases",
         type=_positive_int,
-        default=2,
-        help="Maximum cases running at the same time. Defaults to 2.",
+        default=4,
+        help="Maximum cases running at the same time. Defaults to 4.",
     )
     parser.add_argument(
         "--patient-id",
@@ -363,6 +395,14 @@ def _run_one_case(
         args.model,
         "--zero-shot-model",
         args.zero_shot_model,
+        "--reasoning-effort",
+        getattr(args, "reasoning_effort", DEFAULT_REASONING_EFFORT),
+        "--zero-shot-reasoning-effort",
+        getattr(
+            args,
+            "zero_shot_reasoning_effort",
+            DEFAULT_ZERO_SHOT_REASONING_EFFORT,
+        ),
         "--max-flow-iterations",
         str(args.max_flow_iterations),
         "--pubmed-max-workers",
@@ -417,6 +457,11 @@ def _run_case_entry(
     case_dir = output_root / case_key
     row = entry["row"]
     started = time.monotonic()
+    started_at = datetime.now(timezone.utc).isoformat()
+    print(
+        f"[{started_at}] START patient={patient_id} case={case_key}",
+        flush=True,
+    )
     with _ACTIVE_LOCK:
         _ACTIVE_CASES.add(case_key)
     try:
@@ -430,6 +475,11 @@ def _run_case_entry(
             args=args,
         )
         if args.resume and not args.force and _case_is_complete(case_dir, expected_config):
+            print(
+                f"[{datetime.now(timezone.utc).isoformat()}] SKIP patient={patient_id} "
+                f"case={case_key} reason=completed",
+                flush=True,
+            )
             return {
                 "patient_id": patient_id,
                 "case_key": case_key,
@@ -455,6 +505,12 @@ def _run_case_entry(
         )
         summary = _read_json(case_dir / "execution_summary.json") or {}
         status = "completed" if return_code == 0 and summary.get("status") == "completed" else "failed"
+        print(
+            f"[{datetime.now(timezone.utc).isoformat()}] END patient={patient_id} "
+            f"case={case_key} status={status} "
+            f"duration={time.monotonic() - started:.1f}s",
+            flush=True,
+        )
         return {
             "patient_id": patient_id,
             "case_key": case_key,
@@ -493,7 +549,10 @@ def main() -> int:
     args = _build_parser().parse_args()
     metadata_path = Path(args.metadata).expanduser().resolve()
     image_dir = Path(args.image_dir).expanduser().resolve()
-    output_root = Path(args.output_root).expanduser().resolve()
+    output_root = _output_root_with_suffix(
+        Path(args.output_root).expanduser().resolve(),
+        args.output_suffix,
+    )
     if not metadata_path.is_file():
         raise FileNotFoundError(f"Metadata TSV not found: {metadata_path}")
     if not image_dir.is_dir():
@@ -539,6 +598,11 @@ def main() -> int:
     )
     started = time.monotonic()
     started_at = datetime.now(timezone.utc).isoformat()
+    print(
+        f"[{started_at}] BATCH START cases={len(case_entries)} "
+        f"max_parallel_cases={args.max_parallel_cases} output_root={output_root}",
+        flush=True,
+    )
     records: list[dict[str, Any]] = []
     interrupted = False
     next_index = 0
@@ -621,9 +685,9 @@ def main() -> int:
                     "image_dir": str(image_dir),
                     "model_config": {
                         "model": args.model,
-                        "reasoning_effort": "medium",
+                        "reasoning_effort": args.reasoning_effort,
                         "zero_shot_model": args.zero_shot_model,
-                        "zero_shot_reasoning_effort": "high",
+                        "zero_shot_reasoning_effort": args.zero_shot_reasoning_effort,
                         "default_max_completion_tokens": 40000,
                     },
                     "patient_count": len(patient_order),
@@ -710,9 +774,9 @@ def main() -> int:
         "image_dir": str(image_dir),
         "model_config": {
             "model": args.model,
-            "reasoning_effort": "medium",
+            "reasoning_effort": args.reasoning_effort,
             "zero_shot_model": args.zero_shot_model,
-            "zero_shot_reasoning_effort": "high",
+            "zero_shot_reasoning_effort": args.zero_shot_reasoning_effort,
             "default_max_completion_tokens": 40000,
         },
         "output_root": str(output_root),
@@ -726,8 +790,16 @@ def main() -> int:
         "interrupted_count": sum(record["status"] == "interrupted" for record in records),
         "pending_count": sum(record["status"] == "pending" for record in records),
         "records": records,
+        "command": [str(value) for value in sys.argv],
+        "git": _git_snapshot(),
     }
     _write_json(output_root / "summary.json", final_summary)
+    print(
+        f"[{final_summary['finished_at']}] BATCH END status={final_summary['status']} "
+        f"completed={final_summary['completed_count']} skipped={final_summary['skipped_count']} "
+        f"failed={final_summary['failed_count']} interrupted={final_summary['interrupted_count']}",
+        flush=True,
+    )
     print(json.dumps(final_summary, ensure_ascii=False, indent=2))
     if interrupted:
         return 130

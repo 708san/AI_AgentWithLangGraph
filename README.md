@@ -81,13 +81,24 @@ and `Data/OldData/test_images/`:
 ```bash
 python testCode/phenopacket_image_case/run_all_cases.py \
   --model gpt-5-4 \
-  --max-parallel-cases 2 \
+  --max-parallel-cases 4 \
   --pubmed-max-workers 1 \
   --evidence-max-workers 2
 ```
 
+実行条件ごとに結果を分離する場合は、保存先に接尾辞を付けられます。
+
+```bash
+python testCode/phenopacket_image_case/run_all_cases.py \
+  --output-suffix gpt54_p4
+```
+
+この場合の保存先は `testCode/phenopacket_image_case/runs/all_test_gpt54_p4/`
+です。同じ接尾辞で再実行すると、そのディレクトリ内の完了済みケースを
+再利用します。
+
 `--max-parallel-cases` controls how many patient/image cases run at once. It
-defaults to 2; increase it gradually because each case also makes concurrent
+defaults to 4; reduce it if needed because each case also makes concurrent
 PubMed and Evidence requests.
 
 PhenoBrainはデフォルトで無効です。使用する場合だけ

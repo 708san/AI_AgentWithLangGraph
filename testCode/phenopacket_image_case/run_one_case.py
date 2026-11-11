@@ -43,13 +43,13 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import time
 import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -61,6 +61,14 @@ DEFAULT_METADATA = PROJECT_ROOT / "Data/OldData/browser_input_74_cases.tsv"
 DEFAULT_IMAGE_DIR = PROJECT_ROOT / "Data/OldData/test_images"
 DEFAULT_OUTPUT_ROOT = PROJECT_ROOT / "testCode/phenopacket_image_case/runs"
 EVIDENCE_MODE = "v2"
+# Keep these harness defaults aligned with agent.agent_pipeline. They are
+# local so planning, --help, and unit tests do not import LangGraph before a
+# case is actually launched.
+DEFAULT_MODEL_NAME = "gpt-5-4"
+DEFAULT_REASONING_EFFORT = "medium"
+DEFAULT_ZERO_SHOT_MODEL_NAME = "gpt-5-4"
+DEFAULT_ZERO_SHOT_REASONING_EFFORT = "high"
+DEFAULT_MAX_FLOW_ITERATIONS = 0
 
 
 def _jsonable(value: Any) -> Any:
@@ -105,6 +113,28 @@ def _positive_int(value: str) -> int:
     if parsed < 1:
         raise argparse.ArgumentTypeError("must be at least 1")
     return parsed
+
+
+def _git_snapshot() -> dict[str, Any]:
+    """Return reproducibility metadata without making git a run dependency."""
+    def git(*args: str) -> str | None:
+        try:
+            result = subprocess.run(
+                ["git", *args],
+                cwd=PROJECT_ROOT,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except (OSError, subprocess.CalledProcessError):
+            return None
+        return result.stdout.strip()
+
+    return {
+        "branch": git("branch", "--show-current"),
+        "commit": git("rev-parse", "HEAD"),
+        "working_tree_dirty": bool(git("status", "--porcelain")),
+    }
 
 
 def _build_timing_summary(profiler: Any, pipeline_seconds: float, total_seconds: float) -> dict[str, Any]:
@@ -277,21 +307,21 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Stable output key; use an image-qualified key for duplicate patient IDs.",
     )
-    parser.add_argument("--model", default="gpt-5-4")
-    parser.add_argument("--zero-shot-model", default="gpt-5-4")
+    parser.add_argument("--model", default=DEFAULT_MODEL_NAME)
+    parser.add_argument("--zero-shot-model", default=DEFAULT_ZERO_SHOT_MODEL_NAME)
     parser.add_argument(
         "--reasoning-effort",
         choices=("none", "low", "medium", "high", "xhigh"),
-        default="medium",
+        default=DEFAULT_REASONING_EFFORT,
         help="Reasoning effort for GPT-5 models. Defaults to medium.",
     )
     parser.add_argument(
         "--zero-shot-reasoning-effort",
         choices=("none", "low", "medium", "high", "xhigh"),
-        default="high",
+        default=DEFAULT_ZERO_SHOT_REASONING_EFFORT,
         help="Separate reasoning effort for Zero-shot. Defaults to high.",
     )
-    parser.add_argument("--max-flow-iterations", type=int, default=0)
+    parser.add_argument("--max-flow-iterations", type=int, default=DEFAULT_MAX_FLOW_ITERATIONS)
     parser.add_argument("--use-phenobrain", action="store_true")
     parser.add_argument("--use-absent-hpo", action="store_true")
     parser.add_argument(
@@ -381,6 +411,9 @@ def main() -> int:
                 feature.get("excluded", False)
                 for feature in phenopacket.get("phenotypicFeatures", [])
             ),
+            "started_at": started_at.isoformat(),
+            "command": [str(value) for value in sys.argv],
+            "git": _git_snapshot(),
         }
         _write_json(run_dir / "run_info.json", run_info)
 
